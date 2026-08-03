@@ -27,9 +27,14 @@ type GlassButtonProps = {
 };
 
 /**
- * High-contrast gradient action. The surface is intentionally one opaque layer:
- * no native blur, shadow, or stacked translucent overlays need to be recomposed
- * while the CTA enters on the Reanimated UI thread.
+ * Translucent glass action. The backdrop shows through a darkening tint, with a
+ * specular sheen along the top edge and a tinted rim instead of a hard outline.
+ *
+ * The glass is built from translucent gradients rather than a native blur. What
+ * sits behind this button is a smooth gradient, so there is no detail for a blur
+ * to soften: it would cost a native blur pass on every frame of the entrance
+ * animation and look the same. A screen that puts real content behind a glass
+ * surface would want `expo-blur` instead.
  */
 export function GlassButton({
   label,
@@ -61,12 +66,21 @@ export function GlassButton({
       style={[styles.button, disabled && styles.disabled, style]}
     >
       <LinearGradient
-        colors={gradients.primaryAction.colors}
-        end={{ x: 1, y: 0.5 }}
-        locations={gradients.primaryAction.locations}
-        start={{ x: 0, y: 0.5 }}
+        colors={gradients.glassAction.colors}
+        end={{ x: 0.5, y: 1 }}
+        locations={gradients.glassAction.locations}
+        start={{ x: 0.5, y: 0 }}
         style={styles.fill}
       >
+        <LinearGradient
+          colors={gradients.glassActionSheen.colors}
+          end={{ x: 0.5, y: 1 }}
+          locations={gradients.glassActionSheen.locations}
+          pointerEvents="none"
+          start={{ x: 0.5, y: 0 }}
+          style={styles.sheen}
+        />
+
         <Text style={styles.label}>{label}</Text>
       </LinearGradient>
     </PressableScale>
@@ -77,14 +91,22 @@ const styles = StyleSheet.create({
   button: {
     height: 64,
     borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.glassEdge,
+    // Keeps the translucent fill and its sheen inside the pill.
+    overflow: 'hidden',
   },
   fill: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.55)',
-    borderRadius: radii.pill,
+  },
+  sheen: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
   },
   label: {
     ...typography.heading,

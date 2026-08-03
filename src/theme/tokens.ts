@@ -31,6 +31,11 @@ export const colors = {
 
   // Translucent action surfaces.
   glassTextShadow: 'rgba(40, 8, 72, 0.7)',
+  /**
+   * Edge for glass surfaces. Tinted with the violet ramp rather than plain
+   * white, so it defines the rim without drawing a hard outline around it.
+   */
+  glassEdge: 'rgba(196, 181, 253, 0.32)',
 } as const;
 
 export const spacing = {
@@ -150,11 +155,27 @@ export const gradients = {
     ],
     locations: [0, 0.36, 1],
   },
-  primaryAction: {
-    // Fully opaque so the CTA remains high contrast and can composite as one
-    // inexpensive layer during its entrance animation.
-    colors: ['#9868FF', '#7A3FEA', '#5C25C4'],
-    locations: [0, 0.5, 1],
+  /**
+   * Translucent CTA glass. The backdrop reads through the surface, and because
+   * the tint darkens rather than lightens, the white label keeps its contrast
+   * even where the ramp behind the button is at its brightest.
+   */
+  glassAction: {
+    colors: ['rgba(32, 19, 64, 0.42)', 'rgba(12, 7, 26, 0.58)'],
+    locations: [0, 1],
+  },
+  /**
+   * Specular highlight along the top of the glass. It fades out well before the
+   * midpoint, so it reads as a curved surface catching light rather than as a
+   * second fill.
+   */
+  glassActionSheen: {
+    colors: [
+      'rgba(255, 255, 255, 0.22)',
+      'rgba(255, 255, 255, 0.05)',
+      'rgba(255, 255, 255, 0)',
+    ],
+    locations: [0, 0.4, 1],
   },
 } as const;
 
