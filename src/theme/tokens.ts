@@ -216,4 +216,16 @@ export const motion = {
     offsetY: 18,
     stagger: 90,
   },
+  /**
+   * Backdrop slide-up on entry. Ease-out reads as fast-then-smooth: the gradient
+   * rushes up and decelerates into place. `offsetRatio` is a fraction of screen
+   * height so the travel scales with the device, and `contentDelay` holds the
+   * logo and text back just until the panel is settling — not long enough to
+   * feel like a wait.
+   */
+  backdropSlide: {
+    duration: 560,
+    offsetRatio: 0.16,
+    contentDelay: 300,
+  },
 } as const;

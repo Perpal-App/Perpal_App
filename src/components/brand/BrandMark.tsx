@@ -2,7 +2,11 @@ import { Image, StyleSheet, Text, View, type ImageSourcePropType } from 'react-n
 
 import { colors, spacing, typography } from '@/theme/tokens';
 
-const appIcon = require('../../../assets/icon.png') as ImageSourcePropType;
+/**
+ * The transparent logo, not the packaged app icon: it is a white glyph on alpha,
+ * so it sits directly on a coloured field with no plate or corner rounding.
+ */
+const logoMark = require('../../../assets/AppLogos/Perpal_logo_transparent.png') as ImageSourcePropType;
 
 type BrandMarkProps = {
   showName?: boolean;
@@ -19,8 +23,8 @@ export function BrandMark({ showName = false, size = 52 }: BrandMarkProps) {
       <Image
         accessible={false}
         resizeMode="contain"
-        source={appIcon}
-        style={{ width: size, height: size, borderRadius: size * 0.27 }}
+        source={logoMark}
+        style={{ width: size, height: size }}
       />
       {showName ? <Text style={styles.name}>PERPAL</Text> : null}
     </View>

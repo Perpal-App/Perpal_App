@@ -7,23 +7,26 @@ import {
   initialWindowMetrics,
 } from 'react-native-safe-area-context';
 
+import { PrivyBoundary } from '@/integrations/privy/PrivyBoundary';
 import { colors } from '@/theme/tokens';
 
 /**
- * Root shell. Providers (Privy, wallet, query client) are added here when the
- * auth boundary is implemented — the shell stays intentionally empty until then.
+ * Root shell. The safe-area provider owns device metrics, and Privy is mounted
+ * once here so every route shares the same persisted authentication session.
  */
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: styles.content,
-          }}
-        />
+        <PrivyBoundary>
+          <StatusBar style="light" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: styles.content,
+            }}
+          />
+        </PrivyBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

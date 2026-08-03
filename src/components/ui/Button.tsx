@@ -1,7 +1,7 @@
 import { StyleSheet, Text } from 'react-native';
 
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, layout, motion, radii, spacing, typography } from '@/theme/tokens';
 
 type ButtonVariant = 'primary' | 'secondary';
 
@@ -11,6 +11,12 @@ type ButtonProps = {
   accessibilityHint?: string;
   disabled?: boolean;
   variant?: ButtonVariant;
+  /**
+   * Scale the button shrinks to while pressed. Pass `1` for no press animation.
+   * Mirrors the pressable's own default: `exactOptionalPropertyTypes` rules out
+   * forwarding `undefined` to fall back to it.
+   */
+  pressedScale?: number;
 };
 
 export function Button({
@@ -19,6 +25,7 @@ export function Button({
   accessibilityHint,
   disabled = false,
   variant = 'primary',
+  pressedScale = motion.pressScale,
 }: ButtonProps) {
   return (
     <PressableScale
@@ -28,6 +35,7 @@ export function Button({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
+      pressedScale={pressedScale}
       style={[
         styles.base,
         variant === 'primary' ? styles.primary : styles.secondary,
