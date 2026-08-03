@@ -1,7 +1,7 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 /**
- * Pivote — private, non-custodial perpetuals client.
+ * Perpal — private, non-custodial perpetuals client.
  *
  * This app is a custom native build only. It is not supported under Expo Go:
  * Privy, secure storage, biometrics and (later) native proving all require a
@@ -12,17 +12,17 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  * relayer endpoint and provider key must come from environment configuration
  * instead — see `.env.example`.
  */
-const IOS_BUNDLE_IDENTIFIER = 'com.pivote.app';
-const ANDROID_PACKAGE = 'com.pivote.app';
-const URL_SCHEME = 'pivote';
+const IOS_BUNDLE_IDENTIFIER = 'com.perpal.app';
+const ANDROID_PACKAGE = 'com.perpal.app';
+const URL_SCHEME = 'perpal';
 
 // Surface-level brand colors only. Semantic design tokens live in the app.
 const BACKGROUND = '#0B0D10';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'Pivote',
-  slug: 'pivote',
+  name: 'Perpal',
+  slug: 'perpal',
   version: '0.1.0',
   scheme: URL_SCHEME,
   orientation: 'portrait',
@@ -52,8 +52,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-splash-screen',
       {
+        // Deliberately blank launch screen: flat background, no mark.
+        //
+        // expo-splash-screen requires an image, and Android 12+ requires a
+        // splash icon drawable, so `splash-icon.png` is a fully transparent
+        // 1024x1024 RGBA asset that satisfies both without rendering anything.
+        // Replace that file with real art to bring a launch logo back; the
+        // config does not need to change.
         image: './assets/splash-icon.png',
-        imageWidth: 160,
+        imageWidth: 200,
         resizeMode: 'contain',
         backgroundColor: BACKGROUND,
       },
@@ -61,7 +68,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-local-authentication',
       {
-        faceIDPermission: 'Pivote uses Face ID to unlock your on-device trading key.',
+        faceIDPermission: 'Perpal uses Face ID to unlock your on-device trading key.',
       },
     ],
   ],

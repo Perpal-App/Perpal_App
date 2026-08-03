@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cache cleaner for the Pivote native build.
+ * Cache cleaner for the Perpal native build.
  *
  * Caches are layered. Clearing the wrong layer wastes time; clearing all of
  * them on every run wastes more. Levels, cheapest first:
@@ -23,7 +23,7 @@ import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const XCODE_PROJECT_PREFIX = 'Pivote-';
+const XCODE_PROJECT_PREFIX = 'Perpal-';
 
 const args = new Set(process.argv.slice(2));
 

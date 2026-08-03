@@ -8,7 +8,17 @@
 - Do not start a local development server. Use focused static checks, unit tests, native builds, and deployed probes appropriate to the changed boundary.
 - Treat wallet addresses, transaction bytes, signatures, circuit inputs, proofs, authorization headers, and secure-storage contents as sensitive. Never log secrets, private keys, seed material, raw proof data, or full authorization headers.
 
-## Pivote product constraints
+## Code organization and file limits
+
+- Keep every hand-authored source file at or below 500 physical lines, including imports, comments, tests, and styles. Split a file before it approaches the limit; do not compress formatting or move unrelated code into comments to pass it. Generated native files, lockfiles, vendored code, and generated types are exempt.
+- Keep `app/` limited to Expo Router route adapters and route layouts. Route files select a feature screen and declare navigation options; they do not own business logic, protocol calls, authentication flows, or large style sheets.
+- Organize reusable code by boundary: `src/components/` for cross-feature UI and brand primitives, `src/features/<feature>/` for feature screens/components/hooks/state, `src/theme/` for semantic design tokens, `src/config/` for validated runtime configuration, and `src/integrations/` for Privy, wallet, protocol, API, and observability adapters.
+- Build screens from small, typed components with one clear responsibility. Reuse an existing primitive before creating a screen-local duplicate; promote a component to `src/components/` when it is shared across features, not merely to shorten a file.
+- Keep feature internals private to their feature. Import another feature only through an explicit public module, and never import route files from application code.
+- Co-locate a component's styles with that component unless the values are semantic tokens. Do not create one global stylesheet or a generic helpers directory that becomes an unowned dependency bucket.
+- Prefer composition and explicit props over copy-paste, inheritance, hidden global state, or configurable mega-components. Shared components must expose accessibility labels/states and support dynamic type, safe areas, and reduced motion where applicable.
+
+## Perpal product constraints
 
 - Build a private, non-custodial perpetuals client. The backend must never hold a user's signing key or funds; all signing stays on the device after an explicit confirmation.
 - Keep the fast trade path separate from funding and privacy work. A trade may build, independently verify, sign, submit, and confirm; it must not wait for proving, funding settlement, long polling, or unrelated screen data.
@@ -184,6 +194,7 @@
 
 - Each new protocol, Worker handler, and non-trivial state transition gets focused tests for success, malformed input, cancellation, timeout, idempotency, and error classification.
 - Run `npx expo install --check`, `npx expo-doctor`, the project test suite, TypeScript checks, lint, formatting/diff checks, and the affected Worker checks for every dependency or SDK update. Native integrations require a native build; a JavaScript-only check is not proof of native compatibility.
+- Presentation-only changes are the one scoped exception: when a change touches nothing but styles, design tokens, SVG or other static assets, copy, and layout inside `app/` or `src/`, run `npx tsc --noEmit` alone. Do not run a native build, bundle export, lint sweep, dependency check, or doctor pass for that change, and do not claim device-verified results from it. The moment the change also touches a dependency, native module, config plugin, `app.config.ts`, entry order, or any protocol/Worker boundary, the full quality gate applies again.
 - Validate deployments with real environment bindings and a redacted end-to-end trace. Do not declare an integration complete based only on static checks.
 - Test cold start, warm start, low-tier hardware, app-switching during signing, connectivity loss during a state transition, stale quote recovery, duplicate submission, Worker restart, provider timeout, and rollback of a mobile update before a production release.
 - Keep a lockfile, review dependency diffs, pin protocol-native compatibility sets, and remove unused packages before release. Do not add a monitoring, state, animation, or UI dependency unless a measured gap justifies its native and bundle cost.
