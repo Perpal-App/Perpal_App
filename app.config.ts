@@ -50,6 +50,31 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-secure-store',
     'expo-status-bar',
     [
+      // Embed fonts natively at build time so the family is available
+      // synchronously at runtime with no runtime font loading. iOS derives the
+      // family name from the file ("Patrick Hand"); Android is given the same
+      // family explicitly so a single family string works on both platforms.
+      'expo-font',
+      {
+        ios: {
+          fonts: ['./assets/fonts/Patrick_Hand/PatrickHand-Regular.ttf'],
+        },
+        android: {
+          fonts: [
+            {
+              fontFamily: 'Patrick Hand',
+              fontDefinitions: [
+                {
+                  path: './assets/fonts/Patrick_Hand/PatrickHand-Regular.ttf',
+                  weight: 400,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    [
       'expo-splash-screen',
       {
         // Deliberately blank launch screen: flat background, no mark.

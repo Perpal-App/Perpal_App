@@ -28,6 +28,9 @@ export const colors = {
 
   // Dark circular action that sits on top of the bloom.
   darkAction: '#08070C',
+
+  // Translucent action surfaces.
+  glassTextShadow: 'rgba(40, 8, 72, 0.7)',
 } as const;
 
 export const spacing = {
@@ -50,7 +53,25 @@ export const radii = {
   pill: 999,
 } as const;
 
+/**
+ * Font families embedded natively at build time (see the expo-font plugin in
+ * app.config.ts). The family string is identical on iOS and Android.
+ */
+export const fonts = {
+  brand: 'Patrick Hand',
+} as const;
+
 export const typography = {
+  wordmark: {
+    // Patrick Hand is a handwriting face; heavy tracking breaks its flow, so
+    // the letters keep only a light, breathable gap. Sized to read as a brand
+    // mark without competing with the headline below it.
+    fontFamily: fonts.brand,
+    fontSize: 46,
+    lineHeight: 52,
+    fontWeight: '700' as const,
+    letterSpacing: 1.5,
+  },
   display: {
     fontSize: 44,
     lineHeight: 50,
@@ -129,6 +150,12 @@ export const gradients = {
     ],
     locations: [0, 0.36, 1],
   },
+  primaryAction: {
+    // Fully opaque so the CTA remains high contrast and can composite as one
+    // inexpensive layer during its entrance animation.
+    colors: ['#9868FF', '#7A3FEA', '#5C25C4'],
+    locations: [0, 0.5, 1],
+  },
 } as const;
 
 export const layout = {
@@ -143,5 +170,29 @@ export const motion = {
     damping: 18,
     stiffness: 280,
     mass: 0.55,
+  },
+  /** Cross-fade reveal: opacity only, no delay and no movement. */
+  fade: {
+    duration: 420,
+  },
+  /**
+   * Staggered candle reveal. Each candle starts `stagger` ms after the one to
+   * its left, so the series reads left to right. Because `duration` is much
+   * longer than `stagger`, neighbouring fades overlap and the run lands as one
+   * continuous sweep rather than eight separate steps.
+   */
+  candleReveal: {
+    duration: 520,
+    stagger: 95,
+  },
+  /**
+   * Slide-and-fade reveal. `offsetY` is applied as a transform, so the travel is
+   * composited and never moves anything in layout. `stagger` spaces consecutive
+   * elements when several rise as one cascade.
+   */
+  rise: {
+    duration: 520,
+    offsetY: 18,
+    stagger: 90,
   },
 } as const;
