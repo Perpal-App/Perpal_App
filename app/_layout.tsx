@@ -6,6 +6,8 @@ import {
   initialWindowMetrics,
 } from 'react-native-safe-area-context';
 
+import { readAppConfig } from '@/config/appConfig';
+import { ConfigErrorScreen } from '@/features/diagnostics/screens/ConfigErrorScreen';
 import { PrivyBoundary } from '@/integrations/privy/PrivyBoundary';
 import { AuthNavigationGate } from '@/navigation/AuthNavigationGate';
 import { AppPreferencesProvider } from '@/storage/AppPreferencesProvider';
@@ -14,17 +16,27 @@ import { AppPreferencesProvider } from '@/storage/AppPreferencesProvider';
  * Root shell. The safe-area provider owns device metrics, Privy owns encrypted
  * session persistence, and AppPreferencesProvider owns bounded non-secret MMKV
  * state. AuthNavigationGate waits for restoration and authorizes every route.
+ *
+ * Config is checked before anything else mounts. A build missing its cluster,
+ * venue, or gateway must not reach auth, because a partially configured app could
+ * otherwise dial the wrong network.
  */
 export default function RootLayout() {
+  const config = readAppConfig();
+
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <PrivyBoundary>
-          <AppPreferencesProvider>
-            <StatusBar style="light" />
-            <AuthNavigationGate />
-          </AppPreferencesProvider>
-        </PrivyBoundary>
+        <StatusBar style="light" />
+        {config.ok ? (
+          <PrivyBoundary>
+            <AppPreferencesProvider>
+              <AuthNavigationGate />
+            </AppPreferencesProvider>
+          </PrivyBoundary>
+        ) : (
+          <ConfigErrorScreen issues={config.issues} />
+        )}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

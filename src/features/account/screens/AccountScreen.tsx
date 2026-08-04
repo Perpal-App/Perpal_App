@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
+import { BuildTargetBadge } from '@/features/diagnostics/components/BuildTargetBadge';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 
@@ -62,6 +63,7 @@ export function AccountScreen() {
         </View>
 
         <View style={styles.body}>
+          <BuildTargetBadge />
           <Text style={styles.note}>More account settings are coming soon.</Text>
         </View>
 

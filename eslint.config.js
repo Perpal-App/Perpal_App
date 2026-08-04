@@ -74,16 +74,19 @@ module.exports = defineConfig([
     ),
   },
 
-  // Tests may import adapters but not hardcode endpoints; config comes from env.
+  // Tests must not point at real remote services. Loopback is fine, and so are
+  // RFC 2606 reserved names (`*.example`, `example.com`), which exist precisely to
+  // be unroutable fixtures — a URL-handling test has to be given URLs.
   {
     files: ['tests/**'],
     rules: {
       'no-restricted-syntax': [
         'error',
         {
-          selector: "Literal[value=/^https?:\\/\\/(?!localhost|127\\.0\\.0\\.1)/]",
+          selector:
+            "Literal[value=/^https?:\\/\\/(?!localhost|127\\.0\\.0\\.1)(?![^\\/]*example)/]",
           message:
-            'Do not hardcode remote URLs in tests. Use fixtures or injected config.',
+            'Do not point tests at a real remote host. Use localhost or an *.example fixture host.',
         },
       ],
     },
