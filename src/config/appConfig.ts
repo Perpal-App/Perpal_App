@@ -1,4 +1,4 @@
-import { readPrivyPublicConfig, type PrivyPublicConfig } from '@/config/publicEnv';
+import type { PrivyPublicConfig } from '@/config/publicEnv';
 
 /**
  * The single typed view of build-time configuration.
@@ -69,12 +69,28 @@ function isCluster(value: string): value is SolanaCluster {
   return (CLUSTERS as readonly string[]).includes(value);
 }
 
+/** The raw, untrusted string form of every configuration variable. */
+export type RawAppEnv = {
+  readonly venue: string;
+  readonly cluster: string;
+  readonly apiOrigin: string;
+  readonly rpcPath: string;
+  readonly telemetryEnabled: string;
+  readonly telemetrySampleRate: string;
+  readonly privyAppId: string;
+  readonly privyClientId: string;
+};
+
 /**
- * Reads a raw variable. Direct `process.env.EXPO_PUBLIC_*` property access is
- * required: Expo substitutes these statically, so dynamic indexing yields
- * `undefined` in a release bundle.
+ * Reads the raw variables.
+ *
+ * Direct `process.env.EXPO_PUBLIC_*` property access is required: Babel
+ * substitutes these statically at bundle time, so dynamic indexing yields
+ * `undefined` in a release build. That same inlining is why validation lives in
+ * {@link parseAppConfig} instead of here — a test cannot influence an inlined
+ * literal, so the parsing logic takes its input as an argument.
  */
-function readRawEnv() {
+export function readRawAppEnv(): RawAppEnv {
   return {
     venue: process.env.EXPO_PUBLIC_PERPS_VENUE?.trim() ?? '',
     cluster: process.env.EXPO_PUBLIC_SOLANA_CLUSTER?.trim() ?? '',
@@ -83,6 +99,8 @@ function readRawEnv() {
     telemetryEnabled: process.env.EXPO_PUBLIC_TELEMETRY_ENABLED?.trim() ?? '',
     telemetrySampleRate:
       process.env.EXPO_PUBLIC_TELEMETRY_SAMPLE_RATE?.trim() ?? '',
+    privyAppId: process.env.EXPO_PUBLIC_PRIVY_APP_ID?.trim() ?? '',
+    privyClientId: process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID?.trim() ?? '',
   };
 }
 
@@ -163,8 +181,8 @@ function validateSampleRate(raw: string, issues: ConfigIssue[]): number {
   return parsed;
 }
 
-export function readAppConfig(): AppConfigResult {
-  const raw = readRawEnv();
+/** Validates raw configuration. Pure, so it is directly testable. */
+export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
   const issues: ConfigIssue[] = [];
 
   if (raw.venue.length === 0) {
@@ -202,15 +220,19 @@ export function readAppConfig(): AppConfigResult {
   const origin = validateOrigin(raw.apiOrigin, issues);
   const rpcPath = validateRpcPath(raw.rpcPath, issues);
   const sampleRate = validateSampleRate(raw.telemetrySampleRate, issues);
-  const privy = readPrivyPublicConfig();
 
-  if (!privy.ok) {
-    for (const variable of privy.missing) {
-      issues.push({ variable, problem: 'is required' });
-    }
+  if (raw.privyAppId.length === 0) {
+    issues.push({ variable: 'EXPO_PUBLIC_PRIVY_APP_ID', problem: 'is required' });
   }
 
-  if (!privy.ok || !isVenueId(raw.venue) || issues.length > 0) {
+  if (raw.privyClientId.length === 0) {
+    issues.push({
+      variable: 'EXPO_PUBLIC_PRIVY_CLIENT_ID',
+      problem: 'is required',
+    });
+  }
+
+  if (!isVenueId(raw.venue) || issues.length > 0) {
     return { ok: false, issues };
   }
 
@@ -219,7 +241,7 @@ export function readAppConfig(): AppConfigResult {
     value: {
       venue: raw.venue,
       cluster: VENUE_CLUSTER[raw.venue],
-      privy: privy.value,
+      privy: { appId: raw.privyAppId, clientId: raw.privyClientId },
       api: {
         origin,
         rpcPath,
@@ -231,4 +253,9 @@ export function readAppConfig(): AppConfigResult {
       },
     },
   };
+}
+
+/** Reads and validates the active build configuration. */
+export function readAppConfig(): AppConfigResult {
+  return parseAppConfig(readRawAppEnv());
 }

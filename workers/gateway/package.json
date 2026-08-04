@@ -1,0 +1,20 @@
+{
+  "name": "perpal-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PerPal RPC gateway. Keeps provider credentials off the device.",
+  "scripts": {
+    "dev": "wrangler dev --env devnet",
+    "typecheck": "tsc --noEmit",
+    "deploy:devnet": "wrangler deploy --env devnet",
+    "deploy:mainnet": "wrangler deploy --env mainnet",
+    "secrets:devnet": "wrangler secret list --env devnet",
+    "secrets:mainnet": "wrangler secret list --env mainnet",
+    "tail:devnet": "wrangler tail --env devnet"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260804.1",
+    "typescript": "~6.0.3",
+    "wrangler": "4.118.0"
+  }
+}

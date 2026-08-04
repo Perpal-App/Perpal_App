@@ -53,6 +53,28 @@ function isCluster(value: string | undefined): value is ResolvedCluster {
 }
 
 /**
+ * Provider secrets must be the bare API key, not the full RPC URL the provider
+ * dashboard shows you.
+ *
+ * This matters beyond tidiness: the host is chosen here from the deployment's
+ * cluster, so a pasted URL is the one way a mainnet endpoint could end up serving
+ * a devnet deployment. Rejecting it keeps that impossible.
+ */
+function assertBareKey(
+  value: string,
+  variable: string,
+  missing: string[],
+): void {
+  if (value.length === 0) {
+    return;
+  }
+
+  if (value.includes('://') || value.toLowerCase().startsWith('http')) {
+    missing.push(`${variable} (supply the API key only, not the full RPC URL)`);
+  }
+}
+
+/**
  * Validates the environment and composes provider endpoints.
  *
  * Fails closed: a gateway with no usable provider must refuse to start rather
@@ -77,6 +99,9 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
   if (heliusKey.length === 0 && alchemyKey.length === 0) {
     missing.push('HELIUS_API_KEY or ALCHEMY_API_KEY (at least one)');
   }
+
+  assertBareKey(heliusKey, 'HELIUS_API_KEY', missing);
+  assertBareKey(alchemyKey, 'ALCHEMY_API_KEY', missing);
 
   if (missing.length > 0 || !isCluster(env.SOLANA_CLUSTER)) {
     throw new ConfigurationError(missing);

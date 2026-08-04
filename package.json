@@ -27,6 +27,8 @@
     "emu:start": "emulator -avd",
     "typecheck": "tsc --noEmit",
     "test": "jest",
+    "env:devnet": "node scripts/use-env.mjs devnet",
+    "env:mainnet": "node scripts/use-env.mjs mainnet",
     "lint": "eslint .",
     "check:file-size": "node scripts/check-file-size.mjs",
     "validate": "npm run typecheck && npm run lint && npm run deps:check && npm run check:file-size",

@@ -9,11 +9,18 @@
 name = "perpal-gateway"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
-workers_dev = false
+
+# Preview URLs are off. Every preview URL is a public, unauthenticated endpoint
+# bound to the same provider secrets as production, so each one widens the attack
+# surface for no benefit here. Versions are still testable via `wrangler dev`.
+preview_urls = false
 
 # --- devnet -----------------------------------------------------------------
+# workers.dev is enabled here so devnet has a working URL without a custom domain.
+# Mainnet leaves it off, so production must be attached to a domain deliberately.
 [env.devnet]
 name = "perpal-gateway-devnet"
+workers_dev = true
 
 [env.devnet.vars]
 SOLANA_CLUSTER = "devnet"
@@ -28,6 +35,7 @@ PERPS_VENUE = "drift-devnet"
 # --- mainnet ----------------------------------------------------------------
 [env.mainnet]
 name = "perpal-gateway-mainnet"
+workers_dev = false
 
 [env.mainnet.vars]
 SOLANA_CLUSTER = "mainnet"

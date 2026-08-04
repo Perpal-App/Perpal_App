@@ -5,7 +5,11 @@ import {
   type RouterOptions,
 } from '../../../workers/gateway/src/providerRouter';
 import { classifyMethod, isHedgeable } from '../../../workers/gateway/src/rpcAllowlist';
-import { redactUrl } from '../../../workers/gateway/src/env';
+import {
+  ConfigurationError,
+  redactUrl,
+  resolveConfig,
+} from '../../../workers/gateway/src/env';
 
 const ENDPOINTS: readonly ProviderEndpoint[] = [
   { id: 'helius', url: 'https://helius.example/?api-key=secret' },
@@ -160,5 +164,44 @@ describe('redactUrl', () => {
 
   it('does not throw on malformed input', () => {
     expect(redactUrl('not a url')).toBe('[unparseable-url]');
+  });
+});
+
+describe('resolveConfig provider secrets', () => {
+  const base = {
+    SOLANA_CLUSTER: 'devnet',
+    PERPS_VENUE: 'drift-devnet',
+  } as const;
+
+  it('accepts a bare API key and composes the provider URL', () => {
+    const config = resolveConfig({ ...base, HELIUS_API_KEY: 'abc-123' });
+
+    expect(config.providers).toHaveLength(1);
+    expect(config.providers[0]?.id).toBe('helius');
+    expect(config.providers[0]?.url).toContain('devnet.helius-rpc.com');
+    expect(config.providers[0]?.url).toContain('abc-123');
+  });
+
+  it('rejects a full RPC URL pasted in place of the key', () => {
+    expect(() =>
+      resolveConfig({
+        ...base,
+        HELIUS_API_KEY: 'https://mainnet.helius-rpc.com/?api-key=abc-123',
+      }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it('rejects when neither provider key is present', () => {
+    expect(() => resolveConfig(base)).toThrow(ConfigurationError);
+  });
+
+  it('treats Redis as unconfigured unless both url and token are present', () => {
+    const config = resolveConfig({
+      ...base,
+      ALCHEMY_API_KEY: 'key',
+      UPSTASH_REDIS_REST_URL: 'https://fixture.upstash.example',
+    });
+
+    expect(config.redis).toBeNull();
   });
 });
