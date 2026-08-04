@@ -14,7 +14,8 @@ import { BrandMark } from '@/components/brand/BrandMark';
 import { SuccessView } from '@/components/feedback/SuccessView';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { FadeInView } from '@/components/motion/FadeInView';
-import { RiseInView } from '@/components/motion/RiseInView';
+import { PresenceView } from '@/components/motion/PresenceView';
+import { ScaleInView } from '@/components/motion/ScaleInView';
 import { Card } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
 import { AuthFlowCard } from '@/features/auth/components/AuthFlowCard';
@@ -32,6 +33,9 @@ const successCopy = {
   title: 'You’re in',
   message: "You're logged in and ready to trade.",
 } as const;
+
+/** Vertical travel for the success sheet's slide in / slide out, in px. */
+const SUCCESS_SHEET_TRAVEL = 48;
 
 /**
  * Account-access screen. Privy identity and wallet wiring belongs to the
@@ -107,16 +111,24 @@ export function AuthAccessScreen() {
             </IconButton>
           </FadeInView>
 
+          {/* The brand settles from a larger scale as the screen pushes in, so
+              it reads as the onboarding hero shrinking into this header — a
+              shared-element-style handoff done with composited transforms
+              rather than the experimental native shared-element API. */}
           <View style={styles.brand}>
-            <RiseInView delay={revealDelay(0)}>
+            <ScaleInView delay={revealDelay(0)} fromScale={1.22}>
               <BrandMark size={markSize} />
-            </RiseInView>
+            </ScaleInView>
 
-            <RiseInView delay={revealDelay(1)}>
+            <ScaleInView
+              delay={revealDelay(1)}
+              fromScale={1.12}
+              offsetY={motion.rise.offsetY}
+            >
               <Text style={[styles.wordmark, compact && styles.compactWordmark]}>
                 Perpal
               </Text>
-            </RiseInView>
+            </ScaleInView>
           </View>
         </View>
 
@@ -131,27 +143,35 @@ export function AuthAccessScreen() {
         )}
 
         {/* Scrim and sheet stay inside AppScreen's content, so the safe-area
-            inset bounds them. The sheet sits at the bottom of the inset area
-            (flush, straight edge) rather than the physical edge, so the device's
-            rounded screen corners never clip its square bottom into a curve. The
-            scrim is an absolute sibling painted before the sheet, so it dims the
-            content above while the sheet stays on top and interactive. */}
-        {succeeded ? (
-          <FadeInView style={styles.scrim} toOpacity={0.72} />
-        ) : null}
+            inset bounds them. Both are absolute siblings: the scrim dims the
+            content above while the sheet sits flush at the inset bottom (a
+            straight edge, so the device's rounded corners never clip it). As
+            absolute layers they are decoupled from the auth card's flow, so the
+            auth card can reclaim its space on dismiss without shifting the
+            sheet mid-exit. Each animates its own presence — the success state
+            fades/slides in on login and reverses out on dismiss. */}
+        <PresenceView
+          duration={motion.fade.duration}
+          style={styles.scrim}
+          toOpacity={0.72}
+          visible={succeeded}
+        />
 
-        {succeeded ? (
-          <RiseInView accessibilityViewIsModal>
-            <Card>
-              <SuccessView
-                actionLabel="Nice one!"
-                message={successCopy.message}
-                onAction={handleDismissSuccess}
-                title={successCopy.title}
-              />
-            </Card>
-          </RiseInView>
-        ) : null}
+        <PresenceView
+          accessibilityViewIsModal
+          offsetY={SUCCESS_SHEET_TRAVEL}
+          style={styles.successSheet}
+          visible={succeeded}
+        >
+          <Card>
+            <SuccessView
+              actionLabel="Nice one!"
+              message={successCopy.message}
+              onAction={handleDismissSuccess}
+              title={successCopy.title}
+            />
+          </Card>
+        </PresenceView>
       </View>
     </AppScreen>
   );
@@ -232,5 +252,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     backgroundColor: colors.scrim,
+  },
+  // Bottom-anchored overlay for the success sheet. Absolute (not in flow) so its
+  // exit animation is independent of the auth card reclaiming its layout slot.
+  successSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });

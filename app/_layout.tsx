@@ -8,11 +8,13 @@ import {
 } from 'react-native-safe-area-context';
 
 import { PrivyBoundary } from '@/integrations/privy/PrivyBoundary';
-import { colors } from '@/theme/tokens';
+import { globalScreenOptions } from '@/navigation/screenOptions';
 
 /**
  * Root shell. The safe-area provider owns device metrics, and Privy is mounted
  * once here so every route shares the same persisted authentication session.
+ * Screen transitions come from the shared `globalScreenOptions` so every route
+ * in the app animates identically.
  */
 export default function RootLayout() {
   return (
@@ -20,12 +22,7 @@ export default function RootLayout() {
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <PrivyBoundary>
           <StatusBar style="light" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: styles.content,
-            }}
-          />
+          <Stack screenOptions={globalScreenOptions} />
         </PrivyBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
@@ -34,5 +31,4 @@ export default function RootLayout() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { backgroundColor: colors.background },
 });
