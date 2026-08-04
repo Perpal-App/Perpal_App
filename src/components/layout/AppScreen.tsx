@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import {
+  KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   View,
@@ -39,16 +40,21 @@ export function AppScreen({
         </View>
       ) : null}
 
-      <ScrollView
-        bounces={false}
-        contentContainerStyle={[styles.content, contentContainerStyle]}
-        contentInsetAdjustmentBehavior="never"
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        style={styles.scroll}
-      >
-        {children}
-      </ScrollView>
+      {/* Keyboard avoidance is centralized here alongside the safe area: when
+          the keyboard opens, the scroll area shrinks so flex-based screen
+          layouts recompute and lift their content clear of the keypad. */}
+      <KeyboardAvoidingView behavior="padding" style={styles.keyboardAvoider}>
+        <ScrollView
+          bounces={false}
+          contentContainerStyle={[styles.content, contentContainerStyle]}
+          contentInsetAdjustmentBehavior="never"
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          style={styles.scroll}
+        >
+          {children}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -57,6 +63,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  keyboardAvoider: {
+    flex: 1,
   },
   scroll: {
     flex: 1,

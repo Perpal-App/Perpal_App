@@ -1,8 +1,27 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import type { SocialAuthProvider } from '@/integrations/privy/usePrivyAuth';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, layout } from '@/theme/tokens';
+
+// Neutral slate chip (deliberately not violet) that reads clearly as a raised
+// circle against the near-white card instead of blending into it.
+const PRIVY_BORDER = '#D3D7E0';
+const PRIVY_SURFACE = '#EEF0F5';
+const PRIVY_PRESSED = '#E1E4EC';
+// Solid darker lip along the bottom edge. This is a real border, not a blurred
+// drop shadow, so the button reads as raised/bulging without floating.
+const PRIVY_EDGE = '#BFC4D1';
+const PRIVY_TEXT = '#040217';
+
+const BUTTON_SIZE = 60;
+const RAISED_LIP = 4;
+const PRESSED_LIP = 1;
+
+const providerAccessibilityLabels: Record<SocialAuthProvider, string> = {
+  google: 'Continue with Google',
+  twitter: 'Continue with X',
+};
 
 type AuthProviderButtonProps = {
   provider: SocialAuthProvider;
@@ -11,44 +30,32 @@ type AuthProviderButtonProps = {
   loading?: boolean;
 };
 
-const providerCopy: Record<
-  SocialAuthProvider,
-  { accessibilityLabel: string; label: string }
-> = {
-  google: {
-    accessibilityLabel: 'Continue with Google',
-    label: 'Google',
-  },
-  twitter: {
-    accessibilityLabel: 'Continue with X',
-    label: 'X',
-  },
-};
-
-/** Full-width Privy-style provider row with no press or entrance animation. */
+/** Compact icon-only OAuth action for the horizontal provider row. */
 export function AuthProviderButton({
   provider,
   onPress,
   disabled = false,
   loading = false,
 }: AuthProviderButtonProps) {
-  const copy = providerCopy[provider];
-
   return (
     <Pressable
-      accessibilityLabel={copy.accessibilityLabel}
+      accessibilityLabel={providerAccessibilityLabels[provider]}
       accessibilityRole="button"
       accessibilityState={{ busy: loading, disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[styles.button, disabled && styles.disabled]}
+      style={({ pressed }) => [
+        styles.button,
+        pressed && !disabled && styles.pressed,
+        disabled && styles.disabled,
+      ]}
     >
       <View accessibilityElementsHidden style={styles.iconBox}>
-        <ProviderIcon provider={provider} />
-      </View>
-      <Text style={styles.label}>{copy.label}</Text>
-      <View accessibilityElementsHidden style={styles.trailing}>
-        {loading ? <ActivityIndicator color={colors.onLight} size="small" /> : null}
+        {loading ? (
+          <ActivityIndicator color={colors.onLight} size="small" />
+        ) : (
+          <ProviderIcon provider={provider} />
+        )}
       </View>
     </Pressable>
   );
@@ -60,7 +67,7 @@ function ProviderIcon({ provider }: { provider: SocialAuthProvider }) {
       <Svg height={24} viewBox="0 0 24 24" width={24}>
         <Path
           d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"
-          fill={colors.onLight}
+          fill={PRIVY_TEXT}
         />
       </Svg>
     );
@@ -90,30 +97,34 @@ function ProviderIcon({ provider }: { provider: SocialAuthProvider }) {
 
 const styles = StyleSheet.create({
   button: {
-    minHeight: 54,
+    width: BUTTON_SIZE,
+    height: BUTTON_SIZE,
+    minHeight: layout.minTouchTarget,
     minWidth: layout.minTouchTarget,
-    alignSelf: 'stretch',
-    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.glassEdge,
-    borderRadius: radii.md,
-    backgroundColor: colors.textPrimary,
-    paddingHorizontal: spacing.md,
+    borderColor: PRIVY_BORDER,
+    // Thicker bottom border forms the raised lip; the sides/top stay hairline.
+    borderBottomWidth: RAISED_LIP,
+    borderBottomColor: PRIVY_EDGE,
+    // Full radius makes the chip a circle while the lip keeps it raised.
+    borderRadius: BUTTON_SIZE / 2,
+    backgroundColor: PRIVY_SURFACE,
   },
   iconBox: {
-    width: 28,
+    width: 24,
+    height: 24,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  label: {
-    ...typography.label,
-    flex: 1,
-    color: colors.onLight,
-    textAlign: 'center',
-  },
-  trailing: {
-    width: 28,
-    alignItems: 'center',
+  pressed: {
+    backgroundColor: PRIVY_PRESSED,
+    // Collapse the lip and drop the face down so the button presses inward.
+    // The extra top margin offsets the shorter bottom border, keeping height
+    // constant and the row aligned.
+    borderBottomWidth: PRESSED_LIP,
+    marginTop: RAISED_LIP - PRESSED_LIP,
   },
   disabled: {
     opacity: 0.5,

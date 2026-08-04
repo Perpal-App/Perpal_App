@@ -174,21 +174,23 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   // `flex` (basis 0) on this and the card area splits the safe content area
-  // 60/40, so the card lands at 40% of the available height. Expressed as flex
-  // rather than a percentage or a window measurement, so it stays correct on any
-  // inset without reintroducing viewport-height layout math.
+  // ~72/28, so the card stays a compact bottom sheet with little idle space.
+  // Expressed as flex rather than a percentage or a window measurement, so it
+  // stays correct on any inset without reintroducing viewport-height math.
   top: {
-    flex: 6,
+    flex: 72,
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.xs,
   },
   cardArea: {
-    flex: 4,
+    flex: 28,
   },
   authCard: {
     flex: 1,
     // Match Privy's compact 16-point inline gutters while retaining the shared
-    // Card's single outer surface and square bottom edge.
+    // Card's single outer surface and square bottom edge. A faint violet wash
+    // of the brand accent keeps the light sheet from reading as plain white.
+    backgroundColor: '#FCFBFF',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
     paddingBottom: spacing.md,
