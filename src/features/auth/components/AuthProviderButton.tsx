@@ -1,6 +1,8 @@
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
+import { IOSLoader } from '@/components/feedback/IOSLoader';
+import { PressableScale } from '@/components/ui/PressableScale';
 import type { SocialAuthProvider } from '@/integrations/privy/usePrivyAuth';
 import { colors, layout } from '@/theme/tokens';
 
@@ -8,7 +10,6 @@ import { colors, layout } from '@/theme/tokens';
 // circle against the near-white card instead of blending into it.
 const PRIVY_BORDER = '#D3D7E0';
 const PRIVY_SURFACE = '#EEF0F5';
-const PRIVY_PRESSED = '#E1E4EC';
 // Solid darker lip along the bottom edge. This is a real border, not a blurred
 // drop shadow, so the button reads as raised/bulging without floating.
 const PRIVY_EDGE = '#BFC4D1';
@@ -16,7 +17,9 @@ const PRIVY_TEXT = '#040217';
 
 const BUTTON_SIZE = 60;
 const RAISED_LIP = 4;
-const PRESSED_LIP = 1;
+// Press feedback is a transform scale only, so a tap never changes layout or
+// nudges the row and card. Slightly deeper for this small circular chip.
+const PRESSED_SCALE = 0.9;
 
 const providerAccessibilityLabels: Record<SocialAuthProvider, string> = {
   google: 'Continue with Google',
@@ -38,26 +41,23 @@ export function AuthProviderButton({
   loading = false,
 }: AuthProviderButtonProps) {
   return (
-    <Pressable
+    <PressableScale
       accessibilityLabel={providerAccessibilityLabels[provider]}
       accessibilityRole="button"
       accessibilityState={{ busy: loading, disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.button,
-        pressed && !disabled && styles.pressed,
-        disabled && styles.disabled,
-      ]}
+      pressedScale={PRESSED_SCALE}
+      style={[styles.button, disabled && styles.disabled]}
     >
       <View accessibilityElementsHidden style={styles.iconBox}>
         {loading ? (
-          <ActivityIndicator color={colors.onLight} size="small" />
+          <IOSLoader color={colors.onLight} />
         ) : (
           <ProviderIcon provider={provider} />
         )}
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -117,14 +117,6 @@ const styles = StyleSheet.create({
     height: 24,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  pressed: {
-    backgroundColor: PRIVY_PRESSED,
-    // Collapse the lip and drop the face down so the button presses inward.
-    // The extra top margin offsets the shorter bottom border, keeping height
-    // constant and the row aligned.
-    borderBottomWidth: PRESSED_LIP,
-    marginTop: RAISED_LIP - PRESSED_LIP,
   },
   disabled: {
     opacity: 0.5,

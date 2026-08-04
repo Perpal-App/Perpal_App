@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Image,
   StyleSheet,
   Text,
@@ -8,9 +7,10 @@ import {
   View,
   type ImageSourcePropType,
 } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
 
+import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { Button } from '@/components/ui/Button';
+import { AuthMailIcon } from '@/features/auth/components/AuthMailIcon';
 import {
   AuthErrorMessage,
   AuthFormScroll,
@@ -26,7 +26,7 @@ import {
 import { colors, spacing, typography } from '@/theme/tokens';
 
 type AuthStep = 'methods' | 'otp';
-type PendingAction = 'send-email' | 'verify-email' | SocialAuthProvider | 'logout';
+type PendingAction = 'send-email' | 'verify-email' | SocialAuthProvider;
 
 const NO_PRESS_SCALE = 1;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -62,12 +62,16 @@ export function AuthFlowCard() {
   // through Privy's transient readiness/user changes during an OAuth handoff.
   // The root guard performs the post-login route replacement once the session
   // becomes authoritative.
+  const shouldPresentAuthFlow = auth.isReady && !auth.isAuthenticated;
   const [hasPresentedAuthFlow, setHasPresentedAuthFlow] = useState(
-    auth.isReady && !auth.isAuthenticated,
+    shouldPresentAuthFlow,
   );
 
-  const hasPendingAuthFlow = pending !== null && pending !== 'logout';
-  const keepAuthFlowMounted = hasPresentedAuthFlow || hasPendingAuthFlow;
+  if (shouldPresentAuthFlow && !hasPresentedAuthFlow) {
+    setHasPresentedAuthFlow(true);
+  }
+
+  const keepAuthFlowMounted = hasPresentedAuthFlow || pending !== null;
   const isBusy =
     !auth.isReady ||
     auth.initializationError !== null ||
@@ -75,12 +79,6 @@ export function AuthFlowCard() {
     auth.emailState.status === 'sending-code' ||
     auth.emailState.status === 'submitting-code' ||
     auth.oauthState.status === 'loading';
-
-  useEffect(() => {
-    if (auth.isReady && !auth.isAuthenticated) {
-      setHasPresentedAuthFlow(true);
-    }
-  }, [auth.isAuthenticated, auth.isReady]);
 
   useEffect(() => {
     if (resendRemaining <= 0) {
@@ -124,43 +122,18 @@ export function AuthFlowCard() {
 
   if (!auth.isReady && !keepAuthFlowMounted) {
     return (
-      <View accessibilityLiveRegion="polite" style={styles.centeredState}>
-        <ActivityIndicator color={colors.accent} />
-        <Text style={styles.stateText}>Preparing secure sign in…</Text>
-      </View>
+      <IOSLoader
+        accessibilityLabel="Preparing secure sign in"
+        fill
+        size="large"
+      />
     );
   }
 
+  // A restored authenticated `/access` route can survive for one transition
+  // frame while the root Stack remounts. Never expose auth UI or logout here.
   if (auth.isAuthenticated && !keepAuthFlowMounted) {
-    const handleLogout = async () => {
-      setPending('logout');
-      setMessage(null);
-
-      try {
-        await auth.logout();
-      } catch {
-        setMessage('Sign out could not be completed. Please try again.');
-      } finally {
-        setPending(null);
-      }
-    };
-
-    return (
-      <View style={styles.centeredState}>
-        <Text style={styles.title}>You’re signed in</Text>
-        <Text style={styles.body}>Your secure Privy session is active.</Text>
-        <View style={styles.fullWidthAction}>
-          <Button
-            disabled={isBusy}
-            label={pending === 'logout' ? 'Signing out…' : 'Sign out'}
-            onPress={() => void handleLogout()}
-            pressedScale={NO_PRESS_SCALE}
-            variant="secondary"
-          />
-        </View>
-        {message ? <AuthErrorMessage message={message} /> : null}
-      </View>
-    );
+    return <IOSLoader accessibilityLabel="Opening Home" fill size="large" />;
   }
 
   const handleSendCode = async () => {
@@ -290,7 +263,8 @@ export function AuthFlowCard() {
             />
             <Button
               disabled={isBusy || code.length !== OTP_LENGTH}
-              label={pending === 'verify-email' ? 'Verifying…' : 'Continue'}
+              label="Continue"
+              loading={pending === 'verify-email'}
               onPress={() => void handleVerifyCode()}
               pressedScale={NO_PRESS_SCALE}
             />
@@ -341,7 +315,7 @@ export function AuthFlowCard() {
                 emailError && styles.errorInput,
               ]}
             >
-              <MailIcon />
+              <AuthMailIcon color={PRIVY_PLACEHOLDER} />
               <TextInput
                 accessibilityLabel="Email address"
                 autoCapitalize="none"
@@ -366,7 +340,8 @@ export function AuthFlowCard() {
               />
               <AuthTextAction
                 disabled={isBusy || email.trim().length === 0}
-                label={pending === 'send-email' ? 'Sending…' : 'Submit'}
+                label="Submit"
+                loading={pending === 'send-email'}
                 onPress={() => void handleSendCode()}
               />
             </View>
@@ -394,27 +369,6 @@ export function AuthFlowCard() {
   );
 }
 
-function MailIcon() {
-  return (
-    <Svg height={22} viewBox="0 0 24 24" width={22}>
-      <Path
-        d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"
-        fill="none"
-        stroke={PRIVY_PLACEHOLDER}
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-      <Path
-        d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"
-        fill="none"
-        stroke={PRIVY_PLACEHOLDER}
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -426,13 +380,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
-  },
-  stateText: {
-    ...typography.bodyCompact,
-    marginTop: spacing.sm,
-    color: PRIVY_TEXT,
-    opacity: 0.7,
-    textAlign: 'center',
   },
   form: {
     width: '100%',
@@ -510,9 +457,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: spacing.sm,
-  },
-  fullWidthAction: {
-    alignSelf: 'stretch',
-    marginTop: spacing.lg,
   },
 });

@@ -9,7 +9,12 @@ import {
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
+import { IOSLoader } from '@/components/feedback/IOSLoader';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { colors, spacing, typography } from '@/theme/tokens';
+
+// Transform-only press feedback keeps text actions from reflowing their row.
+const TEXT_ACTION_PRESSED_SCALE = 0.92;
 
 const PRIVY_BRAND_URL =
   'https://privy.io/?utm_source=module&utm_medium=module&utm_campaign=registration_module';
@@ -41,6 +46,7 @@ export function AuthFormScroll({ children }: AuthFormScrollProps) {
 type AuthTextActionProps = {
   disabled: boolean;
   label: string;
+  loading?: boolean;
   onPress: () => void;
 };
 
@@ -48,20 +54,39 @@ type AuthTextActionProps = {
 export function AuthTextAction({
   disabled,
   label,
+  loading = false,
   onPress,
 }: AuthTextActionProps) {
+  const unavailable = disabled || loading;
+
   return (
-    <Pressable
+    <PressableScale
+      accessibilityLabel={label}
       accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
+      accessibilityState={{ busy: loading, disabled: unavailable }}
+      disabled={unavailable}
       onPress={onPress}
+      pressedScale={TEXT_ACTION_PRESSED_SCALE}
       style={styles.textAction}
     >
-      <Text style={[styles.textActionLabel, disabled && styles.disabledText]}>
-        {label}
-      </Text>
-    </Pressable>
+      {loading ? (
+        <View
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          <IOSLoader color={colors.accent} />
+        </View>
+      ) : (
+        <Text
+          style={[
+            styles.textActionLabel,
+            unavailable && styles.disabledText,
+          ]}
+        >
+          {label}
+        </Text>
+      )}
+    </PressableScale>
   );
 }
 
@@ -122,6 +147,9 @@ const styles = StyleSheet.create({
   },
   textAction: {
     minHeight: 34,
+    // Reserve width so swapping the label for the spinner never resizes the
+    // action or shifts the row it sits in.
+    minWidth: 64,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.xs,

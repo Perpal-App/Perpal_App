@@ -1,5 +1,6 @@
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { colors, layout, motion, radii, spacing, typography } from '@/theme/tokens';
 
@@ -10,6 +11,7 @@ type ButtonProps = {
   onPress: () => void;
   accessibilityHint?: string;
   disabled?: boolean;
+  loading?: boolean;
   variant?: ButtonVariant;
   /**
    * Scale the button shrinks to while pressed. Pass `1` for no press animation.
@@ -24,32 +26,48 @@ export function Button({
   onPress,
   accessibilityHint,
   disabled = false,
+  loading = false,
   variant = 'primary',
   pressedScale = motion.pressScale,
 }: ButtonProps) {
+  const unavailable = disabled || loading;
+
   return (
     <PressableScale
       accessibilityHint={accessibilityHint}
       accessibilityLabel={label}
       accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
+      accessibilityState={{ busy: loading, disabled: unavailable }}
+      disabled={unavailable}
       onPress={onPress}
       pressedScale={pressedScale}
       style={[
         styles.base,
         variant === 'primary' ? styles.primary : styles.secondary,
-        disabled && styles.disabled,
+        unavailable && styles.disabled,
       ]}
     >
-      <Text
-        style={[
-          styles.label,
-          variant === 'primary' ? styles.primaryLabel : styles.secondaryLabel,
-        ]}
-      >
-        {label}
-      </Text>
+      {loading ? (
+        <View
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          <IOSLoader
+            color={
+              variant === 'primary' ? colors.onAccent : colors.textPrimary
+            }
+          />
+        </View>
+      ) : (
+        <Text
+          style={[
+            styles.label,
+            variant === 'primary' ? styles.primaryLabel : styles.secondaryLabel,
+          ]}
+        >
+          {label}
+        </Text>
+      )}
     </PressableScale>
   );
 }

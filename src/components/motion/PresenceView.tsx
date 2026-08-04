@@ -55,13 +55,14 @@ export function PresenceView({
 }: PresenceViewProps) {
   const reduceMotion = useReducedMotion();
   const [rendered, setRendered] = useState(visible);
-  // Refs keep the exit guard and callback out of the effect's dependency list,
-  // so an unrelated re-render never restarts the enter animation.
-  const renderedRef = useRef(rendered);
+  // Keep the callback out of the animation effect's dependency list so an
+  // unrelated parent render cannot restart an in-flight transition.
   const onExitedRef = useRef(onExited);
   const progress = useSharedValue(visible ? 1 : 0);
 
-  renderedRef.current = rendered;
+  if (visible && !rendered) {
+    setRendered(true);
+  }
 
   useEffect(() => {
     onExitedRef.current = onExited;
@@ -69,8 +70,6 @@ export function PresenceView({
 
   useEffect(() => {
     if (visible) {
-      setRendered(true);
-
       if (reduceMotion) {
         progress.set(1);
         return;
@@ -83,7 +82,7 @@ export function PresenceView({
     }
 
     // Already hidden (e.g. initial mount): nothing to animate out.
-    if (!renderedRef.current) {
+    if (!rendered) {
       return;
     }
 
@@ -94,8 +93,9 @@ export function PresenceView({
 
     if (reduceMotion) {
       progress.set(0);
-      finishExit();
-      return;
+      // Keep React state updates out of the synchronous effect body.
+      const timer = setTimeout(finishExit, 0);
+      return () => clearTimeout(timer);
     }
 
     progress.set(
@@ -109,7 +109,9 @@ export function PresenceView({
         },
       ),
     );
-  }, [duration, progress, reduceMotion, visible]);
+
+    return undefined;
+  }, [duration, progress, reduceMotion, rendered, visible]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: progress.value * toOpacity,

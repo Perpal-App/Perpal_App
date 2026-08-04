@@ -5,7 +5,7 @@
 - Build the Expo mobile app and Cloudflare Worker backend as new systems. Do not assume prior folders, helpers, providers, routes, or data models exist.
 - Start with a small number of clear boundaries: app configuration, authentication/signing, protocol integrations, API client, Worker handlers, and observability. Keep protocol code out of screens and keep rendering code out of protocol modules.
 - Prefer platform capabilities and already-installed packages. Add a dependency only when it removes meaningful custom code and is compatible with the Expo SDK and native build.
-- Do not start a local development server. Use focused static checks, unit tests, native builds, and deployed probes appropriate to the changed boundary.
+- Do not start a local development server. After completing implementation, run only the TypeScript syntax/type check (`npm run typecheck` or `npx tsc --noEmit`) and report its result. Do not run lint, builds, exports, tests, doctor/dependency checks, Git inspection, or other terminal commands unless the user explicitly requests that specific check.
 - Treat wallet addresses, transaction bytes, signatures, circuit inputs, proofs, authorization headers, and secure-storage contents as sensitive. Never log secrets, private keys, seed material, raw proof data, or full authorization headers.
 
 ## Code organization and file limits
@@ -43,7 +43,7 @@
 | Gestures and motion | `react-native-gesture-handler`, `react-native-reanimated`, `react-native-worklets` | Install with Expo; validate the Babel/native setup in a development build before UI work. |
 | Images, fonts, and launch | `expo-image`, `expo-font`, `expo-splash-screen`, `expo-asset` | Install with Expo; bundle only production assets and fonts. |
 | Lists and server state | `@shopify/flash-list`, `@tanstack/react-query` | Use the current stable release compatible with the selected React version; test scrolling and cache invalidation on physical devices. |
-| Secure local state | `expo-secure-store`; optionally `react-native-mmkv` for non-secret hot cache | Secrets and auth material stay in SecureStore. Never duplicate secret data into a fast cache. |
+| Local persistence | `react-native-mmkv` for bounded non-sensitive state; `expo-secure-store` for secrets; `expo-sqlite` only for large relational history | Never use MMKV as an auth authority, duplicate secrets into it, or add AsyncStorage/another persistence library. |
 | Device security | `expo-crypto`, `expo-local-authentication`, `expo-application`, `@expo/app-integrity` | Install with Expo and test actual device attestation/biometric failure paths. |
 | Production app metrics | `expo-observe` and EAS Observe | Requires Expo SDK 55+ and a native development or production build; install with Expo and use it for startup metrics. |
 | Updates | `expo-updates` only when using EAS Update | Use a `fingerprint` runtime-version policy; configure all update endpoints through build configuration, never source literals. |
@@ -57,6 +57,15 @@
 - Load required cryptographic polyfills before the Router and before any Privy, Solana, Umbra, or MagicBlock import. Privy's Expo setup requires `fast-text-encoding`, `react-native-get-random-values`, and `@ethersproject/shims`; add `buffer` only when the selected Solana client requires it.
 - Use TypeScript `moduleResolution: "Bundler"` and preserve Metro package exports unless an upstream package documents a narrow resolver workaround. Keep each workaround isolated, commented with the upstream cause, and covered by a native build test.
 - Use one Solana client model per transaction path. If a protocol requires a different model, convert only at its adapter boundary; never expose both transaction representations to feature screens.
+
+## Local persistence ownership
+
+- Use `react-native-mmkv` only for small, bounded, non-sensitive local state that benefits from fast synchronous storage, such as UI preferences, one-time onboarding flags, and compact cache metadata. Centralize keys and raw MMKV access under `src/storage/`; feature components consume typed adapters or providers.
+- Keep MMKV reads and writes out of React render. Read during an effect or an initialization/service boundary, and write from event handlers or bounded service callbacks. Never persist unbounded query caches, feeds, histories, proofs, transaction payloads, or growing arrays/objects in MMKV.
+- Use `expo-secure-store` for signing keys, authentication/session material, encryption keys, and recovery/security settings. SecureStore payloads stay small and purpose-specific. Privy remains the sole owner of its persisted session; never mirror auth state or secrets into MMKV.
+- Use SQLite only when local history becomes large, relational, paginated, or requires indexed queries and migrations. Do not introduce SQLite for booleans, preferences, cache flags, or other simple key-value state.
+- Do not add or use AsyncStorage or another persistence library. The approved ownership is MMKV for bounded non-secrets, SecureStore for small secrets, and SQLite only for queryable relational data.
+- A persisted preference may select guest UX but must never authorize an authenticated route. Route access always comes from the authoritative authentication provider.
 
 ## Configuration and Cloudflare Workers
 
@@ -192,9 +201,10 @@
 
 ## Quality gate
 
-- Each new protocol, Worker handler, and non-trivial state transition gets focused tests for success, malformed input, cancellation, timeout, idempotency, and error classification.
-- Run `npx expo install --check`, `npx expo-doctor`, the project test suite, TypeScript checks, lint, formatting/diff checks, and the affected Worker checks for every dependency or SDK update. Native integrations require a native build; a JavaScript-only check is not proof of native compatibility.
-- Presentation-only changes are the one scoped exception: when a change touches nothing but styles, design tokens, SVG or other static assets, copy, and layout inside `app/` or `src/`, run `npx tsc --noEmit` alone. Do not run a native build, bundle export, lint sweep, dependency check, or doctor pass for that change, and do not claim device-verified results from it. The moment the change also touches a dependency, native module, config plugin, `app.config.ts`, entry order, or any protocol/Worker boundary, the full quality gate applies again.
+- After completing implementation tasks, run only the TypeScript syntax/type check (`npm run typecheck` or `npx tsc --noEmit`) and report whether it passed. This is the default final check for every agent task.
+- Do not run lint, formatting sweeps, tests, bundle exports, native builds, Expo Doctor, dependency checks, Git status/diff commands, development servers, or unrelated terminal commands unless the user explicitly requests that exact action.
+- If a requested task inherently requires a package installation or another implementation command, run only that necessary command while implementing; it does not expand the final validation beyond the TypeScript check.
+- Broader native, integration, release, and deployment checks remain release responsibilities and should be recommended when relevant, not run automatically.
 - Validate deployments with real environment bindings and a redacted end-to-end trace. Do not declare an integration complete based only on static checks.
 - Test cold start, warm start, low-tier hardware, app-switching during signing, connectivity loss during a state transition, stale quote recovery, duplicate submission, Worker restart, provider timeout, and rollback of a mobile update before a production release.
 - Keep a lockfile, review dependency diffs, pin protocol-native compatibility sets, and remove unused packages before release. Do not add a monitoring, state, animation, or UI dependency unless a measured gap justifies its native and bundle cost.

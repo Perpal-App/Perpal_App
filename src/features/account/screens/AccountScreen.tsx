@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
+
+const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
 
 /**
  * Account tab. Settings are not built yet, so the screen is honest about that
@@ -15,18 +17,37 @@ import { colors, layout, spacing, typography } from '@/theme/tokens';
 export function AccountScreen() {
   const auth = usePrivyAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const [logoutRequested, setLogoutRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Privy's logout promise can resolve before consumers observe the new user
+  // value. Keep the action pending until the root guard removes this route; if
+  // no authoritative unauthenticated state arrives, recover with a useful error.
+  useEffect(() => {
+    if (!logoutRequested || (auth.isReady && !auth.isAuthenticated)) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setLogoutRequested(false);
+      setSigningOut(false);
+      setError('Sign out could not be confirmed. Please try again.');
+    }, LOGOUT_CONFIRMATION_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [auth.isAuthenticated, auth.isReady, logoutRequested]);
 
   const handleSignOut = async () => {
     setSigningOut(true);
+    setLogoutRequested(false);
     setError(null);
 
     try {
       await auth.logout();
+      setLogoutRequested(true);
     } catch {
-      setError('Sign out could not be completed. Please try again.');
-    } finally {
       setSigningOut(false);
+      setError('Sign out could not be completed. Please try again.');
     }
   };
 
@@ -56,7 +77,8 @@ export function AccountScreen() {
           ) : null}
           <Button
             disabled={signingOut}
-            label={signingOut ? 'Signing out…' : 'Sign out'}
+            label="Sign out"
+            loading={signingOut}
             onPress={() => void handleSignOut()}
             variant="secondary"
           />

@@ -11,6 +11,7 @@ import { FadeInView } from '@/components/motion/FadeInView';
 import { RiseInView } from '@/components/motion/RiseInView';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { OnboardingBackdrop } from '@/features/onboarding/components/OnboardingBackdrop';
+import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, motion, spacing, typography } from '@/theme/tokens';
 
 /** The candle backdrop settles at half strength so it stays behind the wordmark. */
@@ -27,10 +28,14 @@ const heroDelay = (step: number) =>
 
 export function OnboardingLandingScreen() {
   const router = useRouter();
+  const { markOnboardingIntroSeen } = useAppPreferences();
   const { width } = useWindowDimensions();
   const compact = width < 360;
 
   const handleContinue = () => {
+    // This bounded, non-sensitive preference is written from the user event,
+    // never during render. It only selects the next guest entry screen.
+    markOnboardingIntroSeen();
     router.push('/access');
   };
 

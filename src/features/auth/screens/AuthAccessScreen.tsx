@@ -11,14 +11,25 @@ import Animated, {
 
 import { DirectionIcon } from '@/assets/svg/DirectionIcon';
 import { BrandMark } from '@/components/brand/BrandMark';
+import { SuccessView } from '@/components/feedback/SuccessView';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { FadeInView } from '@/components/motion/FadeInView';
+import { PresenceView } from '@/components/motion/PresenceView';
 import { ScaleInView } from '@/components/motion/ScaleInView';
 import { Card } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
 import { AuthFlowCard } from '@/features/auth/components/AuthFlowCard';
 import { OnboardingBackdrop } from '@/features/onboarding/components/OnboardingBackdrop';
+import { useAuthHandoff } from '@/navigation/authHandoff';
 import { colors, layout, motion, spacing, typography } from '@/theme/tokens';
+
+const successCopy = {
+  title: 'You’re in',
+  message: "You're logged in and ready to trade.",
+} as const;
+
+/** Vertical travel for the success sheet's slide in / slide out, in px. */
+const SUCCESS_SHEET_TRAVEL = 48;
 
 /**
  * The logo and text begin as the backdrop is settling, then cascade a step
@@ -39,6 +50,7 @@ const revealDelay = (step: number) =>
  */
 export function AuthAccessScreen() {
   const router = useRouter();
+  const { isAwaitingEntry, confirmEntry } = useAuthHandoff();
   const { width, height } = useWindowDimensions();
   const compact = width < 360;
   const reduceMotion = useReducedMotion();
@@ -88,14 +100,18 @@ export function AuthAccessScreen() {
       <View style={styles.content}>
         <View style={[styles.top, compact && styles.compactTop]}>
           <FadeInView style={styles.topBar}>
-            <IconButton
-              accessibilityHint="Returns to the Perpal introduction"
-              accessibilityLabel="Go back"
-              onPress={handleBack}
-              size={48}
-            >
-              <DirectionIcon direction="left" size={22} />
-            </IconButton>
+            {/* Hidden during the success handoff: going back after signing in
+                is not a valid action. */}
+            {isAwaitingEntry ? null : (
+              <IconButton
+                accessibilityHint="Returns to the Perpal introduction"
+                accessibilityLabel="Go back"
+                onPress={handleBack}
+                size={48}
+              >
+                <DirectionIcon direction="left" size={22} />
+              </IconButton>
+            )}
           </FadeInView>
 
           {/* The brand settles from a larger scale as the screen pushes in, so
@@ -119,11 +135,41 @@ export function AuthAccessScreen() {
           </View>
         </View>
 
-        <View style={styles.cardArea}>
-          <Card style={styles.authCard}>
-            <AuthFlowCard />
+        {isAwaitingEntry ? null : (
+          <View style={styles.cardArea}>
+            <Card style={styles.authCard}>
+              <AuthFlowCard />
+            </Card>
+          </View>
+        )}
+
+        {/* Scrim and sheet stay inside AppScreen's content, so the safe-area
+            inset bounds them. Both are absolute siblings: the scrim dims the
+            content above while the sheet sits flush at the inset bottom. As
+            absolute layers they are decoupled from the auth card's flow, so the
+            auth card can reclaim its space without shifting the sheet. */}
+        <PresenceView
+          duration={motion.fade.duration}
+          style={styles.scrim}
+          toOpacity={0.72}
+          visible={isAwaitingEntry}
+        />
+
+        <PresenceView
+          accessibilityViewIsModal
+          offsetY={SUCCESS_SHEET_TRAVEL}
+          style={styles.successSheet}
+          visible={isAwaitingEntry}
+        >
+          <Card>
+            <SuccessView
+              actionLabel="Enter Perpal"
+              message={successCopy.message}
+              onAction={confirmEntry}
+              title={successCopy.title}
+            />
           </Card>
-        </View>
+        </PresenceView>
       </View>
     </AppScreen>
   );
@@ -193,5 +239,24 @@ const styles = StyleSheet.create({
   compactWordmark: {
     fontSize: 40,
     lineHeight: 46,
+  },
+  // Absolute within the inset content: dims the screen above the sheet without
+  // reaching past the safe area. Final translucency comes from the fade's
+  // toOpacity, not a static value here.
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: colors.scrim,
+  },
+  // Bottom-anchored overlay for the success sheet. Absolute (not in flow) so its
+  // exit animation is independent of the auth card reclaiming its layout slot.
+  successSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });

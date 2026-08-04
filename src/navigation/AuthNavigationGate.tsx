@@ -1,93 +1,129 @@
 import { Stack } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
+import { AuthHandoffProvider } from '@/navigation/authHandoff';
 import { globalScreenOptions } from '@/navigation/screenOptions';
+import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 
 type ResolvedSession = 'authenticated' | 'unauthenticated';
+type RootRouteName = '(auth)' | '(tabs)' | 'index';
 
 /**
  * Owns the route tree for both authenticated and unauthenticated sessions.
  *
- * Privy's `isReady` is authoritative for session restoration. Until it resolves
- * for the first time, no route is mounted, which prevents onboarding from
- * flashing while a persisted user is restored. After that first resolution we
- * retain the last confirmed session during transient not-ready periods (for
- * example, an OAuth browser handoff) so the active flow is not unmounted.
+ * A non-null Privy user is immediately authoritative. A null user becomes
+ * authoritative only after Privy is ready, preventing startup from treating an
+ * unresolved persisted session as logged out. The last resolved session is kept
+ * while readiness is transient (for example during an OAuth browser handoff).
  *
- * Protected screens also remove invalid history entries when their guard turns
- * false. Login, logout, passive expiry, and deep links therefore all converge on
- * the same behavior without screen-level redirect races.
+ * The Stack is keyed by the resolved session, so a restored `/access` history
+ * cannot survive authentication: the authenticated tree remounts at `(tabs)`,
+ * whose initial route is always `home`.
  */
 export function AuthNavigationGate() {
   const { initializationError, isAuthenticated, isReady } = usePrivyAuth();
-  const currentSession: ResolvedSession | null =
-    isReady && initializationError === null
-      ? isAuthenticated
-        ? 'authenticated'
-        : 'unauthenticated'
+  const preferences = useAppPreferences();
+  const currentSession: ResolvedSession | null = isAuthenticated
+    ? 'authenticated'
+    : isReady && initializationError === null
+      ? 'unauthenticated'
       : null;
   const [lastResolvedSession, setLastResolvedSession] =
     useState<ResolvedSession | null>(currentSession);
+  // Set only for a sign-in that happens while the app is running, never for a
+  // restored session, so a restart still goes straight to Home.
+  const [pendingEntry, setPendingEntry] = useState(false);
 
-  useEffect(() => {
-    if (currentSession !== null) {
-      setLastResolvedSession(currentSession);
-    }
-  }, [currentSession]);
+  if (
+    currentSession !== null &&
+    currentSession !== lastResolvedSession
+  ) {
+    setLastResolvedSession(currentSession);
+    setPendingEntry(
+      lastResolvedSession === 'unauthenticated' &&
+        currentSession === 'authenticated',
+    );
+  }
+
+  const confirmEntry = useCallback(() => setPendingEntry(false), []);
+  const session = currentSession ?? lastResolvedSession;
+  // While the success confirmation is pending, the auth route stays mounted so
+  // the card can play. Tabs remain unmounted until the user acknowledges it.
+  const isAwaitingEntry = pendingEntry && session === 'authenticated';
+  const handoff = useMemo(
+    () => ({ isAwaitingEntry, confirmEntry }),
+    [confirmEntry, isAwaitingEntry],
+  );
 
   if (initializationError !== null) {
     return <SessionResolutionState hasError />;
   }
 
-  const session = currentSession ?? lastResolvedSession;
-
-  if (session === null) {
+  if (
+    session === null ||
+    (session === 'unauthenticated' && !preferences.isReady)
+  ) {
     return <SessionResolutionState />;
   }
 
-  const isAuthenticatedSession = session === 'authenticated';
+  const isAuthenticatedSession = session === 'authenticated' && !isAwaitingEntry;
+  const initialRouteName: RootRouteName = isAuthenticatedSession
+    ? '(tabs)'
+    : preferences.hasSeenOnboardingIntro
+      ? '(auth)'
+      : 'index';
 
   return (
-    <Stack screenOptions={globalScreenOptions}>
-      <Stack.Protected guard={!isAuthenticatedSession}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)" />
-      </Stack.Protected>
+    <AuthHandoffProvider value={handoff}>
+      <Stack
+        key={isAuthenticatedSession ? 'authenticated' : 'unauthenticated'}
+        initialRouteName={initialRouteName}
+        screenOptions={globalScreenOptions}
+      >
+        {/* Dropping `index` during the handoff also prunes it from history, so
+            back cannot return to onboarding while already signed in. */}
+        <Stack.Protected guard={!isAuthenticatedSession && !isAwaitingEntry}>
+          <Stack.Screen name="index" />
+        </Stack.Protected>
 
-      <Stack.Protected guard={isAuthenticatedSession}>
-        <Stack.Screen name="(tabs)" />
-      </Stack.Protected>
-    </Stack>
+        <Stack.Protected guard={!isAuthenticatedSession}>
+          <Stack.Screen name="(auth)" />
+        </Stack.Protected>
+
+        <Stack.Protected guard={isAuthenticatedSession}>
+          <Stack.Screen name="(tabs)" />
+        </Stack.Protected>
+      </Stack>
+    </AuthHandoffProvider>
   );
 }
 
 function SessionResolutionState({ hasError = false }: { hasError?: boolean }) {
+  if (!hasError) {
+    return (
+      <AppScreen>
+        <IOSLoader
+          accessibilityLabel="Restoring secure session"
+          fill
+          size="large"
+        />
+      </AppScreen>
+    );
+  }
+
   return (
     <AppScreen>
-      <View
-        accessibilityLiveRegion="polite"
-        accessibilityRole={hasError ? 'alert' : undefined}
-        style={styles.state}
-      >
-        {hasError ? null : (
-          <ActivityIndicator
-            accessibilityLabel="Restoring secure session"
-            color={colors.accent}
-          />
-        )}
-        <Text style={styles.title}>
-          {hasError ? 'Session unavailable' : 'Restoring your session…'}
+      <View accessibilityRole="alert" style={styles.state}>
+        <Text style={styles.title}>Session unavailable</Text>
+        <Text style={styles.message}>
+          We couldn’t verify your saved session. Check your connection, then
+          close and reopen Perpal.
         </Text>
-        {hasError ? (
-          <Text style={styles.message}>
-            We couldn’t verify your saved session. Check your connection, then
-            close and reopen Perpal.
-          </Text>
-        ) : null}
       </View>
     </AppScreen>
   );
