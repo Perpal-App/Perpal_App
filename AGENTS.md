@@ -199,6 +199,34 @@
 - For proof failures, preserve the circuit label, asset manifest/version, backend, local-verification outcome, phase, and typed error classification. Do not reduce a proof-verification failure to a generic network error.
 - Reproduce one variable at a time. Add the smallest focused regression test at the shared boundary, rerun the narrow test first, then typecheck, lint, and validate the real integration path before closing the issue.
 
+## AI assistant boundaries
+
+- All model calls route through the Cloudflare Worker. Never call a model provider
+  from the device, and never ship a provider key or provider SDK in the app.
+- Never send wallet addresses, transaction signatures, Privy user IDs, emails, or
+  device identifiers to a model. Give it market symbols and a redacted portfolio
+  snapshot with local position IDs instead.
+- The model emits symbolic intents (market, side, size, leverage, stops). The
+  device resolves them to accounts, builds the transaction, re-verifies it against
+  the intent, and requires explicit user confirmation before signing. A model never
+  constructs or signs a transaction.
+- Run a fail-closed redaction guard before any AI request leaves the device, and
+  again in the Worker. Block on match rather than stripping and sending.
+- Never have the Worker query chain state by the trading-wallet address on behalf
+  of the assistant; that reintroduces the identity-to-trade linkage.
+
+## Testing
+
+- All tests live in one tree at `tests/`, mirroring `src/`: `tests/unit/`,
+  `tests/integration/`, `tests/fixtures/`, `tests/helpers/`. Never scatter
+  `__tests__` folders or `*.test.ts` files next to source files.
+- Each new protocol adapter, Worker handler, and non-trivial state transition gets
+  focused tests for success, malformed input, cancellation, timeout, idempotency,
+  and error classification.
+- Every verify-before-sign path gets a tampered-input case asserting rejection.
+  Funding tests must cover interrupt-and-resume without double-spend.
+- No network access in `tests/unit/`. Use fixtures and stubs.
+
 ## Quality gate
 
 - After completing implementation tasks, run only the TypeScript syntax/type check (`npm run typecheck` or `npx tsc --noEmit`) and report whether it passed. This is the default final check for every agent task.

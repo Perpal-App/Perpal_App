@@ -5,6 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
+import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { AuthHandoffProvider } from '@/navigation/authHandoff';
 import { globalScreenOptions } from '@/navigation/screenOptions';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
@@ -28,6 +29,9 @@ type RootRouteName = '(auth)' | '(tabs)' | 'index';
 export function AuthNavigationGate() {
   const { initializationError, isAuthenticated, isReady } = usePrivyAuth();
   const preferences = useAppPreferences();
+  // Provisioning runs for every authenticated session and is intentionally
+  // non-blocking: routing never waits on wallet creation.
+  useWalletProvisioning();
   const currentSession: ResolvedSession | null = isAuthenticated
     ? 'authenticated'
     : isReady && initializationError === null

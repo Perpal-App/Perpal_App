@@ -47,3 +47,4 @@ yarn-error.*
 
 # internal docs (not shipped)
 perpal_docs_gitignore_it/
+IMPLEMENTATION_STATUS.md
