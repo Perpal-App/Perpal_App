@@ -25,10 +25,6 @@ import {
 } from '@/integrations/privy/usePrivyAuth';
 import { colors, spacing, typography } from '@/theme/tokens';
 
-type AuthFlowCardProps = {
-  onAuthenticated: () => void;
-};
-
 type AuthStep = 'methods' | 'otp';
 type PendingAction = 'send-email' | 'verify-email' | SocialAuthProvider | 'logout';
 
@@ -50,8 +46,9 @@ const loginLogo = require('../../../../assets/AppLogos/perpal_logo_black.png') a
  * Accurate inline recreation of Privy's default login flow in Perpal's existing
  * 40% sheet. Email entry and social methods share the first card; only a
  * successful code request swaps its inner content to confirmation-code entry.
+ * The root auth guard observes successful login and owns the route transition.
  */
-export function AuthFlowCard({ onAuthenticated }: AuthFlowCardProps) {
+export function AuthFlowCard() {
   const auth = usePrivyAuth();
   const [step, setStep] = useState<AuthStep>('methods');
   const [email, setEmail] = useState('');
@@ -63,7 +60,8 @@ export function AuthFlowCard({ onAuthenticated }: AuthFlowCardProps) {
   const [resendRemaining, setResendRemaining] = useState(0);
   // Once the unauthenticated flow has appeared, keep that exact subtree mounted
   // through Privy's transient readiness/user changes during an OAuth handoff.
-  // The parent success transition remains the only post-login replacement.
+  // The root guard performs the post-login route replacement once the session
+  // becomes authoritative.
   const [hasPresentedAuthFlow, setHasPresentedAuthFlow] = useState(
     auth.isReady && !auth.isAuthenticated,
   );
@@ -219,9 +217,7 @@ export function AuthFlowCard({ onAuthenticated }: AuthFlowCardProps) {
         code: verificationCode,
       });
 
-      if (authenticated) {
-        onAuthenticated();
-      } else {
+      if (!authenticated) {
         setMessage('Invalid code. Request a new code and try again.');
       }
     } catch (error) {
@@ -245,11 +241,7 @@ export function AuthFlowCard({ onAuthenticated }: AuthFlowCardProps) {
     setMessage(null);
 
     try {
-      const authenticated = await auth.loginWithSocial({ provider });
-
-      if (authenticated) {
-        onAuthenticated();
-      }
+      await auth.loginWithSocial({ provider });
     } catch (error) {
       const kind = auth.getErrorKind(error);
 

@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   Easing,
@@ -11,10 +11,8 @@ import Animated, {
 
 import { DirectionIcon } from '@/assets/svg/DirectionIcon';
 import { BrandMark } from '@/components/brand/BrandMark';
-import { SuccessView } from '@/components/feedback/SuccessView';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { FadeInView } from '@/components/motion/FadeInView';
-import { PresenceView } from '@/components/motion/PresenceView';
 import { ScaleInView } from '@/components/motion/ScaleInView';
 import { Card } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
@@ -29,17 +27,11 @@ import { colors, layout, motion, spacing, typography } from '@/theme/tokens';
 const revealDelay = (step: number) =>
   motion.backdropSlide.contentDelay + step * motion.rise.stagger;
 
-const successCopy = {
-  title: 'You’re in',
-  message: "You're logged in and ready to trade.",
-} as const;
-
-/** Vertical travel for the success sheet's slide in / slide out, in px. */
-const SUCCESS_SHEET_TRAVEL = 48;
-
 /**
  * Account-access screen. Privy identity and wallet wiring belongs to the
  * integration boundary and is intentionally not invoked from this screen.
+ * AuthNavigationGate replaces this route as soon as Privy confirms a session,
+ * so successful login never depends on a local button or stack mutation.
  *
  * On entry the landing gradient (flipped so the bloom sits at the top) slides up
  * fast-then-smooth. The brand mark rides near the top over it, and the access
@@ -77,14 +69,9 @@ export function AuthAccessScreen() {
     transform: [{ translateY: (1 - slide.value) * slideOffset }],
   }));
 
-  // Set only after an actual Privy email/OAuth login resolves with a user.
-  const [succeeded, setSucceeded] = useState(false);
-
   const handleBack = () => {
     router.back();
   };
-
-  const handleDismissSuccess = () => setSucceeded(false);
 
   return (
     <AppScreen
@@ -132,46 +119,11 @@ export function AuthAccessScreen() {
           </View>
         </View>
 
-        {/* One existing sheet owns the complete inline Privy-style flow. Its
-            controls intentionally have no entrance or press-scale animation. */}
-        {succeeded ? null : (
-          <View style={styles.cardArea}>
-            <Card style={styles.authCard}>
-              <AuthFlowCard onAuthenticated={() => setSucceeded(true)} />
-            </Card>
-          </View>
-        )}
-
-        {/* Scrim and sheet stay inside AppScreen's content, so the safe-area
-            inset bounds them. Both are absolute siblings: the scrim dims the
-            content above while the sheet sits flush at the inset bottom (a
-            straight edge, so the device's rounded corners never clip it). As
-            absolute layers they are decoupled from the auth card's flow, so the
-            auth card can reclaim its space on dismiss without shifting the
-            sheet mid-exit. Each animates its own presence — the success state
-            fades/slides in on login and reverses out on dismiss. */}
-        <PresenceView
-          duration={motion.fade.duration}
-          style={styles.scrim}
-          toOpacity={0.72}
-          visible={succeeded}
-        />
-
-        <PresenceView
-          accessibilityViewIsModal
-          offsetY={SUCCESS_SHEET_TRAVEL}
-          style={styles.successSheet}
-          visible={succeeded}
-        >
-          <Card>
-            <SuccessView
-              actionLabel="Nice one!"
-              message={successCopy.message}
-              onAction={handleDismissSuccess}
-              title={successCopy.title}
-            />
+        <View style={styles.cardArea}>
+          <Card style={styles.authCard}>
+            <AuthFlowCard />
           </Card>
-        </PresenceView>
+        </View>
       </View>
     </AppScreen>
   );
@@ -241,24 +193,5 @@ const styles = StyleSheet.create({
   compactWordmark: {
     fontSize: 40,
     lineHeight: 46,
-  },
-  // Absolute within the inset content: dims the screen above the sheet without
-  // reaching past the safe area. Final translucency comes from the fade's
-  // toOpacity, not a static value here.
-  scrim: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: colors.scrim,
-  },
-  // Bottom-anchored overlay for the success sheet. Absolute (not in flow) so its
-  // exit animation is independent of the auth card reclaiming its layout slot.
-  successSheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
 });
