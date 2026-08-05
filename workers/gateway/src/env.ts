@@ -1,4 +1,5 @@
 import type { ProviderEndpoint } from './providerRouter';
+import type { MarketAsset, MarketDataConfig } from './marketData';
 
 /**
  * Worker configuration.
@@ -16,11 +17,14 @@ export type WorkerEnv = {
   readonly ALCHEMY_API_KEY?: string;
   readonly UPSTASH_REDIS_REST_URL?: string;
   readonly UPSTASH_REDIS_REST_TOKEN?: string;
+  readonly PYTH_API_KEY?: string;
 
   // Vars
-  readonly PERPS_VENUE?: string;
+  readonly PERPS_PROVIDERS?: string;
   readonly SOLANA_CLUSTER?: string;
   readonly CORS_ALLOWED_ORIGINS?: string;
+  readonly PYTH_HERMES_ORIGIN?: string;
+  readonly PYTH_MARKET_FEEDS?: string;
 
   // Bindings
   readonly RATE_LIMITER?: {
@@ -40,12 +44,13 @@ export type AnalyticsEngineBinding = {
   }): void;
 };
 
-export type ResolvedCluster = 'devnet' | 'mainnet';
+export type ResolvedCluster = 'mainnet';
 
 export type GatewayConfig = {
   readonly cluster: ResolvedCluster;
-  readonly venue: string;
+  readonly perpsProviders: readonly ['flash-v2', 'drift-v2'];
   readonly providers: readonly ProviderEndpoint[];
+  readonly marketData: MarketDataConfig;
   readonly redis: { readonly url: string; readonly token: string } | null;
   readonly corsAllowedOrigins: readonly string[];
 };
@@ -57,27 +62,81 @@ export class ConfigurationError extends Error {
   }
 }
 
-const HELIUS_HOST: Readonly<Record<ResolvedCluster, string>> = {
-  devnet: 'https://devnet.helius-rpc.com',
-  mainnet: 'https://mainnet.helius-rpc.com',
-};
-
-const ALCHEMY_HOST: Readonly<Record<ResolvedCluster, string>> = {
-  devnet: 'https://solana-devnet.g.alchemy.com/v2',
-  mainnet: 'https://solana-mainnet.g.alchemy.com/v2',
-};
+const HELIUS_HOST = 'https://mainnet.helius-rpc.com';
+const ALCHEMY_HOST = 'https://solana-mainnet.g.alchemy.com/v2';
 
 function isCluster(value: string | undefined): value is ResolvedCluster {
-  return value === 'devnet' || value === 'mainnet';
+  return value === 'mainnet';
+}
+
+function parseHttpsOrigin(
+  raw: string | undefined,
+  variable: string,
+  invalid: string[],
+): string {
+  const value = raw?.trim() ?? '';
+
+  try {
+    const parsed = new URL(value);
+
+    if (parsed.protocol === 'https:' && parsed.origin === value) {
+      return value;
+    }
+  } catch {
+    // Report the binding name below without exposing its value.
+  }
+
+  invalid.push(`${variable} (exact HTTPS origin required)`);
+  return '';
+}
+
+function parseMarketFeeds(
+  raw: string | undefined,
+  invalid: string[],
+): Readonly<Record<MarketAsset, string>> {
+  const entries = new Map(
+    (raw ?? '').split(',').map((entry) => {
+      const [asset = '', feedId = ''] = entry.split(':');
+      return [asset.trim(), feedId.trim().toLowerCase()];
+    }),
+  );
+  const result = {
+    BTC: entries.get('BTC') ?? '',
+    ETH: entries.get('ETH') ?? '',
+    SOL: entries.get('SOL') ?? '',
+  };
+
+  if (Object.values(result).some((feedId) => !/^[0-9a-f]{64}$/u.test(feedId))) {
+    invalid.push('PYTH_MARKET_FEEDS (BTC, ETH, and SOL feed ids required)');
+  }
+
+  return result;
+}
+
+export function resolveMarketDataConfig(env: WorkerEnv): MarketDataConfig {
+  const invalid: string[] = [];
+  const origin = parseHttpsOrigin(
+    env.PYTH_HERMES_ORIGIN,
+    'PYTH_HERMES_ORIGIN',
+    invalid,
+  );
+  const feedIds = parseMarketFeeds(env.PYTH_MARKET_FEEDS, invalid);
+
+  if (invalid.length > 0) {
+    throw new ConfigurationError(invalid);
+  }
+
+  return {
+    origin,
+    feedIds,
+    apiKey: env.PYTH_API_KEY?.trim() || null,
+  };
 }
 
 /**
  * Provider secrets must be the bare API key, not the full RPC URL the provider
- * dashboard shows you.
- *
- * This matters beyond tidiness: the host is chosen here from the deployment's
- * cluster, so a pasted URL is the one way a mainnet endpoint could end up serving
- * a devnet deployment. Rejecting it keeps that impossible.
+ * dashboard shows you. Rejecting URLs also prevents a key field from silently
+ * overriding the configured mainnet provider host.
  */
 function assertBareKey(
   value: string,
@@ -126,13 +185,13 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
   const missing: string[] = [];
 
   if (!isCluster(env.SOLANA_CLUSTER)) {
-    missing.push('SOLANA_CLUSTER (must be "devnet" or "mainnet")');
+    missing.push('SOLANA_CLUSTER (must be "mainnet")');
   }
 
-  const venue = env.PERPS_VENUE?.trim() ?? '';
+  const perpsProviders = env.PERPS_PROVIDERS?.trim() ?? '';
 
-  if (venue.length === 0) {
-    missing.push('PERPS_VENUE');
+  if (perpsProviders !== 'flash-v2,drift-v2') {
+    missing.push('PERPS_PROVIDERS (must be "flash-v2,drift-v2")');
   }
 
   const heliusKey = env.HELIUS_API_KEY?.trim() ?? '';
@@ -141,6 +200,15 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
     env.CORS_ALLOWED_ORIGINS,
     missing,
   );
+  let marketData: MarketDataConfig | null = null;
+
+  try {
+    marketData = resolveMarketDataConfig(env);
+  } catch (cause) {
+    if (cause instanceof ConfigurationError) {
+      missing.push(...cause.missing);
+    }
+  }
 
   if (heliusKey.length === 0 && alchemyKey.length === 0) {
     missing.push('HELIUS_API_KEY or ALCHEMY_API_KEY (at least one)');
@@ -149,7 +217,11 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
   assertBareKey(heliusKey, 'HELIUS_API_KEY', missing);
   assertBareKey(alchemyKey, 'ALCHEMY_API_KEY', missing);
 
-  if (missing.length > 0 || !isCluster(env.SOLANA_CLUSTER)) {
+  if (
+    missing.length > 0 ||
+    !isCluster(env.SOLANA_CLUSTER) ||
+    marketData === null
+  ) {
     throw new ConfigurationError(missing);
   }
 
@@ -159,14 +231,14 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
   if (heliusKey.length > 0) {
     providers.push({
       id: 'helius',
-      url: `${HELIUS_HOST[cluster]}/?api-key=${heliusKey}`,
+      url: `${HELIUS_HOST}/?api-key=${heliusKey}`,
     });
   }
 
   if (alchemyKey.length > 0) {
     providers.push({
       id: 'alchemy',
-      url: `${ALCHEMY_HOST[cluster]}/${alchemyKey}`,
+      url: `${ALCHEMY_HOST}/${alchemyKey}`,
     });
   }
 
@@ -175,8 +247,9 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
 
   return {
     cluster,
-    venue,
+    perpsProviders: ['flash-v2', 'drift-v2'],
     providers,
+    marketData,
     redis:
       redisUrl.length > 0 && redisToken.length > 0
         ? { url: redisUrl, token: redisToken }

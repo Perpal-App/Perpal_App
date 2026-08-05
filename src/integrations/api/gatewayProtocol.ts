@@ -14,7 +14,7 @@ export const gatewayHeaders = {
 export type GatewaySigningInput = {
   readonly bodyHash: string;
   readonly idempotencyKey: string;
-  readonly network: 'devnet' | 'mainnet';
+  readonly network: 'mainnet';
   readonly nonce: string;
   readonly operation: string;
   readonly timestamp: string;

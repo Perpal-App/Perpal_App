@@ -1,6 +1,11 @@
 import { gatewayHeaders } from '../../../src/integrations/api/gatewayProtocol';
 
-import { ConfigurationError, redactUrl, resolveConfig, type WorkerEnv } from './env';
+import {
+  ConfigurationError,
+  redactUrl,
+  resolveConfig,
+  type WorkerEnv,
+} from './env';
 import {
   corsHeaders,
   isOriginAllowed,
@@ -26,6 +31,8 @@ import {
   type JsonRpcRequest,
 } from './rpcValidation';
 import { parseTelemetryEvents, writeTelemetry } from './telemetry';
+import { MARKET_DATA_PATH } from './marketData';
+import { handlePublicMarketsRequest } from './publicMarketsHandler';
 
 const JSON_HEADERS = { 'content-type': 'application/json' } as const;
 const MAX_RPC_BODY_BYTES = 256 * 1024;
@@ -88,6 +95,15 @@ export default {
       return response;
     };
 
+    if (url.pathname === MARKET_DATA_PATH) {
+      const result = await handlePublicMarketsRequest(request, env, traceId);
+      return complete(result.response, result.outcome, 'markets.read', {
+        ...(result.upstreamMs === undefined
+          ? {}
+          : { upstream: result.upstreamMs }),
+      });
+    }
+
     let config;
 
     try {
@@ -138,13 +154,14 @@ export default {
               ? 'ok'
               : 'degraded',
           cluster: config.cluster,
-          venue: config.venue,
+          perpsProviders: config.perpsProviders,
           providers: activeRouter.snapshot(),
           endpoints: config.providers.map((provider) => redactUrl(provider.url)),
           redisConfigured: config.redis !== null,
           rateLimiterConfigured: env.RATE_LIMITER !== undefined,
           globalRateLimiterConfigured: env.GLOBAL_RATE_LIMITER !== undefined,
           telemetryConfigured: env.TELEMETRY !== undefined,
+          pythApiKeyConfigured: Boolean(config.marketData.apiKey),
           traceId,
         }),
         'ok',
@@ -152,7 +169,7 @@ export default {
       );
     }
 
-    if (url.pathname !== '/v1/rpc' && url.pathname !== '/v1/telemetry') {
+    if (!['/v1/rpc', '/v1/telemetry'].includes(url.pathname)) {
       return complete(
         errorResponse(404, 'not_found', 'Unknown route.', traceId),
         'rejected',
@@ -303,7 +320,6 @@ export default {
       });
     }
 
-    // From here the payload was established as JSON-RPC above.
     if (methodClass === null) {
       return complete(
         errorResponse(500, 'internal_error', 'Request classification failed.', traceId),

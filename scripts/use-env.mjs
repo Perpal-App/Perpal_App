@@ -3,7 +3,7 @@
  * Activates a build target by copying `.env.<target>` into `.env`.
  *
  * Expo only auto-loads `.env`, `.env.local`, and `.env.<mode>`, so an arbitrary
- * name like `.env.devnet` is never read on its own. Rather than teach every
+ * name like `.env.mainnet` is never read on its own. Rather than teach every
  * command a custom loader, one explicit copy makes the active target obvious and
  * keeps `appConfig` reading plain `process.env`.
  *
@@ -14,7 +14,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const TARGETS = ['devnet', 'mainnet'];
+const TARGETS = ['mainnet'];
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const target = process.argv[2];

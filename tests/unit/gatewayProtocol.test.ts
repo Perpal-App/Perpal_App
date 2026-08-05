@@ -11,7 +11,7 @@ describe('gateway signing protocol', () => {
     const message = buildGatewaySigningMessage({
       bodyHash: 'abc123',
       idempotencyKey: '',
-      network: 'devnet',
+      network: 'mainnet',
       nonce: '12345678-1234-1234-1234-123456789abc',
       operation: 'getSlot',
       timestamp: '1700000000000',
@@ -22,7 +22,7 @@ describe('gateway signing protocol', () => {
         'perpal.gateway.v1',
         '1700000000000',
         '12345678-1234-1234-1234-123456789abc',
-        'devnet',
+        'mainnet',
         'getSlot',
         'abc123',
         '',

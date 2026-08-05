@@ -5,7 +5,7 @@ import type { Amount } from '@/domain/money/amount';
  *
  * Everything above this boundary — screens, domain logic, the AI draft pipeline —
  * depends only on these types. Nothing here references a protocol SDK, so a
- * devnet Drift build and a mainnet Flash build present an identical surface.
+ * both Drift and Flash Trade v2 present an identical mainnet surface.
  *
  * Two deliberate choices:
  *
@@ -192,13 +192,13 @@ export type MarginSummary = {
 /* ------------------------------------------------------------ capability --- */
 
 /**
- * Declared per venue so unsupported operations fail loudly. Drift devnet and
- * Flash mainnet differ, and pretending otherwise is how a "supported" order type
+ * Declared per venue so unsupported operations fail loudly. Drift and Flash
+ * differ, and pretending otherwise is how a "supported" order type
  * silently becomes a different one.
  */
 export type VenueCapabilities = {
   readonly venueId: string;
-  readonly cluster: 'devnet' | 'mainnet';
+  readonly cluster: 'mainnet';
   readonly orderKinds: readonly OrderKind['type'][];
   readonly collateralMints: readonly Address[];
   readonly supportsPostOnly: boolean;

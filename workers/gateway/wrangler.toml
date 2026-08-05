@@ -1,69 +1,23 @@
 #:schema node_modules/wrangler/config-schema.json
 
-# PerPal RPC gateway.
-#
-# One deployment per target, each with its own name and its own secret store, so a
-# devnet request cannot reach mainnet credentials. There is deliberately no
-# top-level default environment: deploys must name a target explicitly.
-
+# Android mainnet prototype gateway. The public market route has no wallet
+# requirement; RPC writes remain signed, rate-limited, and idempotent.
 name = "perpal-gateway"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
-
-# Preview URLs are off. Every preview URL is a public, unauthenticated endpoint
-# bound to the same provider secrets as production, so each one widens the attack
-# surface for no benefit here. Versions are still testable via `wrangler dev`.
 preview_urls = false
 
-# --- devnet -----------------------------------------------------------------
-# workers.dev is enabled here so devnet has a working URL without a custom domain.
-# Mainnet leaves it off, so production must be attached to a domain deliberately.
-[env.devnet]
-name = "perpal-gateway-devnet"
-workers_dev = true
-
-[env.devnet.vars]
-SOLANA_CLUSTER = "devnet"
-PERPS_VENUE = "drift-devnet"
-# Android-only prototype: browser origins are denied by default. Add exact HTTPS
-# origins here only if a web client is intentionally introduced.
-CORS_ALLOWED_ORIGINS = ""
-
-[[env.devnet.ratelimits]]
-name = "RATE_LIMITER"
-namespace_id = "2101"
-
-[env.devnet.ratelimits.simple]
-limit = 120
-period = 60
-
-[[env.devnet.ratelimits]]
-name = "GLOBAL_RATE_LIMITER"
-namespace_id = "2103"
-
-[env.devnet.ratelimits.simple]
-limit = 3000
-period = 60
-
-[[env.devnet.analytics_engine_datasets]]
-binding = "TELEMETRY"
-dataset = "perpal_gateway_devnet"
-
-# Secrets (set manually, never committed):
-#   npx wrangler secret put HELIUS_API_KEY --env devnet
-#   npx wrangler secret put ALCHEMY_API_KEY --env devnet
-#   npx wrangler secret put UPSTASH_REDIS_REST_URL --env devnet
-#   npx wrangler secret put UPSTASH_REDIS_REST_TOKEN --env devnet
-
-# --- mainnet ----------------------------------------------------------------
 [env.mainnet]
 name = "perpal-gateway-mainnet"
-workers_dev = false
+workers_dev = true
+compatibility_flags = ["global_fetch_strictly_public"]
 
 [env.mainnet.vars]
 SOLANA_CLUSTER = "mainnet"
-PERPS_VENUE = "flash-mainnet"
+PERPS_PROVIDERS = "flash-v2,drift-v2"
 CORS_ALLOWED_ORIGINS = ""
+PYTH_HERMES_ORIGIN = "https://hermes.pyth.network"
+PYTH_MARKET_FEEDS = "BTC:e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43,ETH:ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace,SOL:ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d"
 
 [[env.mainnet.ratelimits]]
 name = "RATE_LIMITER"
@@ -90,3 +44,4 @@ dataset = "perpal_gateway_mainnet"
 #   npx wrangler secret put ALCHEMY_API_KEY --env mainnet
 #   npx wrangler secret put UPSTASH_REDIS_REST_URL --env mainnet
 #   npx wrangler secret put UPSTASH_REDIS_REST_TOKEN --env mainnet
+#   npx wrangler secret put PYTH_API_KEY --env mainnet

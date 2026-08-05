@@ -46,7 +46,6 @@ yarn-error.*
 .env
 .env.local
 .env.*.local
-.env.devnet
 .env.mainnet
 
 # internal docs (not shipped)

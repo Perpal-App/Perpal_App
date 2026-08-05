@@ -9,7 +9,7 @@ export type TelemetryEvent = {
   readonly spanId: string;
   readonly operation: string;
   readonly deviceClass: 'low' | 'mid' | 'high' | 'unknown';
-  readonly network: 'devnet' | 'mainnet';
+  readonly network: 'mainnet';
   readonly outcome: string;
   readonly durationMs: number;
   readonly errorCode?: string;
@@ -48,7 +48,7 @@ function isTelemetryEvent(value: unknown): value is TelemetryEvent {
     isBoundedText(event.spanId) &&
     isBoundedText(event.operation) &&
     ['low', 'mid', 'high', 'unknown'].includes(String(event.deviceClass)) &&
-    (event.network === 'devnet' || event.network === 'mainnet') &&
+    event.network === 'mainnet' &&
     isBoundedText(event.outcome) &&
     typeof event.durationMs === 'number' &&
     Number.isFinite(event.durationMs) &&

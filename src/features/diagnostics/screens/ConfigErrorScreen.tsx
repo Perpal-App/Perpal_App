@@ -24,7 +24,7 @@ export function ConfigErrorScreen({ issues }: ConfigErrorScreenProps) {
         <Text style={styles.title}>Configuration incomplete</Text>
         <Text style={styles.message}>
           This build cannot start until the following values are set. Copy
-          `.env.example` to `.env.devnet` or `.env.mainnet`, fill them in, then
+          `.env.example` to `.env.mainnet`, fill it in, then
           rebuild.
         </Text>
 

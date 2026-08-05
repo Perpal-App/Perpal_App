@@ -19,6 +19,21 @@ import { Buffer } from 'buffer';
 const globals = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
 globals.Buffer ??= Buffer;
 
+// Hermes can drop Buffer's prototype from subarray views. Anchor decoders then
+// receive a Uint8Array without readUIntLE, so repair only the affected runtime.
+if (typeof Buffer.alloc(1).subarray(0, 1).readUIntLE !== 'function') {
+  const subarray = Buffer.prototype.subarray;
+
+  Buffer.prototype.subarray = function bufferSubarray(
+    start?: number,
+    end?: number,
+  ) {
+    const view = subarray.call(this, start, end);
+    Object.setPrototypeOf(view, Buffer.prototype);
+    return view;
+  };
+}
+
 if (typeof globalThis.crypto?.getRandomValues !== 'function') {
   // Fail loudly at startup rather than producing weak key material later.
   throw new Error('polyfills: crypto.getRandomValues is unavailable');

@@ -4,10 +4,9 @@ import { StyleSheet, Text, View } from 'react-native';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
-import { BuildTargetBadge } from '@/features/diagnostics/components/BuildTargetBadge';
-import { useTradingSession } from '@/integrations/perps/drift/trading-session-provider';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
+import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
@@ -21,7 +20,7 @@ const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
 export function AccountScreen() {
   const auth = usePrivyAuth();
   const walletProvisioning = useWalletProvisioning();
-  const tradingSession = useTradingSession();
+  const preferences = useAppPreferences();
   const [signingOut, setSigningOut] = useState(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +48,6 @@ export function AccountScreen() {
     setError(null);
 
     try {
-      await tradingSession.lock();
       await auth.logout();
       setLogoutRequested(true);
     } catch {
@@ -69,7 +67,6 @@ export function AccountScreen() {
         </View>
 
         <View style={styles.body}>
-          <BuildTargetBadge />
           <View style={styles.walletPanel}>
             <Text accessibilityRole="header" style={styles.walletTitle}>
               Privy embedded wallet
@@ -83,7 +80,7 @@ export function AccountScreen() {
             />
             <StatusRow
               label="Purpose"
-              value="Identity and trading-wallet derivation"
+              value="Identity and confirmed trade authorization"
             />
             {walletProvisioning.embeddedWalletAddress ? (
               <StatusRow
@@ -103,41 +100,22 @@ export function AccountScreen() {
           </View>
           <View style={styles.walletPanel}>
             <Text accessibilityRole="header" style={styles.walletTitle}>
-              Trading wallet
+              Trading preference
             </Text>
             <Text selectable style={styles.walletStatus}>
-              {tradingSessionMessage(tradingSession.status)}
+              Markets remain visible without a wallet signature. Change the
+              active provider from the Markets tab.
             </Text>
             <StatusRow
-              label="Status"
-              value={tradingSessionLabel(tradingSession.status)}
+              label="Provider"
+              value={
+                preferences.selectedPerpsProvider === 'flash'
+                  ? 'Flash Trade v2'
+                  : 'Drift'
+              }
             />
-            <StatusRow label="Network" value="Drift devnet" />
-            {tradingSession.tradingWalletAddress ? (
-              <StatusRow
-                label="Address"
-                selectable
-                value={tradingSession.tradingWalletAddress}
-              />
-            ) : null}
-            <Button
-              disabled={
-                tradingSession.status === 'unavailable' ||
-                tradingSession.status === 'identity-mismatch'
-              }
-              label={
-                tradingSession.status === 'ready'
-                  ? 'Lock trading wallet'
-                  : 'Unlock trading wallet'
-              }
-              loading={tradingSession.status === 'unlocking'}
-              onPress={() =>
-                void (tradingSession.status === 'ready'
-                  ? tradingSession.lock()
-                  : tradingSession.unlock())
-              }
-              variant="secondary"
-            />
+            <StatusRow label="Network" value="Solana mainnet" />
+            <StatusRow label="Market access" value="Public" />
           </View>
         </View>
 
@@ -217,44 +195,6 @@ const styles = StyleSheet.create({
   },
 });
 
-function tradingSessionMessage(
-  status: ReturnType<typeof useTradingSession>['status'],
-): string {
-  switch (status) {
-    case 'unavailable':
-      return 'Waiting for your embedded Solana wallet.';
-    case 'locked':
-      return 'Unlock with one explicit message signature to connect Drift devnet.';
-    case 'unlocking':
-      return 'Deriving the local trading wallet and checking Drift devnet…';
-    case 'ready':
-      return 'Connected to Drift devnet. The signing key is held in memory only.';
-    case 'identity-mismatch':
-      return 'The derived wallet does not match this account’s recorded identity. Trading is blocked.';
-    case 'error':
-      return 'The trading wallet or Drift devnet could not be verified. Try again.';
-  }
-}
-
-function tradingSessionLabel(
-  status: ReturnType<typeof useTradingSession>['status'],
-): string {
-  switch (status) {
-    case 'unavailable':
-      return 'Waiting for Privy wallet';
-    case 'locked':
-      return 'Locked';
-    case 'unlocking':
-      return 'Connecting';
-    case 'ready':
-      return 'Ready';
-    case 'identity-mismatch':
-      return 'Identity mismatch';
-    case 'error':
-      return 'Connection failed';
-  }
-}
-
 function walletProvisioningLabel(
   status: ReturnType<typeof useWalletProvisioning>['status'],
 ): string {
@@ -281,7 +221,7 @@ function walletProvisioningMessage(
     case 'provisioning':
       return 'Privy is creating or restoring the embedded Solana wallet.';
     case 'ready':
-      return 'Available. It signs one explicit derivation message; trades use the separate wallet below.';
+      return 'Available. Market browsing is public; signing is requested only for a confirmed trade.';
     case 'needs-recovery':
       return 'Privy requires wallet recovery before trading can continue.';
     case 'error':

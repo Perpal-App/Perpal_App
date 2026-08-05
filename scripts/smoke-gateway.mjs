@@ -34,7 +34,7 @@ function signedHeaders(body, operation, idempotencyKey = '') {
     buildGatewaySigningMessage({
       bodyHash,
       idempotencyKey,
-      network: 'devnet',
+      network: 'mainnet',
       nonce,
       operation,
       timestamp,
@@ -44,7 +44,7 @@ function signedHeaders(body, operation, idempotencyKey = '') {
 
   return {
     'content-type': 'application/json',
-    [gatewayHeaders.network]: 'devnet',
+    [gatewayHeaders.network]: 'mainnet',
     [gatewayHeaders.nonce]: nonce,
     [gatewayHeaders.publicKey]: bytesToHex(publicKey),
     [gatewayHeaders.signature]: bytesToHex(signature),
@@ -131,7 +131,7 @@ try {
     spanId: randomUUID(),
     operation: 'gateway.smoke',
     deviceClass: 'unknown',
-    network: 'devnet',
+    network: 'mainnet',
     outcome: 'ok',
     durationMs: 0,
   });

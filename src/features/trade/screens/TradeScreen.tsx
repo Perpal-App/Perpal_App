@@ -1,121 +1,176 @@
-import { useRouter } from 'expo-router';
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
-import { BuildTargetBadge } from '@/features/diagnostics/components/BuildTargetBadge';
-import { useTradingSession } from '@/integrations/perps/drift/trading-session-provider';
-import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
+import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
+import { formatAmount } from '@/domain/money/amount';
+import { usePublicMarkets } from '@/features/trade/hooks/usePublicMarkets';
+import {
+  listMainnetMarkets,
+  type MainnetMarket,
+} from '@/integrations/perps/markets/mainnetCatalog';
+import type { PublicMarketPrice } from '@/integrations/perps/markets/publicMarketData';
+import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
-/**
- * Readiness surface for the direct Drift prototype. Only live implementation
- * state is shown; price, funding, quote, and order values remain absent until a
- * venue adapter actually supplies sourced and timestamped market data.
- */
 export function TradeScreen() {
-  const router = useRouter();
-  const walletProvisioning = useWalletProvisioning();
-  const tradingSession = useTradingSession();
+  const config = readAppConfig();
+  const preferences = useAppPreferences();
+  const provider = preferences.selectedPerpsProvider;
+  const markets = useMemo(() => listMainnetMarkets(provider), [provider]);
+  const marketDataUrl = config.ok ? config.value.api.marketDataUrl : '';
+  const publicMarkets = usePublicMarkets(marketDataUrl);
+  const prices = useMemo(
+    () => new Map(publicMarkets.prices.map((price) => [price.symbol, price])),
+    [publicMarkets.prices],
+  );
 
   return (
     <AppScreen>
       <View style={styles.container}>
         <View style={styles.header}>
           <Text accessibilityRole="header" style={styles.title}>
-            Trade
+            Markets
           </Text>
-          <Text style={styles.subtitle}>Execution readiness</Text>
+          <Text style={styles.subtitle}>Solana mainnet perpetuals</Text>
         </View>
 
-        <View style={styles.body}>
-          <BuildTargetBadge />
-
-          <View style={styles.panel}>
-            <Text accessibilityRole="header" style={styles.panelTitle}>
-              SOL-PERP
-            </Text>
-            <StatusRow label="Venue" value="Drift devnet" />
-            <StatusRow
-              label="Drift subscription"
-              value={tradingWalletLabel(tradingSession.status)}
-            />
-            <StatusRow label="Market-data adapter" value="Not implemented" />
-            <StatusRow label="Live price" value="Unavailable" />
-            <StatusRow label="Funding rate" value="Unavailable" />
-            <StatusRow label="Oracle time" value="Unavailable" />
-            <Text selectable style={styles.note}>
-              The session can subscribe to Drift accounts, but no normalized,
-              sourced market-data adapter exposes values to this screen yet.
-            </Text>
+        <View style={styles.providerPanel}>
+          <Text accessibilityRole="header" style={styles.sectionTitle}>
+            Trading provider
+          </Text>
+          <View style={styles.providerButtons}>
+            <View style={styles.providerButton}>
+              <ProviderButton
+                label="Flash Trade v2"
+                provider="flash"
+                selected={provider}
+                select={preferences.selectPerpsProvider}
+              />
+            </View>
+            <View style={styles.providerButton}>
+              <ProviderButton
+                label="Drift"
+                provider="drift"
+                selected={provider}
+                select={preferences.selectPerpsProvider}
+              />
+            </View>
           </View>
+          <StatusRow label="Network" value="Solana mainnet" />
+          <StatusRow
+            label="Market access"
+            value="Public · no wallet signature"
+          />
+        </View>
 
-          <View style={styles.panel}>
-            <Text accessibilityRole="header" style={styles.panelTitle}>
-              Confirmation readiness
-            </Text>
-            <StatusRow
-              label="Privy wallet"
-              value={embeddedWalletLabel(walletProvisioning.status)}
-            />
-            <StatusRow
-              label="Trading wallet"
-              value={tradingWalletLabel(tradingSession.status)}
-            />
-            <StatusRow label="Live quote" value="Not implemented" />
-            <StatusRow label="Intent verification" value="Not implemented" />
-            <StatusRow label="Order submission" value="Blocked" />
-            <Text selectable style={styles.note}>
-              Before signing, this screen must show side, size, price, leverage,
-              collateral, fees, liquidation risk, slippage, and quote expiry.
+        {publicMarkets.status === 'loading' ? (
+          <View accessibilityLabel="Loading mainnet markets" style={styles.loading}>
+            <IOSLoader size="large" />
+          </View>
+        ) : null}
+
+        {publicMarkets.status === 'error' ? (
+          <View accessibilityRole="alert" style={styles.errorPanel}>
+            <Text style={styles.errorTitle}>Markets unavailable</Text>
+            <Text style={styles.note}>
+              Check your connection and retry. Wallet access is not involved.
             </Text>
             <Button
-              label="Review wallet session"
-              onPress={() => router.navigate('/account')}
+              label="Retry market data"
+              onPress={() => void publicMarkets.refresh()}
               variant="secondary"
             />
           </View>
+        ) : null}
+
+        <View style={styles.marketList}>
+          {markets.map((market) => (
+            <MarketCard
+              key={market.symbol}
+              market={market}
+              price={prices.get(market.symbol) ?? null}
+            />
+          ))}
         </View>
+
+        <Text style={styles.footerNote}>
+          Prices load independently of Privy. A wallet signature is requested
+          only after you review and confirm a specific order.
+        </Text>
       </View>
     </AppScreen>
   );
 }
 
-function embeddedWalletLabel(
-  status: ReturnType<typeof useWalletProvisioning>['status'],
-): string {
-  switch (status) {
-    case 'unauthenticated':
-      return 'Signed out';
-    case 'provisioning':
-      return 'Creating or restoring';
-    case 'ready':
-      return 'Ready';
-    case 'needs-recovery':
-      return 'Recovery required';
-    case 'error':
-      return 'Unavailable';
-  }
+function ProviderButton({
+  label,
+  provider,
+  selected,
+  select,
+}: {
+  readonly label: string;
+  readonly provider: PerpsProviderId;
+  readonly selected: PerpsProviderId;
+  readonly select: (provider: PerpsProviderId) => void;
+}) {
+  return (
+    <Button
+      label={label}
+      onPress={() => select(provider)}
+      variant={selected === provider ? 'primary' : 'secondary'}
+    />
+  );
 }
 
-function tradingWalletLabel(
-  status: ReturnType<typeof useTradingSession>['status'],
-): string {
-  switch (status) {
-    case 'unavailable':
-      return 'Waiting for Privy wallet';
-    case 'locked':
-      return 'Locked';
-    case 'unlocking':
-      return 'Connecting';
-    case 'ready':
-      return 'Ready';
-    case 'identity-mismatch':
-      return 'Identity mismatch';
-    case 'error':
-      return 'Connection failed';
-  }
+function MarketCard({
+  market,
+  price,
+}: {
+  readonly market: MainnetMarket;
+  readonly price: PublicMarketPrice | null;
+}) {
+  return (
+    <View style={styles.marketCard}>
+      <View style={styles.marketHeader}>
+        <View>
+          <Text accessibilityRole="header" style={styles.marketSymbol}>
+            {market.symbol}
+          </Text>
+          <Text style={styles.providerLabel}>{market.providerLabel}</Text>
+        </View>
+        <Text style={styles.marketPrice}>
+          {price === null ? '—' : `$${formatAmount(price.price)}`}
+        </Text>
+      </View>
+      <StatusRow
+        label="Confidence"
+        value={price === null ? '—' : `±$${formatAmount(price.confidence)}`}
+      />
+      <StatusRow
+        label="Updated"
+        value={
+          price === null
+            ? 'Loading'
+            : price.stale
+              ? 'Updating'
+              : new Date(price.publishedAtMs).toLocaleTimeString()
+        }
+      />
+      <StatusRow
+        label="Max leverage"
+        value={
+          market.maxLeverage === null
+            ? 'Set by provider risk tier'
+            : `Up to ${market.maxLeverage}×`
+        }
+      />
+      <StatusRow label="Price source" value={price?.source ?? 'Pyth Hermes'} />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -127,6 +182,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
+    gap: spacing.lg,
   },
   header: {
     paddingVertical: spacing.sm,
@@ -137,15 +193,32 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     ...typography.bodyCompact,
-    paddingTop: spacing.xxs,
+    marginTop: spacing.xxs,
     color: colors.textSecondary,
   },
-  body: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    gap: spacing.lg,
+  providerPanel: {
+    gap: spacing.md,
+    paddingBottom: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  panel: {
+  sectionTitle: {
+    ...typography.heading,
+    color: colors.textPrimary,
+  },
+  providerButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  providerButton: {
+    flex: 1,
+  },
+  loading: {
+    minHeight: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorPanel: {
     gap: spacing.md,
     padding: spacing.lg,
     borderWidth: StyleSheet.hairlineWidth,
@@ -153,11 +226,47 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: colors.surface,
   },
-  panelTitle: {
+  errorTitle: {
     ...typography.heading,
     color: colors.textPrimary,
   },
   note: {
+    ...typography.bodyCompact,
+    color: colors.textSecondary,
+  },
+  marketList: {
+    gap: spacing.md,
+  },
+  marketCard: {
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+  },
+  marketHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  marketSymbol: {
+    ...typography.heading,
+    color: colors.textPrimary,
+  },
+  providerLabel: {
+    ...typography.bodyCompact,
+    marginTop: spacing.xxs,
+    color: colors.textMuted,
+  },
+  marketPrice: {
+    ...typography.heading,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+    textAlign: 'right',
+  },
+  footerNote: {
     ...typography.bodyCompact,
     color: colors.textSecondary,
   },

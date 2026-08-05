@@ -4,11 +4,9 @@ const expoConfig = require('eslint-config-expo/flat');
 
 // Venue isolation is enforced here rather than left to code review.
 //
-// Devnet trades on Drift, mainnet trades on Flash. They are separate protocols
-// with separate SDKs and separate pinned web3.js copies, so the only place either
-// SDK may be imported is its own adapter directory. Everything above the adapter
-// boundary talks to the `PerpsVenue` port, which means a devnet build cannot
-// accidentally reach mainnet code and vice versa.
+// Drift and Flash are separate protocols with separate SDKs and pinned web3.js
+// copies, so each SDK may be imported only by its own adapter. Everything above
+// the adapter boundary talks to the `PerpsVenue` port.
 const DRIFT_SDK = ['@drift-labs/*'];
 const FLASH_SDK = ['@flash_trade/*'];
 const UMBRA_SDK = ['@umbra-privacy/*'];
@@ -49,19 +47,19 @@ module.exports = defineConfig([
   },
 
   // The Drift adapter may not reach into Flash, and vice versa. Neither may
-  // import the other's SDK, which is what keeps the two builds disjoint.
+  // import the other's SDK.
   {
     files: ['src/integrations/perps/drift/**'],
     rules: restrict(
       [...FLASH_SDK, 'src/integrations/perps/flash/**', '@/integrations/perps/flash/**'],
-      'The Drift devnet adapter must not reference Flash. Venue adapters are mutually isolated.',
+      'The Drift adapter must not reference Flash. Venue adapters are mutually isolated.',
     ),
   },
   {
     files: ['src/integrations/perps/flash/**'],
     rules: restrict(
       [...DRIFT_SDK, 'src/integrations/perps/drift/**', '@/integrations/perps/drift/**'],
-      'The Flash mainnet adapter must not reference Drift. Venue adapters are mutually isolated.',
+      'The Flash adapter must not reference Drift. Venue adapters are mutually isolated.',
     ),
   },
 

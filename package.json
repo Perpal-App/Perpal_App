@@ -28,7 +28,6 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "smoke:gateway": "node scripts/smoke-gateway.mjs",
-    "env:devnet": "node scripts/use-env.mjs devnet",
     "env:mainnet": "node scripts/use-env.mjs mainnet",
     "lint": "eslint .",
     "check:file-size": "node scripts/check-file-size.mjs",
@@ -37,8 +36,9 @@
     "doctor": "expo-doctor"
   },
   "dependencies": {
-    "@drift-labs/sdk": "2.163.0-beta.13",
+    "@drift-labs/sdk": "2.156.0",
     "@ethersproject/shims": "^5.8.0",
+    "@flash_trade/flash-sdk-v2": "^1.1.1",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
     "@privy-io/expo": "0.70.6",

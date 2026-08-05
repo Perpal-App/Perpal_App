@@ -6,7 +6,7 @@ const VALID = {
   spanId: 'span-1',
   operation: 'rpc.getSlot',
   deviceClass: 'mid',
-  network: 'devnet',
+  network: 'mainnet',
   outcome: 'ok',
   durationMs: 42,
 } as const;
