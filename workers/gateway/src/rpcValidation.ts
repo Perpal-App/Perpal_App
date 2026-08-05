@@ -32,6 +32,12 @@ export type RpcValidationResult =
     }
   | RpcValidationFailure;
 
+const PUBLIC_READ_METHODS = new Set([
+  'getAccountInfo',
+  'getMultipleAccounts',
+  'getSlot',
+]);
+
 function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
@@ -123,4 +129,27 @@ export function validateRpcPayload(value: unknown): RpcValidationResult {
       ? GATEWAY_RPC_BATCH_OPERATION
       : (typedRequests[0]?.method ?? operation),
   };
+}
+
+export function validatePublicRpcPayload(value: unknown): RpcValidationResult {
+  const validation = validateRpcPayload(value);
+
+  if (!validation.ok) {
+    return validation;
+  }
+
+  const requests = Array.isArray(value) ? value : [value];
+  const unsupported = (requests as readonly JsonRpcRequest[]).find(
+    (request) => !PUBLIC_READ_METHODS.has(request.method),
+  );
+
+  return unsupported === undefined
+    ? validation
+    : {
+        ok: false,
+        code: 'method_not_allowed',
+        message: `Method "${unsupported.method}" is not available without authorization.`,
+        operation: unsupported.method,
+        status: 403,
+      };
 }

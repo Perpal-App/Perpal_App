@@ -1,4 +1,5 @@
 export const MARKET_DATA_PATH = '/v1/markets';
+export const MARKET_STREAM_PATH = `${MARKET_DATA_PATH}/stream`;
 
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const UPSTREAM_TIMEOUT_MS = 5_000;
@@ -30,23 +31,14 @@ export type PublicMarketsResponse = {
 export async function fetchMainnetMarkets(
   config: MarketDataConfig,
 ): Promise<PublicMarketsResponse> {
-  const url = new URL('/v2/updates/price/latest', config.origin);
-
-  for (const asset of MARKET_ASSETS) {
-    url.searchParams.append('ids[]', config.feedIds[asset]);
-  }
-
-  url.searchParams.set('parsed', 'true');
-  url.searchParams.set('ignore_invalid_price_ids', 'false');
+  const url = pythUrl('/v2/updates/price/latest', config);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 
   try {
     const response = await fetch(url.toString(), {
-      ...(config.apiKey === null
-        ? {}
-        : { headers: { authorization: `Bearer ${config.apiKey}` } }),
+      headers: pythHeaders(config),
       signal: controller.signal,
     });
 
@@ -60,15 +52,98 @@ export async function fetchMainnetMarkets(
       throw new Error('Pyth Hermes returned an oversized response.');
     }
 
-    return {
-      network: 'mainnet',
-      source: 'Pyth Hermes',
-      fetchedAtMs: Date.now(),
-      markets: parsePythResponse(JSON.parse(body) as unknown, config.feedIds),
-    };
+    return marketResponse(JSON.parse(body) as unknown, config.feedIds);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function streamMainnetMarkets(
+  config: MarketDataConfig,
+  signal: AbortSignal,
+): Promise<Response> {
+  const upstream = await fetch(
+    pythUrl('/v2/updates/price/stream', config).toString(),
+    {
+      headers: { ...pythHeaders(config), accept: 'text/event-stream' },
+      signal,
+    },
+  );
+
+  if (!upstream.ok || upstream.body === null) {
+    throw new Error(`Pyth Hermes stream returned HTTP ${upstream.status}.`);
+  }
+
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = '';
+
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(': connected\n\n'));
+    },
+    async pull(controller) {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          controller.close();
+          return;
+        }
+
+        buffer = `${buffer}${decoder.decode(value, { stream: true })}`.replaceAll(
+          '\r\n',
+          '\n',
+        );
+        const boundary = buffer.lastIndexOf('\n\n');
+
+        if (boundary < 0) {
+          continue;
+        }
+
+        const frames = buffer.slice(0, boundary).split('\n\n');
+        buffer = buffer.slice(boundary + 2);
+
+        for (const frame of frames) {
+          const update = parsePythStreamFrame(frame, config.feedIds);
+
+          if (update !== null) {
+            controller.enqueue(
+              encoder.encode(`event: prices\ndata: ${JSON.stringify(update)}\n\n`),
+            );
+          }
+        }
+
+        return;
+      }
+    },
+    cancel() {
+      return reader.cancel();
+    },
+  });
+
+  return new Response(body, {
+    headers: {
+      'cache-control': 'no-cache, no-store, no-transform',
+      'content-type': 'text/event-stream; charset=utf-8',
+    },
+  });
+}
+
+export function parsePythStreamFrame(
+  frame: string,
+  feedIds: Readonly<Record<MarketAsset, string>>,
+): PublicMarketsResponse | null {
+  const data = frame
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n');
+
+  return data.length === 0
+    ? null
+    : marketResponse(JSON.parse(data) as unknown, feedIds);
 }
 
 export function parsePythResponse(
@@ -153,4 +228,34 @@ function integerString(value: unknown, allowZero: boolean): string | null {
 
   const parsed = BigInt(value);
   return parsed > 0n || (allowZero && parsed === 0n) ? value : null;
+}
+
+function marketResponse(
+  value: unknown,
+  feedIds: Readonly<Record<MarketAsset, string>>,
+): PublicMarketsResponse {
+  return {
+    network: 'mainnet',
+    source: 'Pyth Hermes',
+    fetchedAtMs: Date.now(),
+    markets: parsePythResponse(value, feedIds),
+  };
+}
+
+function pythUrl(path: string, config: MarketDataConfig): URL {
+  const url = new URL(path, config.origin);
+
+  for (const asset of MARKET_ASSETS) {
+    url.searchParams.append('ids[]', config.feedIds[asset]);
+  }
+
+  url.searchParams.set('parsed', 'true');
+  url.searchParams.set('ignore_invalid_price_ids', 'false');
+  return url;
+}
+
+function pythHeaders(config: MarketDataConfig): Record<string, string> {
+  return config.apiKey === null
+    ? {}
+    : { authorization: `Bearer ${config.apiKey}` };
 }

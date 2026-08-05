@@ -15,9 +15,13 @@ export type AppConfig = {
   readonly api: {
     readonly origin: string;
     readonly rpcPath: string;
+    readonly publicRpcPath: string;
     readonly marketDataPath: string;
+    readonly marketStreamPath: string;
     readonly rpcUrl: string;
+    readonly publicRpcUrl: string;
     readonly marketDataUrl: string;
+    readonly marketStreamUrl: string;
   };
   readonly telemetry: {
     readonly enabled: boolean;
@@ -38,7 +42,9 @@ export type RawAppEnv = {
   readonly cluster: string;
   readonly apiOrigin: string;
   readonly rpcPath: string;
+  readonly publicRpcPath: string;
   readonly marketDataPath: string;
+  readonly marketStreamPath: string;
   readonly driftProgramId: string;
   readonly flashProgramId: string;
   readonly telemetryEnabled: string;
@@ -52,8 +58,11 @@ export function readRawAppEnv(): RawAppEnv {
     cluster: process.env.EXPO_PUBLIC_SOLANA_CLUSTER?.trim() ?? '',
     apiOrigin: process.env.EXPO_PUBLIC_API_ORIGIN?.trim() ?? '',
     rpcPath: process.env.EXPO_PUBLIC_RPC_PATH?.trim() ?? '',
+    publicRpcPath: process.env.EXPO_PUBLIC_PUBLIC_RPC_PATH?.trim() ?? '',
     marketDataPath:
       process.env.EXPO_PUBLIC_MARKET_DATA_PATH?.trim() ?? '',
+    marketStreamPath:
+      process.env.EXPO_PUBLIC_MARKET_STREAM_PATH?.trim() ?? '',
     driftProgramId:
       process.env.EXPO_PUBLIC_DRIFT_PROGRAM_ID?.trim() ?? '',
     flashProgramId:
@@ -97,7 +106,11 @@ function validateOrigin(raw: string, issues: ConfigIssue[]): string {
 
 function validatePath(
   raw: string,
-  variable: 'EXPO_PUBLIC_RPC_PATH' | 'EXPO_PUBLIC_MARKET_DATA_PATH',
+  variable:
+    | 'EXPO_PUBLIC_RPC_PATH'
+    | 'EXPO_PUBLIC_PUBLIC_RPC_PATH'
+    | 'EXPO_PUBLIC_MARKET_DATA_PATH'
+    | 'EXPO_PUBLIC_MARKET_STREAM_PATH',
   issues: ConfigIssue[],
 ): string {
   if (raw.length === 0 || !raw.startsWith('/') || raw.endsWith('/')) {
@@ -158,9 +171,19 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
 
   const origin = validateOrigin(raw.apiOrigin, issues);
   const rpcPath = validatePath(raw.rpcPath, 'EXPO_PUBLIC_RPC_PATH', issues);
+  const publicRpcPath = validatePath(
+    raw.publicRpcPath,
+    'EXPO_PUBLIC_PUBLIC_RPC_PATH',
+    issues,
+  );
   const marketDataPath = validatePath(
     raw.marketDataPath,
     'EXPO_PUBLIC_MARKET_DATA_PATH',
+    issues,
+  );
+  const marketStreamPath = validatePath(
+    raw.marketStreamPath,
+    'EXPO_PUBLIC_MARKET_STREAM_PATH',
     issues,
   );
   const driftProgramId = validateAddress(
@@ -199,9 +222,13 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
       api: {
         origin,
         rpcPath,
+        publicRpcPath,
         marketDataPath,
+        marketStreamPath,
         rpcUrl: `${origin}${rpcPath}`,
+        publicRpcUrl: `${origin}${publicRpcPath}`,
         marketDataUrl: `${origin}${marketDataPath}`,
+        marketStreamUrl: `${origin}${marketStreamPath}`,
       },
       telemetry: {
         enabled: raw.telemetryEnabled === 'true',

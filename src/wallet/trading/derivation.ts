@@ -2,7 +2,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha512 } from '@noble/hashes/sha2.js';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
-import { base58 } from '@scure/base';
+import { base58, base64 } from '@scure/base';
 
 /**
  * Deterministic derivation of the trading wallet (T) from the main wallet (M).
@@ -20,20 +20,20 @@ import { base58 } from '@scure/base';
  * callers in serialized form.
  */
 
-export const DERIVATION_VERSION = 1 as const;
+export const DERIVATION_VERSION = 2 as const;
 
-export type DerivationVersion = typeof DERIVATION_VERSION;
+export type DerivationVersion = 1 | typeof DERIVATION_VERSION;
 
 /**
  * Domain-separated message M signs. It is fixed and contains the version, so a
  * v1 signature can never be reinterpreted as a v2 input.
  */
 export const DERIVATION_MESSAGE =
-  'perpal.trading-wallet.derivation.v1\n' +
+  'perpal.trading-wallet.derivation.v2\n' +
   'Signing this message derives your private trading wallet.\n' +
   'It authorises no transaction and moves no funds.';
 
-const HKDF_INFO = 'perpal/trading-wallet/v1/ed25519';
+const HKDF_INFO = 'perpal/trading-wallet/v2/ed25519';
 
 /** Ed25519 signatures are deterministic (RFC 8032), which is what makes this work. */
 const EXPECTED_SIGNATURE_BYTES = 64;
@@ -42,6 +42,28 @@ export class DerivationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DerivationError';
+  }
+}
+
+export function verifyDerivationSignature(
+  encodedSignature: string,
+  mainWalletAddress: string,
+): Uint8Array {
+  try {
+    const signature = base64.decode(encodedSignature);
+    const publicKey = base58.decode(mainWalletAddress);
+
+    if (
+      signature.length !== EXPECTED_SIGNATURE_BYTES ||
+      publicKey.length !== 32 ||
+      !ed25519.verify(signature, utf8ToBytes(DERIVATION_MESSAGE), publicKey)
+    ) {
+      throw new Error('invalid signature');
+    }
+
+    return signature;
+  } catch {
+    throw new DerivationError('Privy returned an invalid derivation signature.');
   }
 }
 
@@ -63,14 +85,14 @@ export function parseTradingWalletIdentity(
     const candidate = parsed as Record<string, unknown>;
 
     if (
-      candidate.version !== DERIVATION_VERSION ||
+      (candidate.version !== 1 && candidate.version !== DERIVATION_VERSION) ||
       typeof candidate.address !== 'string' ||
       !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/u.test(candidate.address)
     ) {
       return null;
     }
 
-    return { address: candidate.address, version: DERIVATION_VERSION };
+    return { address: candidate.address, version: candidate.version };
   } catch {
     return null;
   }

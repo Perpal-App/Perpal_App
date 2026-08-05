@@ -1,4 +1,7 @@
-import { parsePythResponse } from '../../../workers/gateway/src/marketData';
+import {
+  parsePythResponse,
+  parsePythStreamFrame,
+} from '../../../workers/gateway/src/marketData';
 
 const FEEDS = {
   BTC: 'e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43',
@@ -33,6 +36,19 @@ describe('public market-data trust boundary', () => {
     expect(() =>
       parsePythResponse({ parsed: [update(FEEDS.SOL, '1')] }, FEEDS),
     ).toThrow();
+
+    const streamed = parsePythStreamFrame(
+      `data: ${JSON.stringify({
+        parsed: [
+          update(FEEDS.SOL, '7373703007'),
+          update(FEEDS.BTC, '11800000000000'),
+          update(FEEDS.ETH, '400000000000'),
+        ],
+      })}`,
+      FEEDS,
+    );
+
+    expect(streamed?.markets[0]?.symbol).toBe('BTC-PERP');
   });
 });
 

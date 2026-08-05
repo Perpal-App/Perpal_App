@@ -1,3 +1,5 @@
+import { fetch } from 'expo/fetch';
+
 import {
   amountFromBaseUnits,
   type Amount,
@@ -5,8 +7,9 @@ import {
 } from '@/domain/money/amount';
 
 const EXPECTED_SYMBOLS = ['BTC-PERP', 'ETH-PERP', 'SOL-PERP'] as const;
-const MAX_PRICE_AGE_MS = 60_000;
+const MAX_PRICE_AGE_MS = 5_000;
 const MAX_FUTURE_SKEW_MS = 10_000;
+const STREAM_IDLE_TIMEOUT_MS = 10_000;
 
 export type PublicMarketSymbol = (typeof EXPECTED_SYMBOLS)[number];
 
@@ -30,6 +33,79 @@ export async function fetchPublicMarketPrices(
   }
 
   return parsePublicMarketPrices(await response.json(), Date.now());
+}
+
+export async function streamPublicMarketPrices(
+  url: string,
+  signal: AbortSignal,
+  onPrices: (prices: readonly PublicMarketPrice[]) => void,
+): Promise<void> {
+  const response = await fetch(url, {
+    headers: { accept: 'text/event-stream' },
+    signal,
+  });
+
+  if (!response.ok || response.body === null) {
+    throw new Error(`Market stream returned HTTP ${response.status}.`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await readStreamChunk(reader);
+
+      if (done) {
+        throw new Error('Market stream ended.');
+      }
+
+      buffer = `${buffer}${decoder.decode(value)}`.replaceAll('\r\n', '\n');
+      const boundary = buffer.lastIndexOf('\n\n');
+
+      if (boundary < 0) {
+        continue;
+      }
+
+      const frames = buffer.slice(0, boundary).split('\n\n');
+      buffer = buffer.slice(boundary + 2);
+
+      for (const frame of frames) {
+        const prices = parsePublicMarketStreamFrame(frame, Date.now());
+
+        if (prices !== null) {
+          onPrices(prices);
+        }
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+export function parsePublicMarketStreamFrame(
+  frame: string,
+  nowMs: number,
+): readonly PublicMarketPrice[] | null {
+  const lines = frame.split(/\r?\n/u);
+  const event = lines.find((line) => line.startsWith('event:'));
+
+  if (event?.slice(6).trim() !== 'prices') {
+    return null;
+  }
+
+  const data = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n');
+
+  if (data.length === 0) {
+    throw new Error('Market stream returned an empty price event.');
+  }
+
+  return parsePublicMarketPrices(JSON.parse(data) as unknown, nowMs);
 }
 
 export function parsePublicMarketPrices(
@@ -131,4 +207,26 @@ function integer(value: unknown, allowZero: boolean): bigint | null {
 
   const parsed = BigInt(value);
   return parsed > 0n || (allowZero && parsed === 0n) ? parsed : null;
+}
+
+async function readStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Market stream stopped updating.')),
+          STREAM_IDLE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
 }

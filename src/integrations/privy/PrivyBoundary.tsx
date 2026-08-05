@@ -29,6 +29,11 @@ export function PrivyBoundary({ children }: PrivyBoundaryProps) {
     <PrivyProvider
       appId={config.value.appId}
       clientId={config.value.clientId}
+      config={{
+        embedded: {
+          solana: { createOnLogin: 'users-without-wallets' },
+        },
+      }}
     >
       {children}
     </PrivyProvider>

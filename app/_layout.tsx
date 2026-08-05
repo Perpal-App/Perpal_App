@@ -12,6 +12,7 @@ import { PrivyBoundary } from '@/integrations/privy/PrivyBoundary';
 import { WalletProvisioningProvider } from '@/integrations/privy/useWalletProvisioning';
 import { AuthNavigationGate } from '@/navigation/AuthNavigationGate';
 import { AppPreferencesProvider } from '@/storage/AppPreferencesProvider';
+import { TradingSessionProvider } from '@/wallet/trading/TradingSessionProvider';
 
 /**
  * Root shell. The safe-area provider owns device metrics, Privy owns encrypted
@@ -32,9 +33,11 @@ export default function RootLayout() {
         {config.ok ? (
           <PrivyBoundary>
             <WalletProvisioningProvider>
-              <AppPreferencesProvider>
-                <AuthNavigationGate />
-              </AppPreferencesProvider>
+              <TradingSessionProvider>
+                <AppPreferencesProvider>
+                  <AuthNavigationGate />
+                </AppPreferencesProvider>
+              </TradingSessionProvider>
             </WalletProvisioningProvider>
           </PrivyBoundary>
         ) : (

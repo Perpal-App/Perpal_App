@@ -6,8 +6,10 @@ import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
-import { formatAmount } from '@/domain/money/amount';
+import { formatAmount, type Amount } from '@/domain/money/amount';
+import { useDriftVenueMarkets } from '@/features/trade/hooks/useDriftVenueMarkets';
 import { usePublicMarkets } from '@/features/trade/hooks/usePublicMarkets';
+import type { DriftMarketSnapshot } from '@/integrations/perps/drift/driftMarketData';
 import {
   listMainnetMarkets,
   type MainnetMarket,
@@ -22,10 +24,24 @@ export function TradeScreen() {
   const provider = preferences.selectedPerpsProvider;
   const markets = useMemo(() => listMainnetMarkets(provider), [provider]);
   const marketDataUrl = config.ok ? config.value.api.marketDataUrl : '';
-  const publicMarkets = usePublicMarkets(marketDataUrl);
+  const marketStreamUrl = config.ok ? config.value.api.marketStreamUrl : '';
+  const publicRpcUrl = config.ok ? config.value.api.publicRpcUrl : '';
+  const driftProgramId = config.ok ? config.value.perps.driftProgramId : '';
+  const publicMarkets = usePublicMarkets(marketDataUrl, marketStreamUrl);
+  const venueMarkets = useDriftVenueMarkets(
+    provider,
+    publicRpcUrl,
+    driftProgramId,
+    markets,
+    publicMarkets.prices,
+  );
   const prices = useMemo(
     () => new Map(publicMarkets.prices.map((price) => [price.symbol, price])),
     [publicMarkets.prices],
+  );
+  const venueSnapshots = useMemo(
+    () => new Map(venueMarkets.snapshots.map((market) => [market.symbol, market])),
+    [venueMarkets.snapshots],
   );
 
   return (
@@ -65,6 +81,20 @@ export function TradeScreen() {
             label="Market access"
             value="Public · no wallet signature"
           />
+          <StatusRow
+            label="Price feed"
+            value={
+              publicMarkets.streamState === 'live'
+                ? 'Live · Pyth stream'
+                : publicMarkets.streamState === 'connecting'
+                  ? 'Connecting · REST snapshot active'
+                  : 'Reconnecting · latest price retained'
+            }
+          />
+          <StatusRow
+            label="Venue data"
+            value={venueStatus(provider, venueMarkets.status, venueMarkets.snapshots)}
+          />
         </View>
 
         {publicMarkets.status === 'loading' ? (
@@ -93,13 +123,15 @@ export function TradeScreen() {
               key={market.symbol}
               market={market}
               price={prices.get(market.symbol) ?? null}
+              venue={venueSnapshots.get(market.symbol) ?? null}
             />
           ))}
         </View>
 
         <Text style={styles.footerNote}>
-          Prices load independently of Privy. A wallet signature is requested
-          only after you review and confirm a specific order.
+          {provider === 'flash'
+            ? 'Flash venue metrics require the mainnet ER trading endpoint supplied by Flash. Pyth reference prices remain live and need no wallet.'
+            : 'Drift mark, bid, ask, funding, risk, and volume come from live mainnet market accounts. Pyth provides the current oracle input.'}
         </Text>
       </View>
     </AppScreen>
@@ -129,10 +161,14 @@ function ProviderButton({
 function MarketCard({
   market,
   price,
+  venue,
 }: {
   readonly market: MainnetMarket;
   readonly price: PublicMarketPrice | null;
+  readonly venue: DriftMarketSnapshot | null;
 }) {
+  const headlinePrice = venue?.markPrice ?? price?.price ?? null;
+
   return (
     <View style={styles.marketCard}>
       <View style={styles.marketHeader}>
@@ -140,37 +176,128 @@ function MarketCard({
           <Text accessibilityRole="header" style={styles.marketSymbol}>
             {market.symbol}
           </Text>
-          <Text style={styles.providerLabel}>{market.providerLabel}</Text>
+          <Text style={styles.providerLabel}>
+            {venue === null
+              ? `${market.providerLabel} · Pyth reference`
+              : `${market.providerLabel} · mark price`}
+          </Text>
         </View>
         <Text style={styles.marketPrice}>
-          {price === null ? '—' : `$${formatAmount(price.price)}`}
+          {headlinePrice === null ? '—' : `$${formatMarketAmount(headlinePrice)}`}
         </Text>
       </View>
+      {venue === null ? (
+        <ReferenceRows market={market} price={price} />
+      ) : (
+        <DriftRows price={price} venue={venue} />
+      )}
+    </View>
+  );
+}
+
+function ReferenceRows({
+  market,
+  price,
+}: {
+  readonly market: MainnetMarket;
+  readonly price: PublicMarketPrice | null;
+}) {
+  return (
+    <>
       <StatusRow
         label="Confidence"
-        value={price === null ? '—' : `±$${formatAmount(price.confidence)}`}
-      />
-      <StatusRow
-        label="Updated"
         value={
-          price === null
-            ? 'Loading'
-            : price.stale
-              ? 'Updating'
-              : new Date(price.publishedAtMs).toLocaleTimeString()
+          price === null ? '—' : `±$${formatMarketAmount(price.confidence)}`
         }
       />
+      <StatusRow label="Updated" value={priceFreshness(price)} />
       <StatusRow
         label="Max leverage"
         value={
           market.maxLeverage === null
-            ? 'Set by provider risk tier'
+            ? 'Loading provider risk'
             : `Up to ${market.maxLeverage}×`
         }
       />
       <StatusRow label="Price source" value={price?.source ?? 'Pyth Hermes'} />
-    </View>
+    </>
   );
+}
+
+function DriftRows({
+  price,
+  venue,
+}: {
+  readonly price: PublicMarketPrice | null;
+  readonly venue: DriftMarketSnapshot;
+}) {
+  return (
+    <>
+      <StatusRow
+        label="Oracle"
+        value={
+          price === null ? '—' : `$${formatMarketAmount(price.price)} · Pyth`
+        }
+      />
+      <StatusRow
+        label="Bid / ask"
+        value={`$${formatMarketAmount(venue.bidPrice)} / $${formatMarketAmount(venue.askPrice)}`}
+      />
+      <StatusRow
+        label="Funding / hour"
+        value={venue.fundingLabel ?? 'Unavailable'}
+      />
+      <StatusRow
+        label="24h volume"
+        value={`$${formatMarketAmount(venue.volume24h)}`}
+      />
+      <StatusRow
+        label="Initial margin"
+        value={`${formatBasisPoints(venue.initialMarginBps)}%`}
+      />
+      <StatusRow label="Venue slot" value={venue.slot.toLocaleString()} />
+    </>
+  );
+}
+
+function venueStatus(
+  provider: PerpsProviderId,
+  status: 'idle' | 'loading' | 'ready' | 'error',
+  snapshots: readonly DriftMarketSnapshot[],
+): string {
+  if (provider === 'flash') {
+    return 'Reference prices · ER endpoint required';
+  }
+
+  if (status === 'ready') {
+    return `Live · slot ${snapshots[0]?.slot.toLocaleString() ?? '—'}`;
+  }
+
+  return status === 'error' ? 'Retrying on-chain accounts' : 'Loading on-chain accounts';
+}
+
+function priceFreshness(price: PublicMarketPrice | null): string {
+  if (price === null) {
+    return 'Loading';
+  }
+
+  return price.stale
+    ? 'Delayed feed'
+    : new Date(price.publishedAtMs).toLocaleTimeString();
+}
+
+function formatMarketAmount(amount: Amount): string {
+  const [whole = '0', fraction] = formatAmount(amount).split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+
+  return fraction === undefined ? grouped : `${grouped}.${fraction}`;
+}
+
+function formatBasisPoints(basisPoints: number): string {
+  const whole = Math.floor(basisPoints / 100);
+  const fraction = (basisPoints % 100).toString().padStart(2, '0').replace(/0+$/u, '');
+
+  return fraction.length === 0 ? whole.toString() : `${whole}.${fraction}`;
 }
 
 const styles = StyleSheet.create({

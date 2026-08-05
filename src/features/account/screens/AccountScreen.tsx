@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
@@ -8,6 +8,10 @@ import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import {
+  useTradingSession,
+  type TradingSessionStatus,
+} from '@/wallet/trading/TradingSessionProvider';
 
 const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
 
@@ -20,6 +24,7 @@ const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
 export function AccountScreen() {
   const auth = usePrivyAuth();
   const walletProvisioning = useWalletProvisioning();
+  const tradingSession = useTradingSession();
   const preferences = useAppPreferences();
   const [signingOut, setSigningOut] = useState(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
@@ -54,6 +59,31 @@ export function AccountScreen() {
       setSigningOut(false);
       setError('Sign out could not be completed. Please try again.');
     }
+  };
+
+  const confirmTradingWalletReplacement = () => {
+    const recovery = tradingSession.recovery;
+
+    if (recovery === null) {
+      return;
+    }
+
+    Alert.alert(
+      'Replace recorded trading wallet?',
+      'Continue only if the previous trading wallet has no funds or positions. This changes Perpal’s recorded wallet identity; it does not move or recover funds.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Replace',
+          style: 'destructive',
+          onPress: () => {
+            void tradingSession.replaceRecordedIdentity().catch(() => {
+              setError('The recorded trading wallet could not be replaced.');
+            });
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -94,6 +124,61 @@ export function AccountScreen() {
                 label="Retry wallet creation"
                 loading={walletProvisioning.isProvisioning}
                 onPress={() => void walletProvisioning.retry()}
+                variant="secondary"
+              />
+            ) : null}
+          </View>
+          <View style={styles.walletPanel}>
+            <Text accessibilityRole="header" style={styles.walletTitle}>
+              Trading wallet
+            </Text>
+            <Text selectable style={styles.walletStatus}>
+              {tradingSessionMessage(tradingSession.status)}
+            </Text>
+            <StatusRow
+              label="Status"
+              value={tradingSessionLabel(tradingSession.status)}
+            />
+            <StatusRow label="Storage" value="Key held in memory only" />
+            {tradingSession.address ? (
+              <StatusRow
+                label="Address"
+                selectable
+                value={tradingSession.address}
+              />
+            ) : null}
+            {tradingSession.recovery ? (
+              <>
+                <StatusRow
+                  label={`Recorded v${tradingSession.recovery.recorded.version}`}
+                  selectable
+                  value={tradingSession.recovery.recorded.address}
+                />
+                <StatusRow
+                  label={`Derived v${tradingSession.recovery.derived.version}`}
+                  selectable
+                  value={tradingSession.recovery.derived.address}
+                />
+                <Button
+                  label="Review wallet replacement"
+                  onPress={confirmTradingWalletReplacement}
+                  variant="secondary"
+                />
+              </>
+            ) : null}
+            {tradingSession.status === 'ready' ? (
+              <Button
+                label="Lock trading wallet"
+                onPress={tradingSession.lock}
+                variant="secondary"
+              />
+            ) : tradingSession.status !== 'waiting-for-wallet' &&
+              tradingSession.status !== 'recovery-required' ? (
+              <Button
+                disabled={tradingSession.status === 'unlocking'}
+                label="Unlock trading wallet"
+                loading={tradingSession.status === 'unlocking'}
+                onPress={() => void tradingSession.unlock()}
                 variant="secondary"
               />
             ) : null}
@@ -226,5 +311,39 @@ function walletProvisioningMessage(
       return 'Privy requires wallet recovery before trading can continue.';
     case 'error':
       return 'Creation failed. Confirm embedded Solana wallets are enabled in Privy, then retry.';
+  }
+}
+
+function tradingSessionLabel(status: TradingSessionStatus): string {
+  switch (status) {
+    case 'waiting-for-wallet':
+      return 'Waiting for Privy wallet';
+    case 'locked':
+      return 'Locked';
+    case 'unlocking':
+      return 'Awaiting approval';
+    case 'ready':
+      return 'Ready';
+    case 'recovery-required':
+      return 'Recovery required';
+    case 'error':
+      return 'Unlock failed';
+  }
+}
+
+function tradingSessionMessage(status: TradingSessionStatus): string {
+  switch (status) {
+    case 'waiting-for-wallet':
+      return 'The embedded Solana wallet must be ready before trading can unlock.';
+    case 'locked':
+      return 'Unlock with one explicit, non-transaction Privy message signature. No market data requires this.';
+    case 'unlocking':
+      return 'Approve the derivation message in Privy. It authorizes no transaction or transfer.';
+    case 'ready':
+      return 'Derived and verified on this device. The signing seed stays in memory and clears on lock or logout.';
+    case 'recovery-required':
+      return 'The corrected derivation does not match the recorded trading identity. Review both addresses before replacing anything.';
+    case 'error':
+      return 'The signature or stored identity could not be verified. Retry without changing wallets.';
   }
 }

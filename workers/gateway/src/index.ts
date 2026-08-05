@@ -31,8 +31,12 @@ import {
   type JsonRpcRequest,
 } from './rpcValidation';
 import { parseTelemetryEvents, writeTelemetry } from './telemetry';
-import { MARKET_DATA_PATH } from './marketData';
+import { MARKET_DATA_PATH, MARKET_STREAM_PATH } from './marketData';
 import { handlePublicMarketsRequest } from './publicMarketsHandler';
+import {
+  handlePublicRpcRequest,
+  PUBLIC_RPC_PATH,
+} from './publicRpcHandler';
 
 const JSON_HEADERS = { 'content-type': 'application/json' } as const;
 const MAX_RPC_BODY_BYTES = 256 * 1024;
@@ -95,13 +99,18 @@ export default {
       return response;
     };
 
-    if (url.pathname === MARKET_DATA_PATH) {
+    if ([MARKET_DATA_PATH, MARKET_STREAM_PATH].includes(url.pathname)) {
       const result = await handlePublicMarketsRequest(request, env, traceId);
-      return complete(result.response, result.outcome, 'markets.read', {
+      return complete(
+        result.response,
+        result.outcome,
+        url.pathname === MARKET_STREAM_PATH ? 'markets.stream' : 'markets.read',
+        {
         ...(result.upstreamMs === undefined
           ? {}
           : { upstream: result.upstreamMs }),
-      });
+        },
+      );
     }
 
     let config;
@@ -120,6 +129,22 @@ export default {
         ),
         'error',
         'config',
+      );
+    }
+
+    if (url.pathname === PUBLIC_RPC_PATH) {
+      const result = await handlePublicRpcRequest(
+        request,
+        env,
+        getRouter(config.providers),
+        allowedOrigins,
+        traceId,
+      );
+      return complete(
+        result.response,
+        result.outcome,
+        `rpc.public.${result.operation}`,
+        result.upstreamMs === undefined ? {} : { upstream: result.upstreamMs },
       );
     }
 

@@ -74,9 +74,10 @@ function useWalletProvisioningState(): WalletProvisioning {
 
     try {
       await create();
-    } catch {
+    } catch (cause) {
       attemptedRef.current = false;
       setFailed(true);
+      logProvisioningError(cause, wallet.status);
     } finally {
       setCreating(false);
     }
@@ -116,6 +117,24 @@ function useWalletProvisioningState(): WalletProvisioning {
     }),
     [creating, failed, isAuthenticated, retry, wallet],
   );
+}
+
+function logProvisioningError(cause: unknown, walletStatus: string): void {
+  if (!__DEV__) {
+    return;
+  }
+
+  const metadata =
+    typeof cause === 'object' && cause !== null
+      ? (cause as Record<string, unknown>)
+      : null;
+  const code = metadata?.code ?? metadata?.privyErrorCode;
+
+  console.error('[Perpal Privy wallet provisioning failed]', {
+    walletStatus,
+    errorName: cause instanceof Error ? cause.name : typeof cause,
+    ...(typeof code === 'string' ? { errorCode: code } : {}),
+  });
 }
 
 export function WalletProvisioningProvider({

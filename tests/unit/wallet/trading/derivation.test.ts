@@ -1,10 +1,15 @@
+import { ed25519 } from '@noble/curves/ed25519.js';
+import { base58, base64 } from '@scure/base';
+
 import {
+  DERIVATION_MESSAGE,
   DERIVATION_VERSION,
   DerivationError,
   checkTradingWalletIdentity,
   deriveTradingWallet,
   parseTradingWalletIdentity,
   serializeTradingWalletIdentity,
+  verifyDerivationSignature,
   zeroize,
 } from '@/wallet/trading/derivation';
 
@@ -15,6 +20,19 @@ function signature(fill: number): Uint8Array {
 }
 
 describe('deriveTradingWallet', () => {
+  it('accepts only a valid Privy signature from the active main wallet', () => {
+    const secret = new Uint8Array(32).fill(11);
+    const publicKey = ed25519.getPublicKey(secret);
+    const signed = ed25519.sign(new TextEncoder().encode(DERIVATION_MESSAGE), secret);
+
+    expect(
+      verifyDerivationSignature(base64.encode(signed), base58.encode(publicKey)),
+    ).toEqual(signed);
+    expect(() =>
+      verifyDerivationSignature(base64.encode(signature(2)), base58.encode(publicKey)),
+    ).toThrow(DerivationError);
+  });
+
   it('is deterministic: the same signature and salt always give the same wallet', () => {
     const first = deriveTradingWallet(signature(7), SALT);
     const second = deriveTradingWallet(signature(7), SALT);
@@ -90,7 +108,7 @@ describe('checkTradingWalletIdentity', () => {
   });
 
   it('flags a version upgrade separately from a mismatch', () => {
-    const result = checkTradingWalletIdentity({ address: 'AAA', version: 0 as 1 }, derived);
+    const result = checkTradingWalletIdentity({ address: 'AAA', version: 1 }, derived);
 
     expect(result.status).toBe('version-upgrade');
   });
@@ -106,6 +124,9 @@ describe('parseTradingWalletIdentity', () => {
       ),
     ).toEqual({ address, version: DERIVATION_VERSION });
     expect(parseTradingWalletIdentity('{"address":"bad","version":1}')).toBeNull();
+    expect(
+      parseTradingWalletIdentity(JSON.stringify({ address, version: 1 })),
+    ).toEqual({ address, version: 1 });
     expect(parseTradingWalletIdentity('{not json')).toBeNull();
   });
 

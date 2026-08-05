@@ -4,9 +4,16 @@ import {
   type WorkerEnv,
 } from './env';
 import { isOriginAllowed } from './http';
-import { fetchMainnetMarkets, MARKET_DATA_PATH } from './marketData';
+import {
+  fetchMainnetMarkets,
+  MARKET_STREAM_PATH,
+  streamMainnetMarkets,
+} from './marketData';
 
-const JSON_HEADERS = { 'content-type': 'application/json' } as const;
+const JSON_HEADERS = {
+  'cache-control': 'no-store',
+  'content-type': 'application/json',
+} as const;
 
 export type PublicMarketsRouteResult = {
   readonly response: Response;
@@ -19,6 +26,8 @@ export async function handlePublicMarketsRequest(
   env: WorkerEnv,
   traceId: string,
 ): Promise<PublicMarketsRouteResult> {
+  const path = new URL(request.url).pathname;
+
   if (!isOriginAllowed(request, [])) {
     return result(
       errorResponse(403, 'origin_not_allowed', 'Origin is not allowed.', traceId),
@@ -41,7 +50,7 @@ export async function handlePublicMarketsRequest(
   }
 
   const rateLimit = await env.GLOBAL_RATE_LIMITER.limit({
-    key: `mainnet:${MARKET_DATA_PATH}`,
+    key: `mainnet:${path}`,
   });
 
   if (!rateLimit.success) {
@@ -54,8 +63,12 @@ export async function handlePublicMarketsRequest(
   const started = performance.now();
 
   try {
-    const marketData = await fetchMainnetMarkets(resolveMarketDataConfig(env));
-    return result(jsonResponse(marketData), 'ok', performance.now() - started);
+    const config = resolveMarketDataConfig(env);
+    const response =
+      path === MARKET_STREAM_PATH
+        ? await streamMainnetMarkets(config, request.signal)
+        : jsonResponse(await fetchMainnetMarkets(config));
+    return result(response, 'ok', performance.now() - started);
   } catch (cause) {
     const misconfigured = cause instanceof ConfigurationError;
     return result(

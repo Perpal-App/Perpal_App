@@ -1,4 +1,7 @@
-import { parsePublicMarketPrices } from '@/integrations/perps/markets/publicMarketData';
+import {
+  parsePublicMarketPrices,
+  parsePublicMarketStreamFrame,
+} from '@/integrations/perps/markets/publicMarketData';
 
 describe('public mainnet market prices', () => {
   it('normalizes exact prices and applies the freshness gate', () => {
@@ -12,7 +15,7 @@ describe('public mainnet market prices', () => {
           market('SOL-PERP', '7373703007'),
         ],
       },
-      1_775_520_348_000,
+      1_775_520_336_000,
     );
 
     expect(markets[2]).toMatchObject({
@@ -20,6 +23,21 @@ describe('public mainnet market prices', () => {
       price: { baseUnits: 7_373_703_007n, decimals: 8 },
       stale: false,
     });
+
+    const streamed = parsePublicMarketStreamFrame(
+      `event: prices\ndata: ${JSON.stringify({
+        network: 'mainnet',
+        source: 'Pyth Hermes',
+        markets: [
+          market('BTC-PERP', '11800000000000'),
+          market('ETH-PERP', '400000000000'),
+          market('SOL-PERP', '7373703007'),
+        ],
+      })}`,
+      1_775_520_336_000,
+    );
+
+    expect(streamed?.[2]?.symbol).toBe('SOL-PERP');
   });
 });
 

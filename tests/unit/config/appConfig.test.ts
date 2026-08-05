@@ -4,7 +4,9 @@ const VALID: RawAppEnv = {
   cluster: 'mainnet',
   apiOrigin: 'https://gateway.example',
   rpcPath: '/v1/rpc',
+  publicRpcPath: '/v1/rpc/public',
   marketDataPath: '/v1/markets',
+  marketStreamPath: '/v1/markets/stream',
   driftProgramId: '11111111111111111111111111111111',
   flashProgramId: '11111111111111111111111111111111',
   telemetryEnabled: 'false',
@@ -31,8 +33,14 @@ describe('parseAppConfig', () => {
     if (result.ok) {
       expect(result.value.cluster).toBe('mainnet');
       expect(result.value.api.rpcUrl).toBe('https://gateway.example/v1/rpc');
+      expect(result.value.api.publicRpcUrl).toBe(
+        'https://gateway.example/v1/rpc/public',
+      );
       expect(result.value.api.marketDataUrl).toBe(
         'https://gateway.example/v1/markets',
+      );
+      expect(result.value.api.marketStreamUrl).toBe(
+        'https://gateway.example/v1/markets/stream',
       );
     }
   });
