@@ -27,6 +27,7 @@
     "emu:start": "emulator -avd",
     "typecheck": "tsc --noEmit",
     "test": "jest",
+    "smoke:gateway": "node scripts/smoke-gateway.mjs",
     "env:devnet": "node scripts/use-env.mjs devnet",
     "env:mainnet": "node scripts/use-env.mjs mainnet",
     "lint": "eslint .",

@@ -3,6 +3,8 @@ import {
   DerivationError,
   checkTradingWalletIdentity,
   deriveTradingWallet,
+  parseTradingWalletIdentity,
+  serializeTradingWalletIdentity,
   zeroize,
 } from '@/wallet/trading/derivation';
 
@@ -91,5 +93,30 @@ describe('checkTradingWalletIdentity', () => {
     const result = checkTradingWalletIdentity({ address: 'AAA', version: 0 as 1 }, derived);
 
     expect(result.status).toBe('version-upgrade');
+  });
+});
+
+describe('parseTradingWalletIdentity', () => {
+  it('accepts only the current version and a valid base58 address', () => {
+    const address = deriveTradingWallet(signature(4), SALT).address;
+
+    expect(
+      parseTradingWalletIdentity(
+        JSON.stringify({ address, version: DERIVATION_VERSION }),
+      ),
+    ).toEqual({ address, version: DERIVATION_VERSION });
+    expect(parseTradingWalletIdentity('{"address":"bad","version":1}')).toBeNull();
+    expect(parseTradingWalletIdentity('{not json')).toBeNull();
+  });
+
+  it('never serializes derived secret bytes into recovery identity', () => {
+    const derived = deriveTradingWallet(signature(5), SALT);
+    const serialized = serializeTradingWalletIdentity(derived);
+
+    expect(Object.keys(JSON.parse(serialized) as object)).toEqual([
+      'address',
+      'version',
+    ]);
+    expect(serialized).not.toContain('secretKey');
   });
 });

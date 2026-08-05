@@ -45,11 +45,13 @@ describe('gateway signing protocol', () => {
     expect(isValidGatewayNonce('bad nonce with spaces')).toBe(false);
   });
 
-  it('extracts one RPC method and rejects batches or malformed bodies', () => {
+  it('extracts single and bounded batch operations', () => {
     expect(parseGatewayRpcOperation('{"jsonrpc":"2.0","method":"getSlot"}')).toBe(
       'getSlot',
     );
-    expect(parseGatewayRpcOperation('[{"method":"getSlot"}]')).toBeNull();
+    expect(parseGatewayRpcOperation('[{"method":"getSlot"}]')).toBe('rpc.batch');
+    expect(parseGatewayRpcOperation('[]')).toBeNull();
+    expect(parseGatewayRpcOperation('[{"missing":"method"}]')).toBeNull();
     expect(parseGatewayRpcOperation('{not json')).toBeNull();
   });
 });

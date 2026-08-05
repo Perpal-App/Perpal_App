@@ -20,7 +20,11 @@ import {
 import { RedisStore } from './redisStore';
 import { authenticateRequest } from './requestAuth';
 import { dispatchRpc } from './rpcDispatch';
-import { classifyMethod, type MethodClass } from './rpcAllowlist';
+import type { MethodClass } from './rpcAllowlist';
+import {
+  validateRpcPayload,
+  type JsonRpcRequest,
+} from './rpcValidation';
 import { parseTelemetryEvents, writeTelemetry } from './telemetry';
 
 const JSON_HEADERS = { 'content-type': 'application/json' } as const;
@@ -29,33 +33,9 @@ const MAX_TELEMETRY_BODY_BYTES = 16 * 1024;
 
 let router: ProviderRouter | null = null;
 
-type JsonRpcRequest = {
-  readonly jsonrpc: '2.0';
-  readonly id: string | number | null;
-  readonly method: string;
-  readonly params?: unknown;
-};
-
 function getRouter(providers: readonly ProviderEndpoint[]): ProviderRouter {
   router ??= new ProviderRouter(providers, DEFAULT_ROUTER_OPTIONS);
   return router;
-}
-
-function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const id = candidate.id;
-
-  return (
-    candidate.jsonrpc === '2.0' &&
-    typeof candidate.method === 'string' &&
-    candidate.method.length > 0 &&
-    candidate.method.length <= 96 &&
-    (id === null || typeof id === 'string' || typeof id === 'number')
-  );
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -229,48 +209,29 @@ export default {
 
     let operation: string;
     let methodClass: MethodClass | null = null;
+    let batchRequests: readonly JsonRpcRequest[] | undefined;
 
     if (url.pathname === '/v1/rpc') {
-      if (Array.isArray(bodyResult.payload)) {
+      const validation = validateRpcPayload(bodyResult.payload);
+
+      if (!validation.ok) {
         return complete(
           errorResponse(
-            400,
-            'batch_unsupported',
-            'Send one JSON-RPC request per call.',
+            validation.status,
+            validation.code,
+            validation.message,
             traceId,
           ),
           'rejected',
-          'rpc.batch',
+          validation.operation,
         );
       }
 
-      if (!isJsonRpcRequest(bodyResult.payload)) {
-        return complete(
-          errorResponse(
-            400,
-            'invalid_request',
-            'Expected a JSON-RPC 2.0 request.',
-            traceId,
-          ),
-          'rejected',
-          'rpc.invalid',
-        );
-      }
+      operation = validation.operation;
+      methodClass = validation.methodClass;
 
-      operation = bodyResult.payload.method;
-      methodClass = classifyMethod(operation);
-
-      if (methodClass === null) {
-        return complete(
-          errorResponse(
-            403,
-            'method_not_allowed',
-            `Method "${operation}" is not on the gateway allowlist.`,
-            traceId,
-          ),
-          'rejected',
-          operation,
-        );
+      if (validation.batchRequests !== null) {
+        batchRequests = validation.batchRequests;
       }
     } else {
       operation = 'telemetry.write';
@@ -430,7 +391,12 @@ export default {
     const activeRouter = getRouter(config.providers);
 
     try {
-      const result = await dispatchRpc(activeRouter, bodyResult.body, methodClass);
+      const result = await dispatchRpc(
+        activeRouter,
+        bodyResult.body,
+        methodClass,
+        batchRequests,
+      );
       const responseBody = await result.response.text();
 
       if (idempotencyStorageKey !== null) {

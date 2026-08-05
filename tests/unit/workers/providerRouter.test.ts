@@ -5,6 +5,7 @@ import {
   type RouterOptions,
 } from '../../../workers/gateway/src/providerRouter';
 import { classifyMethod, isHedgeable } from '../../../workers/gateway/src/rpcAllowlist';
+import { validateRpcPayload } from '../../../workers/gateway/src/rpcValidation';
 import {
   ConfigurationError,
   redactUrl,
@@ -146,6 +147,30 @@ describe('rpcAllowlist', () => {
     expect(isHedgeable('write')).toBe(false);
     expect(isHedgeable('heavy-read')).toBe(false);
     expect(isHedgeable('read')).toBe(true);
+  });
+});
+
+describe('rpcValidation', () => {
+  it('accepts a bounded read batch under one canonical operation', () => {
+    expect(
+      validateRpcPayload([
+        { jsonrpc: '2.0', id: 1, method: 'getMultipleAccounts' },
+        { jsonrpc: '2.0', id: 2, method: 'getSlot' },
+      ]),
+    ).toMatchObject({
+      ok: true,
+      operation: 'rpc.batch',
+      methodClass: 'read',
+    });
+  });
+
+  it('rejects a forbidden method anywhere in a batch', () => {
+    expect(
+      validateRpcPayload([
+        { jsonrpc: '2.0', id: 1, method: 'getSlot' },
+        { jsonrpc: '2.0', id: 2, method: 'requestAirdrop' },
+      ]),
+    ).toMatchObject({ ok: false, code: 'method_not_allowed' });
   });
 });
 

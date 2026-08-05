@@ -50,6 +50,42 @@ export type TradingWalletIdentity = {
   readonly version: DerivationVersion;
 };
 
+export function parseTradingWalletIdentity(
+  value: string,
+): TradingWalletIdentity | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const candidate = parsed as Record<string, unknown>;
+
+    if (
+      candidate.version !== DERIVATION_VERSION ||
+      typeof candidate.address !== 'string' ||
+      !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/u.test(candidate.address)
+    ) {
+      return null;
+    }
+
+    return { address: candidate.address, version: DERIVATION_VERSION };
+  } catch {
+    return null;
+  }
+}
+
+/** Serializes only recovery identity fields, even when passed a derived wallet. */
+export function serializeTradingWalletIdentity(
+  identity: TradingWalletIdentity,
+): string {
+  return JSON.stringify({
+    address: identity.address,
+    version: identity.version,
+  });
+}
+
 export type DerivedTradingWallet = TradingWalletIdentity & {
   /** Raw 32-byte ed25519 seed. Zero it after use; never persist or log it. */
   readonly secretKey: Uint8Array;

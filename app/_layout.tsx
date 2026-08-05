@@ -8,6 +8,7 @@ import {
 
 import { readAppConfig } from '@/config/appConfig';
 import { ConfigErrorScreen } from '@/features/diagnostics/screens/ConfigErrorScreen';
+import { TradingSessionProvider } from '@/integrations/perps/drift/trading-session-provider';
 import { PrivyBoundary } from '@/integrations/privy/PrivyBoundary';
 import { AuthNavigationGate } from '@/navigation/AuthNavigationGate';
 import { AppPreferencesProvider } from '@/storage/AppPreferencesProvider';
@@ -31,7 +32,12 @@ export default function RootLayout() {
         {config.ok ? (
           <PrivyBoundary>
             <AppPreferencesProvider>
-              <AuthNavigationGate />
+              <TradingSessionProvider
+                enabled={config.value.venue === 'drift-devnet'}
+                rpcUrl={config.value.api.rpcUrl}
+              >
+                <AuthNavigationGate />
+              </TradingSessionProvider>
             </AppPreferencesProvider>
           </PrivyBoundary>
         ) : (

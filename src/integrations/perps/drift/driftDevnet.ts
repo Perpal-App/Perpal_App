@@ -1,8 +1,6 @@
-import {
-  BulkAccountLoader,
-  DriftClient,
-  WalletV2,
-} from '@drift-labs/sdk';
+import { BulkAccountLoader } from '@drift-labs/sdk/lib/browser/accounts/bulkAccountLoader';
+import { DriftClient } from '@drift-labs/sdk/lib/browser/driftClient';
+import { WalletV2 } from '@drift-labs/sdk/lib/browser/wallet';
 import { Connection, Keypair, type FetchFn } from '@solana/web3.js';
 
 import {
@@ -80,6 +78,7 @@ export function openDriftDevnetSession(rpcUrl: string, seed: Uint8Array) {
     connection,
     wallet,
     env: 'devnet',
+    skipLoadUsers: true,
     accountSubscription: { type: 'polling', accountLoader },
   });
   let closed = false;

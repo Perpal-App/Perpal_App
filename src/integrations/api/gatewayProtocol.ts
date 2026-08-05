@@ -1,4 +1,6 @@
 export const GATEWAY_AUTH_VERSION = 'perpal.gateway.v1';
+export const GATEWAY_RPC_BATCH_OPERATION = 'rpc.batch';
+export const MAX_GATEWAY_RPC_BATCH_ENTRIES = 10;
 
 export const gatewayHeaders = {
   idempotencyKey: 'x-perpal-idempotency-key',
@@ -63,7 +65,25 @@ export function parseGatewayRpcOperation(body: string): string | null {
   try {
     const value = JSON.parse(body) as unknown;
 
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    if (Array.isArray(value)) {
+      if (
+        value.length === 0 ||
+        value.length > MAX_GATEWAY_RPC_BATCH_ENTRIES ||
+        value.some(
+          (entry) =>
+            typeof entry !== 'object' ||
+            entry === null ||
+            Array.isArray(entry) ||
+            typeof (entry as Record<string, unknown>).method !== 'string',
+        )
+      ) {
+        return null;
+      }
+
+      return GATEWAY_RPC_BATCH_OPERATION;
+    }
+
+    if (typeof value !== 'object' || value === null) {
       return null;
     }
 

@@ -28,18 +28,6 @@ for (const platform of nativePlatforms) {
 // falling back to this same file. Resolve only Noble's internal request to the
 // intended browser implementation, preserving package exports everywhere else.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (
-    nativePlatforms.includes(platform) &&
-    moduleName === '@drift-labs/sdk'
-  ) {
-    const packageRoot = path.dirname(require.resolve('@drift-labs/sdk/package.json'));
-
-    return {
-      filePath: path.join(packageRoot, 'lib', 'browser', 'index.js'),
-      type: 'sourceFile',
-    };
-  }
-
   const isNobleCryptoRequest =
     moduleName === '@noble/hashes/crypto' ||
     moduleName === '@noble/hashes/crypto.js';

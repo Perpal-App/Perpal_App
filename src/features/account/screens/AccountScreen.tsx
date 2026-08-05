@@ -4,8 +4,9 @@ import { StyleSheet, Text, View } from 'react-native';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
 import { BuildTargetBadge } from '@/features/diagnostics/components/BuildTargetBadge';
+import { useTradingSession } from '@/integrations/perps/drift/trading-session-provider';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
-import { colors, layout, spacing, typography } from '@/theme/tokens';
+import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
 
@@ -17,6 +18,7 @@ const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
  */
 export function AccountScreen() {
   const auth = usePrivyAuth();
+  const tradingSession = useTradingSession();
   const [signingOut, setSigningOut] = useState(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +46,7 @@ export function AccountScreen() {
     setError(null);
 
     try {
+      await tradingSession.lock();
       await auth.logout();
       setLogoutRequested(true);
     } catch {
@@ -64,7 +67,37 @@ export function AccountScreen() {
 
         <View style={styles.body}>
           <BuildTargetBadge />
-          <Text style={styles.note}>More account settings are coming soon.</Text>
+          <View style={styles.walletPanel}>
+            <Text accessibilityRole="header" style={styles.walletTitle}>
+              Trading wallet
+            </Text>
+            <Text style={styles.walletStatus}>
+              {tradingSessionMessage(tradingSession.status)}
+            </Text>
+            {tradingSession.tradingWalletAddress ? (
+              <Text selectable style={styles.walletAddress}>
+                {tradingSession.tradingWalletAddress}
+              </Text>
+            ) : null}
+            <Button
+              disabled={
+                tradingSession.status === 'unavailable' ||
+                tradingSession.status === 'identity-mismatch'
+              }
+              label={
+                tradingSession.status === 'ready'
+                  ? 'Lock trading wallet'
+                  : 'Unlock trading wallet'
+              }
+              loading={tradingSession.status === 'unlocking'}
+              onPress={() =>
+                void (tradingSession.status === 'ready'
+                  ? tradingSession.lock()
+                  : tradingSession.unlock())
+              }
+              variant="secondary"
+            />
+          </View>
         </View>
 
         <View style={styles.footer}>
@@ -115,11 +148,27 @@ const styles = StyleSheet.create({
   body: {
     flexGrow: 1,
     justifyContent: 'center',
+    gap: spacing.lg,
   },
-  note: {
+  walletPanel: {
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+  },
+  walletTitle: {
+    ...typography.heading,
+    color: colors.textPrimary,
+  },
+  walletStatus: {
     ...typography.bodyCompact,
-    color: colors.textMuted,
-    textAlign: 'center',
+    color: colors.textSecondary,
+  },
+  walletAddress: {
+    ...typography.bodyCompact,
+    color: colors.accentSoft,
   },
   footer: {
     gap: spacing.sm,
@@ -130,3 +179,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+function tradingSessionMessage(
+  status: ReturnType<typeof useTradingSession>['status'],
+): string {
+  switch (status) {
+    case 'unavailable':
+      return 'Waiting for your embedded Solana wallet.';
+    case 'locked':
+      return 'Unlock with one explicit message signature to connect Drift devnet.';
+    case 'unlocking':
+      return 'Deriving the local trading wallet and checking Drift devnet…';
+    case 'ready':
+      return 'Connected to Drift devnet. The signing key is held in memory only.';
+    case 'identity-mismatch':
+      return 'The derived wallet does not match this account’s recorded identity. Trading is blocked.';
+    case 'error':
+      return 'The trading wallet or Drift devnet could not be verified. Try again.';
+  }
+}
