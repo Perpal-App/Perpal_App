@@ -1,11 +1,10 @@
 import { Stack } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
-import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { AuthHandoffProvider } from '@/navigation/authHandoff';
 import { globalScreenOptions } from '@/navigation/screenOptions';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
@@ -29,9 +28,6 @@ type RootRouteName = '(auth)' | '(tabs)' | 'index';
 export function AuthNavigationGate() {
   const { initializationError, isAuthenticated, isReady } = usePrivyAuth();
   const preferences = useAppPreferences();
-  // Provisioning runs for every authenticated session and is intentionally
-  // non-blocking: routing never waits on wallet creation.
-  useWalletProvisioning();
   const currentSession: ResolvedSession | null = isAuthenticated
     ? 'authenticated'
     : isReady && initializationError === null
@@ -43,16 +39,17 @@ export function AuthNavigationGate() {
   // restored session, so a restart still goes straight to Home.
   const [pendingEntry, setPendingEntry] = useState(false);
 
-  if (
-    currentSession !== null &&
-    currentSession !== lastResolvedSession
-  ) {
-    setLastResolvedSession(currentSession);
+  useEffect(() => {
+    if (currentSession === null || currentSession === lastResolvedSession) {
+      return;
+    }
+
     setPendingEntry(
       lastResolvedSession === 'unauthenticated' &&
         currentSession === 'authenticated',
     );
-  }
+    setLastResolvedSession(currentSession);
+  }, [currentSession, lastResolvedSession]);
 
   const confirmEntry = useCallback(() => setPendingEntry(false), []);
   const session = currentSession ?? lastResolvedSession;

@@ -60,7 +60,7 @@ export function isValidGatewayNonce(value: string): boolean {
   return /^[A-Za-z0-9_-]{16,64}$/u.test(value);
 }
 
-/** Reads the single JSON-RPC operation that the gateway will authenticate. */
+/** Reads the canonical JSON-RPC operation that the gateway will authenticate. */
 export function parseGatewayRpcOperation(body: string): string | null {
   try {
     const value = JSON.parse(body) as unknown;
@@ -74,7 +74,8 @@ export function parseGatewayRpcOperation(body: string): string | null {
             typeof entry !== 'object' ||
             entry === null ||
             Array.isArray(entry) ||
-            typeof (entry as Record<string, unknown>).method !== 'string',
+            typeof (entry as Record<string, unknown>).method !== 'string' ||
+            (entry as Record<string, unknown>).method === '',
         )
       ) {
         return null;

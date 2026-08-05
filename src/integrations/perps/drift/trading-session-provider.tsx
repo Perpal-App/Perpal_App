@@ -40,6 +40,14 @@ type TradingSessionContextValue = {
 };
 
 type DriftSession = ReturnType<typeof openDriftDevnetSession>;
+type TradingSessionPhase =
+  | 'wallet-provider'
+  | 'derivation-signature'
+  | 'wallet-derivation'
+  | 'identity-read'
+  | 'identity-write'
+  | 'drift-open'
+  | 'drift-subscribe';
 
 const TradingSessionContext = createContext<TradingSessionContextValue | null>(
   null,
@@ -102,19 +110,23 @@ export function TradingSessionProvider({
     const attempt = ++attemptRef.current;
     let seed: Uint8Array | null = null;
     let openedSession: DriftSession | null = null;
+    let phase: TradingSessionPhase = 'wallet-provider';
     setStatus('unlocking');
 
     try {
       const provider = await wallet.getProvider();
+      phase = 'derivation-signature';
       const { signature } = await provider.request({
         method: 'signMessage',
         params: { message: DERIVATION_MESSAGE },
       });
+      phase = 'wallet-derivation';
       const derived = deriveTradingWallet(
         base64.decode(signature),
         mainWalletAddress,
       );
       seed = derived.secretKey;
+      phase = 'identity-read';
       const recorded = await readTradingWalletIdentity(mainWalletAddress);
       const identity = checkTradingWalletIdentity(recorded, derived);
 
@@ -126,13 +138,16 @@ export function TradingSessionProvider({
       }
 
       if (identity.status === 'first-derivation') {
+        phase = 'identity-write';
         await writeTradingWalletIdentity(mainWalletAddress, derived);
       }
 
+      phase = 'drift-open';
       openedSession = openDriftDevnetSession(rpcUrl, seed);
       zeroize(seed);
       seed = null;
 
+      phase = 'drift-subscribe';
       if (!(await openedSession.client.subscribe())) {
         throw new Error('Drift subscription was not established.');
       }
@@ -145,7 +160,9 @@ export function TradingSessionProvider({
       openedSession = null;
       setTradingWalletAddress(derived.address);
       setStatus('ready');
-    } catch {
+    } catch (cause) {
+      logTradingSessionFailure(phase, cause);
+
       if (attempt === attemptRef.current) {
         setTradingWalletAddress(null);
         setStatus('error');
@@ -188,6 +205,29 @@ export function TradingSessionProvider({
       {children}
     </TradingSessionContext.Provider>
   );
+}
+
+function logTradingSessionFailure(
+  phase: TradingSessionPhase,
+  cause: unknown,
+): void {
+  if (!__DEV__) {
+    return;
+  }
+
+  const candidate =
+    typeof cause === 'object' && cause !== null
+      ? (cause as Record<string, unknown>)
+      : null;
+  const code = candidate?.code;
+  const status = candidate?.status;
+
+  console.error('[Perpal trading session failed]', {
+    phase,
+    errorName: cause instanceof Error ? cause.name : typeof cause,
+    ...(typeof code === 'string' || typeof code === 'number' ? { code } : {}),
+    ...(typeof status === 'number' ? { status } : {}),
+  });
 }
 
 export function useTradingSession(): TradingSessionContextValue {

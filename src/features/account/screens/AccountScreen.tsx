@@ -3,9 +3,11 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
+import { StatusRow } from '@/components/ui/StatusRow';
 import { BuildTargetBadge } from '@/features/diagnostics/components/BuildTargetBadge';
 import { useTradingSession } from '@/integrations/perps/drift/trading-session-provider';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
+import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
@@ -18,6 +20,7 @@ const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
  */
 export function AccountScreen() {
   const auth = usePrivyAuth();
+  const walletProvisioning = useWalletProvisioning();
   const tradingSession = useTradingSession();
   const [signingOut, setSigningOut] = useState(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
@@ -69,15 +72,53 @@ export function AccountScreen() {
           <BuildTargetBadge />
           <View style={styles.walletPanel}>
             <Text accessibilityRole="header" style={styles.walletTitle}>
+              Privy embedded wallet
+            </Text>
+            <Text selectable style={styles.walletStatus}>
+              {walletProvisioningMessage(walletProvisioning.status)}
+            </Text>
+            <StatusRow
+              label="Status"
+              value={walletProvisioningLabel(walletProvisioning.status)}
+            />
+            <StatusRow
+              label="Purpose"
+              value="Identity and trading-wallet derivation"
+            />
+            {walletProvisioning.embeddedWalletAddress ? (
+              <StatusRow
+                label="Address"
+                selectable
+                value={walletProvisioning.embeddedWalletAddress}
+              />
+            ) : null}
+            {walletProvisioning.status === 'error' ? (
+              <Button
+                label="Retry wallet creation"
+                loading={walletProvisioning.isProvisioning}
+                onPress={() => void walletProvisioning.retry()}
+                variant="secondary"
+              />
+            ) : null}
+          </View>
+          <View style={styles.walletPanel}>
+            <Text accessibilityRole="header" style={styles.walletTitle}>
               Trading wallet
             </Text>
-            <Text style={styles.walletStatus}>
+            <Text selectable style={styles.walletStatus}>
               {tradingSessionMessage(tradingSession.status)}
             </Text>
+            <StatusRow
+              label="Status"
+              value={tradingSessionLabel(tradingSession.status)}
+            />
+            <StatusRow label="Network" value="Drift devnet" />
             {tradingSession.tradingWalletAddress ? (
-              <Text selectable style={styles.walletAddress}>
-                {tradingSession.tradingWalletAddress}
-              </Text>
+              <StatusRow
+                label="Address"
+                selectable
+                value={tradingSession.tradingWalletAddress}
+              />
             ) : null}
             <Button
               disabled={
@@ -166,10 +207,6 @@ const styles = StyleSheet.create({
     ...typography.bodyCompact,
     color: colors.textSecondary,
   },
-  walletAddress: {
-    ...typography.bodyCompact,
-    color: colors.accentSoft,
-  },
   footer: {
     gap: spacing.sm,
   },
@@ -196,5 +233,58 @@ function tradingSessionMessage(
       return 'The derived wallet does not match this account’s recorded identity. Trading is blocked.';
     case 'error':
       return 'The trading wallet or Drift devnet could not be verified. Try again.';
+  }
+}
+
+function tradingSessionLabel(
+  status: ReturnType<typeof useTradingSession>['status'],
+): string {
+  switch (status) {
+    case 'unavailable':
+      return 'Waiting for Privy wallet';
+    case 'locked':
+      return 'Locked';
+    case 'unlocking':
+      return 'Connecting';
+    case 'ready':
+      return 'Ready';
+    case 'identity-mismatch':
+      return 'Identity mismatch';
+    case 'error':
+      return 'Connection failed';
+  }
+}
+
+function walletProvisioningLabel(
+  status: ReturnType<typeof useWalletProvisioning>['status'],
+): string {
+  switch (status) {
+    case 'unauthenticated':
+      return 'Signed out';
+    case 'provisioning':
+      return 'Creating or restoring';
+    case 'ready':
+      return 'Ready';
+    case 'needs-recovery':
+      return 'Recovery required';
+    case 'error':
+      return 'Unavailable';
+  }
+}
+
+function walletProvisioningMessage(
+  status: ReturnType<typeof useWalletProvisioning>['status'],
+): string {
+  switch (status) {
+    case 'unauthenticated':
+      return 'Sign in before creating the embedded Solana wallet.';
+    case 'provisioning':
+      return 'Privy is creating or restoring the embedded Solana wallet.';
+    case 'ready':
+      return 'Available. It signs one explicit derivation message; trades use the separate wallet below.';
+    case 'needs-recovery':
+      return 'Privy requires wallet recovery before trading can continue.';
+    case 'error':
+      return 'Creation failed. Confirm embedded Solana wallets are enabled in Privy, then retry.';
   }
 }

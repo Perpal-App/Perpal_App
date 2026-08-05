@@ -155,6 +155,11 @@ describe('rpcValidation', () => {
     expect(
       validateRpcPayload([
         { jsonrpc: '2.0', id: 1, method: 'getMultipleAccounts' },
+      ]),
+    ).toMatchObject({ ok: true, operation: 'rpc.batch' });
+    expect(
+      validateRpcPayload([
+        { jsonrpc: '2.0', id: 1, method: 'getMultipleAccounts' },
         { jsonrpc: '2.0', id: 2, method: 'getSlot' },
       ]),
     ).toMatchObject({

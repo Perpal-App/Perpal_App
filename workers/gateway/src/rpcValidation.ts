@@ -54,10 +54,9 @@ function idKey(id: JsonRpcRequest['id']): string {
 }
 
 export function validateRpcPayload(value: unknown): RpcValidationResult {
-  const requests = Array.isArray(value) ? value : [value];
-  const operation = Array.isArray(value)
-    ? GATEWAY_RPC_BATCH_OPERATION
-    : 'rpc.invalid';
+  const isBatch = Array.isArray(value);
+  const requests = isBatch ? value : [value];
+  const operation = isBatch ? GATEWAY_RPC_BATCH_OPERATION : 'rpc.invalid';
 
   if (
     requests.length === 0 ||
@@ -101,7 +100,7 @@ export function validateRpcPayload(value: unknown): RpcValidationResult {
       };
     }
 
-    if (typedRequests.length > 1 && requestClass === 'write') {
+    if (isBatch && requestClass === 'write') {
       return {
         ok: false,
         code: 'batch_write_unsupported',
@@ -118,11 +117,10 @@ export function validateRpcPayload(value: unknown): RpcValidationResult {
 
   return {
     ok: true,
-    batchRequests: typedRequests.length > 1 ? typedRequests : null,
+    batchRequests: isBatch ? typedRequests : null,
     methodClass,
-    operation:
-      typedRequests.length > 1
-        ? GATEWAY_RPC_BATCH_OPERATION
-        : typedRequests[0].method,
+    operation: isBatch
+      ? GATEWAY_RPC_BATCH_OPERATION
+      : (typedRequests[0]?.method ?? operation),
   };
 }

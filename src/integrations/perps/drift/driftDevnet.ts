@@ -9,9 +9,16 @@ import {
   type GatewayRequestSigner,
 } from '@/integrations/api/gatewayClient';
 import { parseGatewayRpcOperation } from '@/integrations/api/gatewayProtocol';
+import { safeDriftDiagnosticMessage } from '@/integrations/perps/drift/driftDiagnostics';
 
 const REQUEST_TIMEOUT_MS = 8_000;
 const POLLING_INTERVAL_MS = 1_000;
+type DriftOpenStep =
+  | 'keypair'
+  | 'wallet'
+  | 'connection'
+  | 'account-loader'
+  | 'client';
 
 function signedGatewayFetch(signer: GatewayRequestSigner): FetchFn {
   return async (input, init) => {
@@ -39,11 +46,31 @@ function signedGatewayFetch(signer: GatewayRequestSigner): FetchFn {
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
-      return await fetch(input, {
+      const response = await fetch(input, {
         ...init,
         headers,
         signal: controller.signal,
       });
+
+      if (__DEV__ && !response.ok) {
+        console.error('[Perpal Drift RPC failed]', {
+          operation,
+          status: response.status,
+          traceId: response.headers.get('x-perpal-trace-id') ?? 'missing',
+        });
+      }
+
+      return response;
+    } catch (cause) {
+      if (__DEV__) {
+        console.error('[Perpal Drift RPC transport failed]', {
+          operation,
+          aborted: controller.signal.aborted,
+          errorName: cause instanceof Error ? cause.name : typeof cause,
+        });
+      }
+
+      throw cause;
     } finally {
       clearTimeout(timeout);
     }
@@ -59,45 +86,68 @@ export function openDriftDevnetSession(rpcUrl: string, seed: Uint8Array) {
     throw new Error('A 32-byte trading-wallet seed is required.');
   }
 
-  const payer = Keypair.fromSeed(seed);
-  const wallet = new WalletV2(payer);
-  const connection = new Connection(rpcUrl, {
-    commitment: 'confirmed',
-    disableRetryOnRateLimit: true,
-    fetch: signedGatewayFetch({
-      publicKey: payer.publicKey.toBytes(),
-      sign: (message) => wallet.signMessage(message),
-    }),
-  });
-  const accountLoader = new BulkAccountLoader(
-    connection,
-    'confirmed',
-    POLLING_INTERVAL_MS,
-  );
-  const client = new DriftClient({
-    connection,
-    wallet,
-    env: 'devnet',
-    skipLoadUsers: true,
-    accountSubscription: { type: 'polling', accountLoader },
-  });
-  let closed = false;
+  let step: DriftOpenStep = 'keypair';
+  let payer: Keypair | null = null;
 
-  return {
-    client,
-    async close(): Promise<void> {
-      if (closed) {
-        return;
-      }
+  try {
+    payer = Keypair.fromSeed(seed);
+    step = 'wallet';
+    const wallet = new WalletV2(payer);
+    step = 'connection';
+    const connection = new Connection(rpcUrl, {
+      commitment: 'confirmed',
+      disableRetryOnRateLimit: true,
+      fetch: signedGatewayFetch({
+        publicKey: payer.publicKey.toBytes(),
+        sign: (message) => wallet.signMessage(message),
+      }),
+    });
+    step = 'account-loader';
+    const accountLoader = new BulkAccountLoader(
+      connection,
+      'confirmed',
+      POLLING_INTERVAL_MS,
+    );
+    step = 'client';
+    const client = new DriftClient({
+      connection,
+      wallet,
+      env: 'devnet',
+      skipLoadUsers: true,
+      accountSubscription: { type: 'polling', accountLoader },
+    });
+    let closed = false;
 
-      closed = true;
+    return {
+      client,
+      async close(): Promise<void> {
+        if (closed) {
+          return;
+        }
 
-      try {
-        await client.unsubscribe();
-      } finally {
-        accountLoader.stopPolling();
-        payer.secretKey.fill(0);
-      }
-    },
-  };
+        closed = true;
+
+        try {
+          await client.unsubscribe();
+        } finally {
+          accountLoader.stopPolling();
+          payer?.secretKey.fill(0);
+        }
+      },
+    };
+  } catch (cause) {
+    payer?.secretKey.fill(0);
+
+    if (__DEV__) {
+      const detail = safeDriftDiagnosticMessage(cause);
+
+      console.error('[Perpal Drift session open failed]', {
+        step,
+        errorName: cause instanceof Error ? cause.name : typeof cause,
+        ...(detail === null ? {} : { detail }),
+      });
+    }
+
+    throw cause;
+  }
 }

@@ -1,5 +1,4 @@
 import {
-  hasError,
   isConnected,
   isCreating,
   isNotCreated,
@@ -7,20 +6,32 @@ import {
   useEmbeddedSolanaWallet,
   usePrivy,
 } from '@privy-io/expo';
-import { useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
-export type WalletProvisioningStatus =
-  | 'unauthenticated'
-  | 'provisioning'
-  | 'ready'
-  | 'needs-recovery'
-  | 'error';
+import {
+  resolveWalletProvisioningStatus,
+  type WalletProvisioningStatus,
+} from '@/integrations/privy/walletProvisioningStatus';
 
 type WalletProvisioning = {
   status: WalletProvisioningStatus;
   /** True while a create call is in flight or Privy reports a creating state. */
   isProvisioning: boolean;
+  embeddedWalletAddress: string | null;
+  retry: () => Promise<void>;
 };
+
+const WalletProvisioningContext = createContext<WalletProvisioning | null>(null);
 
 /**
  * Ensures every authenticated user has an embedded Solana wallet (M).
@@ -37,86 +48,94 @@ type WalletProvisioning = {
  * Recovery is surfaced, never performed silently: `needs-recovery` requires an
  * explicit user-driven flow.
  */
-export function useWalletProvisioning(): WalletProvisioning {
+function useWalletProvisioningState(): WalletProvisioning {
   const { isReady, user } = usePrivy();
   const wallet = useEmbeddedSolanaWallet();
   const attemptedRef = useRef(false);
   const [failed, setFailed] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const isAuthenticated = isReady && user !== null;
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      // Reset so the next authenticated session retries provisioning.
-      attemptedRef.current = false;
-      return;
-    }
-
-    if (attemptedRef.current || !isNotCreated(wallet)) {
+  const provision = useCallback(async () => {
+    if (!isAuthenticated || isConnected(wallet) || needsRecovery(wallet)) {
       return;
     }
 
     const create = wallet.create;
 
-    if (typeof create !== 'function') {
+    if (attemptedRef.current || typeof create !== 'function') {
       return;
     }
 
     attemptedRef.current = true;
-    let active = true;
+    setFailed(false);
+    setCreating(true);
 
-    void (async () => {
-      try {
-        await create();
-
-        if (active) {
-          setFailed(false);
-        }
-      } catch {
-        // Allow a retry on the next session; never surface SDK internals.
-        attemptedRef.current = false;
-
-        if (active) {
-          setFailed(true);
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
+    try {
+      await create();
+    } catch {
+      attemptedRef.current = false;
+      setFailed(true);
+    } finally {
+      setCreating(false);
+    }
   }, [isAuthenticated, wallet]);
 
-  return {
-    status: resolveStatus({ failed, isAuthenticated, wallet }),
-    isProvisioning: isNotCreated(wallet) || isCreating(wallet),
-  };
+  useEffect(() => {
+    if (!isAuthenticated) {
+      // Reset so the next authenticated session retries provisioning.
+      attemptedRef.current = false;
+      setFailed(false);
+      setCreating(false);
+      return;
+    }
+
+    if (isNotCreated(wallet)) {
+      void provision();
+    }
+  }, [isAuthenticated, provision, wallet]);
+
+  const retry = useCallback(async () => {
+    attemptedRef.current = false;
+    await provision();
+  }, [provision]);
+
+  return useMemo(
+    () => ({
+      status: resolveWalletProvisioningStatus({
+        failed,
+        isAuthenticated,
+        walletStatus: wallet.status,
+      }),
+      isProvisioning: creating || isCreating(wallet),
+      embeddedWalletAddress: isConnected(wallet)
+        ? (wallet.wallets[0]?.address ?? null)
+        : null,
+      retry,
+    }),
+    [creating, failed, isAuthenticated, retry, wallet],
+  );
 }
 
-function resolveStatus({
-  failed,
-  isAuthenticated,
-  wallet,
+export function WalletProvisioningProvider({
+  children,
 }: {
-  failed: boolean;
-  isAuthenticated: boolean;
-  wallet: ReturnType<typeof useEmbeddedSolanaWallet>;
-}): WalletProvisioningStatus {
-  if (!isAuthenticated) {
-    return 'unauthenticated';
+  readonly children: ReactNode;
+}) {
+  const value = useWalletProvisioningState();
+
+  return createElement(WalletProvisioningContext.Provider, { value }, children);
+}
+
+export function useWalletProvisioning(): WalletProvisioning {
+  const value = useContext(WalletProvisioningContext);
+
+  if (value === null) {
+    throw new Error(
+      'useWalletProvisioning must be used inside WalletProvisioningProvider.',
+    );
   }
 
-  if (needsRecovery(wallet)) {
-    return 'needs-recovery';
-  }
-
-  if (isConnected(wallet)) {
-    return 'ready';
-  }
-
-  if (failed || hasError(wallet)) {
-    return 'error';
-  }
-
-  return 'provisioning';
+  return value;
 }
