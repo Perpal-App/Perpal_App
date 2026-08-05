@@ -1,52 +1,65 @@
+import { gatewayHeaders } from '../../../src/integrations/api/gatewayProtocol';
+
 import { ConfigurationError, redactUrl, resolveConfig, type WorkerEnv } from './env';
+import {
+  corsHeaders,
+  isOriginAllowed,
+  readJsonBody,
+  serverTiming,
+} from './http';
 import {
   AllProvidersUnavailableError,
   DEFAULT_ROUTER_OPTIONS,
   ProviderRouter,
   type ProviderEndpoint,
 } from './providerRouter';
-import { classifyMethod, isHedgeable } from './rpcAllowlist';
-
-/**
- * PerPal RPC gateway.
- *
- * Exists so provider credentials never ship inside the mobile binary. It is a
- * narrow, allowlisted JSON-RPC forwarder — not a general proxy — and it holds no
- * keys, no funds, and no user identity.
- *
- * Deployed once per target (`perpal-gateway-devnet`, `perpal-gateway-mainnet`) so
- * a devnet request can never reach mainnet credentials.
- *
- * Privacy invariant: this Worker must never see the main wallet and the trading
- * wallet in the same request or log line. It therefore logs no addresses at all.
- */
+import {
+  beginIdempotentRequest,
+  finishIdempotentRequest,
+} from './idempotency';
+import { RedisStore } from './redisStore';
+import { authenticateRequest } from './requestAuth';
+import { dispatchRpc } from './rpcDispatch';
+import { classifyMethod, type MethodClass } from './rpcAllowlist';
+import { parseTelemetryEvents, writeTelemetry } from './telemetry';
 
 const JSON_HEADERS = { 'content-type': 'application/json' } as const;
+const MAX_RPC_BODY_BYTES = 256 * 1024;
+const MAX_TELEMETRY_BODY_BYTES = 16 * 1024;
 
-/** Router state is per-isolate, which is the right lifetime for breaker state. */
 let router: ProviderRouter | null = null;
+
+type JsonRpcRequest = {
+  readonly jsonrpc: '2.0';
+  readonly id: string | number | null;
+  readonly method: string;
+  readonly params?: unknown;
+};
 
 function getRouter(providers: readonly ProviderEndpoint[]): ProviderRouter {
   router ??= new ProviderRouter(providers, DEFAULT_ROUTER_OPTIONS);
-
   return router;
 }
 
-type JsonRpcRequest = {
-  jsonrpc: string;
-  id: string | number | null;
-  method: string;
-  params?: unknown;
-};
-
 function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
-  if (typeof value !== 'object' || value === null) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
 
   const candidate = value as Record<string, unknown>;
+  const id = candidate.id;
 
-  return candidate.jsonrpc === '2.0' && typeof candidate.method === 'string';
+  return (
+    candidate.jsonrpc === '2.0' &&
+    typeof candidate.method === 'string' &&
+    candidate.method.length > 0 &&
+    candidate.method.length <= 96 &&
+    (id === null || typeof id === 'string' || typeof id === 'number')
+  );
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });
 }
 
 function errorResponse(
@@ -55,224 +68,423 @@ function errorResponse(
   message: string,
   traceId: string,
 ): Response {
-  return new Response(JSON.stringify({ error: { code, message }, traceId }), {
-    status,
-    headers: JSON_HEADERS,
-  });
+  return jsonResponse({ error: { code, message }, traceId }, status);
 }
 
-async function forward(
-  endpoint: ProviderEndpoint,
-  body: string,
-  timeoutMs: number,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(endpoint.url, {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Sends to the primary and, for hedgeable reads only, races a second provider
- * once the latency budget is exceeded. The hedge is additive: whichever answers
- * first wins and the loser is abandoned.
- */
-async function dispatch(
-  activeRouter: ProviderRouter,
-  body: string,
-  hedge: boolean,
-): Promise<{ response: Response; provider: ProviderEndpoint; hedged: boolean }> {
-  const primary = activeRouter.primary();
-  const started = Date.now();
-
-  activeRouter.beginAttempt(primary.id);
-
-  const primaryAttempt = forward(primary, body, DEFAULT_ROUTER_OPTIONS.timeoutMs)
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(`Provider responded ${response.status}`);
-      }
-
-      activeRouter.recordSuccess(primary.id, Date.now() - started);
-      return { response, provider: primary, hedged: false };
-    })
-    .catch((cause: unknown) => {
-      activeRouter.recordFailure(primary.id);
-      throw cause;
-    });
-
-  if (!hedge) {
-    return primaryAttempt;
-  }
-
-  const secondary = activeRouter.hedgeTarget(primary.id);
-
-  if (secondary === null) {
-    return primaryAttempt;
-  }
-
-  const hedged = new Promise<never>((_, reject) => {
-    setTimeout(
-      () => reject(new Error('hedge-window-elapsed')),
-      DEFAULT_ROUTER_OPTIONS.hedgeAfterMs,
-    );
-  }).catch(async () => {
-    const hedgeStarted = Date.now();
-
-    activeRouter.beginAttempt(secondary.id);
-
-    try {
-      const response = await forward(
-        secondary,
-        body,
-        DEFAULT_ROUTER_OPTIONS.timeoutMs,
-      );
-
-      if (!response.ok) {
-        throw new Error(`Provider responded ${response.status}`);
-      }
-
-      activeRouter.recordSuccess(secondary.id, Date.now() - hedgeStarted);
-      return { response, provider: secondary, hedged: true };
-    } catch (cause) {
-      activeRouter.recordFailure(secondary.id);
-      throw cause;
-    }
-  });
-
-  return Promise.race([primaryAttempt, hedged]);
+function safeLog(fields: Readonly<Record<string, string | number | boolean>>) {
+  console.log(JSON.stringify(fields));
 }
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    const started = performance.now();
     const traceId = crypto.randomUUID();
     const url = new URL(request.url);
+    let allowedOrigins: readonly string[] = [];
+
+    const complete = (
+      response: Response,
+      outcome: string,
+      operation: string,
+      timings: Readonly<Record<string, number>> = {},
+    ) => {
+      const total = performance.now() - started;
+      const headers = corsHeaders(request, allowedOrigins);
+
+      for (const [name, value] of Object.entries(headers)) {
+        response.headers.set(name, value);
+      }
+
+      response.headers.set('server-timing', serverTiming({ ...timings, total }));
+      response.headers.set('x-perpal-trace-id', traceId);
+      safeLog({
+        traceId,
+        route: url.pathname,
+        operation,
+        outcome,
+        status: response.status,
+        durationMs: Math.round(total),
+      });
+      return response;
+    };
 
     let config;
 
     try {
       config = resolveConfig(env);
+      allowedOrigins = config.corsAllowedOrigins;
     } catch (cause) {
       const missing = cause instanceof ConfigurationError ? cause.missing : [];
-
-      return errorResponse(
-        503,
-        'gateway_misconfigured',
-        `Gateway is not configured: ${missing.join(', ')}`,
-        traceId,
+      return complete(
+        errorResponse(
+          503,
+          'gateway_misconfigured',
+          `Gateway is not configured: ${missing.join(', ')}`,
+          traceId,
+        ),
+        'error',
+        'config',
       );
+    }
+
+    if (!isOriginAllowed(request, allowedOrigins)) {
+      return complete(
+        errorResponse(403, 'origin_not_allowed', 'Origin is not allowed.', traceId),
+        'rejected',
+        'cors',
+      );
+    }
+
+    if (request.method === 'OPTIONS') {
+      return complete(new Response(null, { status: 204 }), 'ok', 'preflight');
     }
 
     if (url.pathname === '/health') {
-      const activeRouter = getRouter(config.providers);
-
-      return new Response(
-        JSON.stringify({
-          status: 'ok',
-          cluster: config.cluster,
-          venue: config.venue,
-          providers: activeRouter.snapshot(),
-          // Redacted so a health probe can never leak a provider key.
-          endpoints: config.providers.map((p) => redactUrl(p.url)),
-          redisConfigured: config.redis !== null,
-          traceId,
-        }),
-        { headers: JSON_HEADERS },
-      );
-    }
-
-    if (url.pathname !== '/v1/rpc') {
-      return errorResponse(404, 'not_found', 'Unknown route.', traceId);
-    }
-
-    if (request.method !== 'POST') {
-      return errorResponse(405, 'method_not_allowed', 'Use POST.', traceId);
-    }
-
-    let payload: unknown;
-
-    try {
-      payload = await request.json();
-    } catch {
-      return errorResponse(400, 'invalid_json', 'Body must be JSON.', traceId);
-    }
-
-    // Batches are rejected: a batch can mix reads and writes, which would defeat
-    // per-method classification and routing.
-    if (Array.isArray(payload)) {
-      return errorResponse(
-        400,
-        'batch_unsupported',
-        'Send one JSON-RPC request per call.',
-        traceId,
-      );
-    }
-
-    if (!isJsonRpcRequest(payload)) {
-      return errorResponse(
-        400,
-        'invalid_request',
-        'Expected a JSON-RPC 2.0 request.',
-        traceId,
-      );
-    }
-
-    const methodClass = classifyMethod(payload.method);
-
-    if (methodClass === null) {
-      return errorResponse(
-        403,
-        'method_not_allowed',
-        `Method "${payload.method}" is not on the gateway allowlist.`,
-        traceId,
-      );
-    }
-
-    const activeRouter = getRouter(config.providers);
-
-    try {
-      const { response, provider, hedged } = await dispatch(
-        activeRouter,
-        JSON.stringify(payload),
-        isHedgeable(methodClass),
-      );
-
-      const body = await response.text();
-
-      return new Response(body, {
-        status: 200,
-        headers: {
-          ...JSON_HEADERS,
-          'x-perpal-trace-id': traceId,
-          'x-perpal-provider': provider.id,
-          'x-perpal-hedged': hedged ? '1' : '0',
-        },
-      });
-    } catch (cause) {
-      if (cause instanceof AllProvidersUnavailableError) {
-        return errorResponse(
-          503,
-          'providers_unavailable',
-          'All RPC providers are currently unavailable.',
-          traceId,
+      if (request.method !== 'GET') {
+        return complete(
+          errorResponse(405, 'method_not_allowed', 'Use GET.', traceId),
+          'rejected',
+          'health',
         );
       }
 
-      // Deliberately no provider URL, no request params, no addresses.
-      return errorResponse(
-        502,
-        'upstream_failure',
-        'The RPC provider request failed.',
-        traceId,
+      const activeRouter = getRouter(config.providers);
+      return complete(
+        jsonResponse({
+          status:
+            config.redis !== null &&
+            env.RATE_LIMITER !== undefined &&
+            env.GLOBAL_RATE_LIMITER !== undefined
+              ? 'ok'
+              : 'degraded',
+          cluster: config.cluster,
+          venue: config.venue,
+          providers: activeRouter.snapshot(),
+          endpoints: config.providers.map((provider) => redactUrl(provider.url)),
+          redisConfigured: config.redis !== null,
+          rateLimiterConfigured: env.RATE_LIMITER !== undefined,
+          globalRateLimiterConfigured: env.GLOBAL_RATE_LIMITER !== undefined,
+          telemetryConfigured: env.TELEMETRY !== undefined,
+          traceId,
+        }),
+        'ok',
+        'health',
+      );
+    }
+
+    if (url.pathname !== '/v1/rpc' && url.pathname !== '/v1/telemetry') {
+      return complete(
+        errorResponse(404, 'not_found', 'Unknown route.', traceId),
+        'rejected',
+        'route',
+      );
+    }
+
+    if (request.method !== 'POST') {
+      return complete(
+        errorResponse(405, 'method_not_allowed', 'Use POST.', traceId),
+        'rejected',
+        'http',
+      );
+    }
+
+    if (
+      config.redis === null ||
+      env.RATE_LIMITER === undefined ||
+      env.GLOBAL_RATE_LIMITER === undefined
+    ) {
+      return complete(
+        errorResponse(
+          503,
+          'security_state_unavailable',
+          'Gateway security state is unavailable.',
+          traceId,
+        ),
+        'error',
+        'security',
+      );
+    }
+
+    const validationStarted = performance.now();
+    const bodyResult = await readJsonBody(
+      request,
+      url.pathname === '/v1/rpc'
+        ? MAX_RPC_BODY_BYTES
+        : MAX_TELEMETRY_BODY_BYTES,
+    );
+
+    if (!bodyResult.ok) {
+      return complete(
+        errorResponse(
+          bodyResult.status,
+          bodyResult.code,
+          'Request body is invalid.',
+          traceId,
+        ),
+        'rejected',
+        'body',
+        { validation: performance.now() - validationStarted },
+      );
+    }
+
+    let operation: string;
+    let methodClass: MethodClass | null = null;
+
+    if (url.pathname === '/v1/rpc') {
+      if (Array.isArray(bodyResult.payload)) {
+        return complete(
+          errorResponse(
+            400,
+            'batch_unsupported',
+            'Send one JSON-RPC request per call.',
+            traceId,
+          ),
+          'rejected',
+          'rpc.batch',
+        );
+      }
+
+      if (!isJsonRpcRequest(bodyResult.payload)) {
+        return complete(
+          errorResponse(
+            400,
+            'invalid_request',
+            'Expected a JSON-RPC 2.0 request.',
+            traceId,
+          ),
+          'rejected',
+          'rpc.invalid',
+        );
+      }
+
+      operation = bodyResult.payload.method;
+      methodClass = classifyMethod(operation);
+
+      if (methodClass === null) {
+        return complete(
+          errorResponse(
+            403,
+            'method_not_allowed',
+            `Method "${operation}" is not on the gateway allowlist.`,
+            traceId,
+          ),
+          'rejected',
+          operation,
+        );
+      }
+    } else {
+      operation = 'telemetry.write';
+    }
+
+    const redis = new RedisStore(config.redis);
+    const authStarted = performance.now();
+    const auth = await authenticateRequest({
+      body: bodyResult.body,
+      cluster: config.cluster,
+      nowMs: Date.now(),
+      operation,
+      request,
+      redis,
+    });
+    const authDuration = performance.now() - authStarted;
+
+    if (!auth.ok) {
+      return complete(
+        errorResponse(auth.status, auth.code, 'Request authorization failed.', traceId),
+        'rejected',
+        operation,
+        { auth: authDuration },
+      );
+    }
+
+    const [rateLimit, globalRateLimit] = await Promise.all([
+      env.RATE_LIMITER.limit({
+        key: `${config.cluster}:${auth.actorHash}:${url.pathname}`,
+      }),
+      env.GLOBAL_RATE_LIMITER.limit({
+        key: `${config.cluster}:${url.pathname}`,
+      }),
+    ]);
+
+    if (!rateLimit.success || !globalRateLimit.success) {
+      return complete(
+        errorResponse(429, 'rate_limited', 'Too many requests.', traceId),
+        'rejected',
+        operation,
+        { auth: authDuration },
+      );
+    }
+
+    if (url.pathname === '/v1/telemetry') {
+      const events = parseTelemetryEvents(bodyResult.payload);
+
+      if (events === null) {
+        return complete(
+          errorResponse(400, 'invalid_telemetry', 'Telemetry payload is invalid.', traceId),
+          'rejected',
+          operation,
+          { auth: authDuration },
+        );
+      }
+
+      if (env.TELEMETRY === undefined) {
+        return complete(
+          errorResponse(503, 'telemetry_unavailable', 'Telemetry is unavailable.', traceId),
+          'error',
+          operation,
+          { auth: authDuration },
+        );
+      }
+
+      writeTelemetry(env.TELEMETRY, events);
+      return complete(jsonResponse({ accepted: events.length }, 202), 'ok', operation, {
+        auth: authDuration,
+      });
+    }
+
+    // From here the payload was established as JSON-RPC above.
+    if (methodClass === null) {
+      return complete(
+        errorResponse(500, 'internal_error', 'Request classification failed.', traceId),
+        'error',
+        operation,
+      );
+    }
+
+    let idempotencyStorageKey: string | null = null;
+
+    if (methodClass === 'write') {
+      try {
+        const idempotency = await beginIdempotentRequest({
+          actorHash: auth.actorHash,
+          bodyHash: auth.bodyHash,
+          cluster: config.cluster,
+          key: request.headers.get(gatewayHeaders.idempotencyKey),
+          redis,
+        });
+
+        if (idempotency.status === 'invalid-key') {
+          return complete(
+            errorResponse(
+              400,
+              'idempotency_key_required',
+              'A valid idempotency key is required for state-changing requests.',
+              traceId,
+            ),
+            'rejected',
+            operation,
+            { auth: authDuration },
+          );
+        }
+
+        if (idempotency.status === 'conflict') {
+          return complete(
+            errorResponse(
+              409,
+              'idempotency_conflict',
+              'Idempotency key was already used for another request.',
+              traceId,
+            ),
+            'rejected',
+            operation,
+          );
+        }
+
+        if (idempotency.status === 'in-flight') {
+          return complete(
+            errorResponse(409, 'request_in_flight', 'Request is already in flight.', traceId),
+            'rejected',
+            operation,
+          );
+        }
+
+        if (idempotency.status === 'replay') {
+          const response = new Response(idempotency.record.responseBody, {
+              status: 200,
+              headers: {
+                ...JSON_HEADERS,
+                'x-perpal-idempotency': 'replayed',
+                'x-perpal-provider': idempotency.record.provider,
+                'x-perpal-routing': idempotency.record.routing,
+              },
+            });
+          return complete(
+            response,
+            'replayed',
+            operation,
+            { auth: authDuration },
+          );
+        }
+
+        idempotencyStorageKey = idempotency.storageKey;
+      } catch {
+        return complete(
+          errorResponse(503, 'state_unavailable', 'Request state is unavailable.', traceId),
+          'error',
+          operation,
+        );
+      }
+    }
+
+    const upstreamStarted = performance.now();
+    const activeRouter = getRouter(config.providers);
+
+    try {
+      const result = await dispatchRpc(activeRouter, bodyResult.body, methodClass);
+      const responseBody = await result.response.text();
+
+      if (idempotencyStorageKey !== null) {
+        await finishIdempotentRequest(
+          redis,
+          idempotencyStorageKey,
+          auth.bodyHash,
+          responseBody,
+          result,
+        );
+      }
+
+      const response = new Response(responseBody, {
+        status: 200,
+        headers: {
+          ...JSON_HEADERS,
+          'x-perpal-provider': result.provider.id,
+          'x-perpal-routing': result.routing,
+          ...(idempotencyStorageKey !== null
+            ? { 'x-perpal-idempotency': 'stored' }
+            : {}),
+        },
+      });
+
+      return complete(response, 'ok', operation, {
+        auth: authDuration,
+        upstream: performance.now() - upstreamStarted,
+      });
+    } catch (cause) {
+      if (idempotencyStorageKey !== null) {
+        try {
+          await redis.delete(idempotencyStorageKey);
+        } catch {
+          // Pending reservation expires after two minutes; never mask the RPC error.
+        }
+      }
+
+      return complete(
+        errorResponse(
+          cause instanceof AllProvidersUnavailableError ? 503 : 502,
+          cause instanceof AllProvidersUnavailableError
+            ? 'providers_unavailable'
+            : 'upstream_failure',
+          cause instanceof AllProvidersUnavailableError
+            ? 'All RPC providers are currently unavailable.'
+            : 'The RPC provider request failed.',
+          traceId,
+        ),
+        'error',
+        operation,
+        {
+          auth: authDuration,
+          upstream: performance.now() - upstreamStarted,
+        },
       );
     }
   },

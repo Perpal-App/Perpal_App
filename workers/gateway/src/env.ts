@@ -20,6 +20,24 @@ export type WorkerEnv = {
   // Vars
   readonly PERPS_VENUE?: string;
   readonly SOLANA_CLUSTER?: string;
+  readonly CORS_ALLOWED_ORIGINS?: string;
+
+  // Bindings
+  readonly RATE_LIMITER?: {
+    limit(input: { readonly key: string }): Promise<{ readonly success: boolean }>;
+  };
+  readonly GLOBAL_RATE_LIMITER?: {
+    limit(input: { readonly key: string }): Promise<{ readonly success: boolean }>;
+  };
+  readonly TELEMETRY?: AnalyticsEngineBinding;
+};
+
+export type AnalyticsEngineBinding = {
+  writeDataPoint(point: {
+    readonly blobs?: readonly string[];
+    readonly doubles?: readonly number[];
+    readonly indexes?: readonly string[];
+  }): void;
 };
 
 export type ResolvedCluster = 'devnet' | 'mainnet';
@@ -29,6 +47,7 @@ export type GatewayConfig = {
   readonly venue: string;
   readonly providers: readonly ProviderEndpoint[];
   readonly redis: { readonly url: string; readonly token: string } | null;
+  readonly corsAllowedOrigins: readonly string[];
 };
 
 export class ConfigurationError extends Error {
@@ -74,6 +93,29 @@ function assertBareKey(
   }
 }
 
+function parseCorsOrigins(raw: string | undefined, invalid: string[]): string[] {
+  const origins = (raw ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+
+  for (const origin of origins) {
+    try {
+      const parsed = new URL(origin);
+
+      if (parsed.protocol !== 'https:' || parsed.origin !== origin) {
+        invalid.push('CORS_ALLOWED_ORIGINS (exact HTTPS origins only)');
+        return [];
+      }
+    } catch {
+      invalid.push('CORS_ALLOWED_ORIGINS (exact HTTPS origins only)');
+      return [];
+    }
+  }
+
+  return [...new Set(origins)];
+}
+
 /**
  * Validates the environment and composes provider endpoints.
  *
@@ -95,6 +137,10 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
 
   const heliusKey = env.HELIUS_API_KEY?.trim() ?? '';
   const alchemyKey = env.ALCHEMY_API_KEY?.trim() ?? '';
+  const corsAllowedOrigins = parseCorsOrigins(
+    env.CORS_ALLOWED_ORIGINS,
+    missing,
+  );
 
   if (heliusKey.length === 0 && alchemyKey.length === 0) {
     missing.push('HELIUS_API_KEY or ALCHEMY_API_KEY (at least one)');
@@ -135,6 +181,7 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
       redisUrl.length > 0 && redisToken.length > 0
         ? { url: redisUrl, token: redisToken }
         : null,
+    corsAllowedOrigins,
   };
 }
 

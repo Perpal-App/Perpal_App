@@ -7,10 +7,9 @@
  * - Reads go to the provider with fewer in-flight requests.
  * - A read that exceeds its latency budget is hedged: fire the other provider and
  *   take whichever answers first. Only for idempotent reads.
- * - Writes are never hedged. Broadcasting the same signed transaction twice is
- *   safe on Solana (identical signature dedupes), but a *different* transaction
- *   must never be produced by a retry, so writes go to one provider and failover
- *   is explicit.
+ * - Write selection is handled by `rpcDispatch`: the exact same already-signed
+ *   transaction bytes are broadcast to every healthy provider. This router only
+ *   tracks each attempt; it never rebuilds or mutates a transaction.
  * - A failing provider is tripped by a circuit breaker and recovers gradually
  *   through a half-open probe rather than being slammed the moment it returns.
  */

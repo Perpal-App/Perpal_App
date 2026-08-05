@@ -82,8 +82,8 @@ export function OnboardingLandingScreen() {
 
           <RiseInView delay={heroDelay(3)}>
             <Text style={styles.description}>
-              Your wallet stays unlinked from your identity, and your signing key
-              never leaves this device.
+              Your signing key stays on your device. Private funding and trading
+              are being added to this Android prototype in verified stages.
             </Text>
           </RiseInView>
         </View>

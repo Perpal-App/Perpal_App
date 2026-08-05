@@ -36,6 +36,7 @@
     "doctor": "expo-doctor"
   },
   "dependencies": {
+    "@drift-labs/sdk": "2.163.0-beta.13",
     "@ethersproject/shims": "^5.8.0",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
@@ -43,6 +44,9 @@
     "@privy-io/expo-native-extensions": "0.0.12",
     "@scure/base": "^2.2.0",
     "@scure/bip39": "^2.2.0",
+    "@solana/web3.js": "1.98.0",
+    "buffer": "6.0.3",
+    "events": "3.3.0",
     "expo": "57.0.10",
     "expo-apple-authentication": "~57.0.1",
     "expo-application": "~57.0.2",

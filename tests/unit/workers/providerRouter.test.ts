@@ -186,7 +186,7 @@ describe('resolveConfig provider secrets', () => {
     expect(() =>
       resolveConfig({
         ...base,
-        HELIUS_API_KEY: 'https://mainnet.helius-rpc.com/?api-key=abc-123',
+        HELIUS_API_KEY: 'https://mainnet.helius-rpc.example/?api-key=abc-123',
       }),
     ).toThrow(ConfigurationError);
   });

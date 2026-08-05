@@ -10,7 +10,7 @@
  * The written file carries a header naming its source, so nobody edits `.env`
  * directly and loses the change on the next switch.
  */
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

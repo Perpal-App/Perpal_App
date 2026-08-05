@@ -9,13 +9,15 @@
  * - `react-native-get-random-values`  crypto.getRandomValues (required by Privy
  *                             and by the audited key-derivation libraries)
  * - `@ethersproject/shims`    misc runtime shims required by Privy's peer set
- *
- * `buffer` is deliberately not polyfilled. Add it only if the Solana client we
- * select at the protocol boundary requires it.
+ * - `buffer`                  required by Drift's `web3.js` transaction model
  */
 import 'fast-text-encoding';
 import 'react-native-get-random-values';
 import '@ethersproject/shims';
+import { Buffer } from 'buffer';
+
+const globals = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
+globals.Buffer ??= Buffer;
 
 if (typeof globalThis.crypto?.getRandomValues !== 'function') {
   // Fail loudly at startup rather than producing weak key material later.
