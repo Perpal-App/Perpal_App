@@ -8,7 +8,7 @@ import { decodeUser } from '@velocity-exchange/sdk/lib/browser/decode/user';
 import velocityIdl from '@velocity-exchange/sdk/lib/browser/idl/velocity.json';
 import { calculatePositionPNL } from '@velocity-exchange/sdk/lib/browser/math/position';
 import type { OraclePriceData } from '@velocity-exchange/sdk/lib/browser/oracles/types';
-import type { PerpMarketAccount, SpotMarketAccount, UserAccount } from '@velocity-exchange/sdk/lib/browser/types';
+import type { PerpMarketAccount, SpotMarketAccount, StateAccount, UserAccount } from '@velocity-exchange/sdk/lib/browser/types';
 import { User } from '@velocity-exchange/sdk/lib/browser/user';
 import type { VelocityClient } from '@velocity-exchange/sdk/lib/browser/velocityClient';
 import { PublicKey } from '@solana/web3.js';
@@ -20,6 +20,7 @@ import {
 } from '@/integrations/api/publicSolanaRpc';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
 import type { PublicMarketPrice } from '@/integrations/perps/markets/publicMarketData';
+import { normalizeVelocityAccount } from '@/integrations/perps/velocity/normalizeVelocityAccount';
 
 const QUOTE_SPOT_MARKET_INDEX = 0;
 
@@ -115,7 +116,9 @@ export async function fetchVelocityPortfolio(
       throw new Error('Velocity omitted an active perpetual market account.');
     }
 
-    const market = coder.decode<PerpMarketAccount>('PerpMarket', data);
+    const market = normalizeVelocityAccount<PerpMarketAccount>(
+      coder.decode<PerpMarketAccount>('PerpMarket', data),
+    );
 
     if (market.marketIndex !== expectedIndex) {
       throw new Error('Velocity returned a mismatched perpetual market account.');
@@ -130,9 +133,8 @@ export async function fetchVelocityPortfolio(
     throw new Error('Velocity omitted its quote spot market account.');
   }
 
-  const quoteSpotMarket = coder.decode<SpotMarketAccount>(
-    'SpotMarket',
-    quoteSpotData,
+  const quoteSpotMarket = normalizeVelocityAccount<SpotMarketAccount>(
+    coder.decode<SpotMarketAccount>('SpotMarket', quoteSpotData),
   );
 
   if (quoteSpotMarket.marketIndex !== QUOTE_SPOT_MARKET_INDEX) {
@@ -160,7 +162,7 @@ export async function fetchVelocityPortfolio(
       oracleByIndex.has(position.marketIndex),
     );
   const riskUser = supportsFullRisk
-    ? createReadOnlyUser(
+    ? createReadOnlyVelocityUser(
         userAddress,
         userAccount,
         accountSet.slot,
@@ -239,13 +241,14 @@ export async function fetchVelocityPortfolio(
   };
 }
 
-function createReadOnlyUser(
+export function createReadOnlyVelocityUser(
   address: PublicKey,
   account: UserAccount,
   slot: number,
   perpMarkets: ReadonlyMap<number, PerpMarketAccount>,
   quoteSpotMarket: SpotMarketAccount,
   oracles: ReadonlyMap<number, OraclePriceData>,
+  stateAccount?: StateAccount,
 ): User {
   const Bn = quoteSpotMarket.depositBalance.constructor as unknown as new (
     input: string,
@@ -288,6 +291,7 @@ function createReadOnlyUser(
       index === QUOTE_SPOT_MARKET_INDEX
         ? quoteSpotMarket
         : required(undefined, `spot market ${index}`),
+    getStateAccount: () => required(stateAccount, 'state account'),
   } as unknown as VelocityClient;
   const subscriber = {
     eventEmitter: new EventEmitter(),

@@ -99,6 +99,96 @@ export function formatAmount(amount: Amount): string {
   return negative ? `-${body}` : body;
 }
 
+export function formatAmountWithCommas(amount: Amount): string {
+  const [whole = '0', fraction] = formatAmount(amount).split('.');
+  const negative = whole.startsWith('-');
+  const digits = negative ? whole.slice(1) : whole;
+  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+  const body = fraction === undefined ? grouped : `${grouped}.${fraction}`;
+
+  return negative ? `-${body}` : body;
+}
+
+export function formatCompactTokenPrice(amount: Amount): string {
+  const magnitude = amount.baseUnits < 0n ? -amount.baseUnits : amount.baseUnits;
+  const unit = 10n ** BigInt(amount.decimals);
+  const decimals = magnitude >= 1_000n * unit
+    ? 2
+    : magnitude >= 100n * unit
+      ? 0
+      : magnitude >= unit
+        ? 1
+        : Math.min(amount.decimals, 8);
+  const body = formatRoundedMagnitude(magnitude, amount.decimals, decimals, true);
+
+  return amount.baseUnits < 0n ? `-$${body}` : `$${body}`;
+}
+
+export function formatCompactUsd(amount: Amount): string {
+  const negative = amount.baseUnits < 0n;
+  const magnitude = negative ? -amount.baseUnits : amount.baseUnits;
+  const unit = 10n ** BigInt(amount.decimals);
+  const scales = [
+    { value: 1_000_000_000_000n, suffix: 'T' },
+    { value: 1_000_000_000n, suffix: 'B' },
+    { value: 1_000_000n, suffix: 'M' },
+    { value: 1_000n, suffix: 'K' },
+  ] as const;
+
+  if (magnitude > 0n && magnitude * 100n < unit) {
+    return negative ? '-<$0.01' : '<$0.01';
+  }
+
+  const scale = scales.find((candidate) => magnitude >= candidate.value * unit);
+
+  if (scale !== undefined) {
+    const tenths = (magnitude * 10n + (scale.value * unit) / 2n) /
+      (scale.value * unit);
+    const fraction = tenths % 10n;
+    const body = fraction === 0n
+      ? (tenths / 10n).toString()
+      : `${tenths / 10n}.${fraction}`;
+
+    return `${negative ? '-' : ''}$${body}${scale.suffix}`;
+  }
+
+  const body = formatRoundedMagnitude(magnitude, amount.decimals, 2, false);
+  return `${negative ? '-' : ''}$${body}`;
+}
+
+export function formatDetailedUsd(amount: Amount): string {
+  const negative = amount.baseUnits < 0n;
+  const magnitude = negative ? -amount.baseUnits : amount.baseUnits;
+  const body = formatRoundedMagnitude(magnitude, amount.decimals, 2, false);
+
+  return `${negative ? '-' : ''}$${body}`;
+}
+
+function formatRoundedMagnitude(
+  magnitude: bigint,
+  sourceDecimals: TokenDecimals,
+  targetDecimals: number,
+  trimTrailingZeros: boolean,
+): string {
+  const factor = 10n ** BigInt(Math.max(sourceDecimals - targetDecimals, 0));
+  const rounded = sourceDecimals > targetDecimals
+    ? (magnitude + factor / 2n) / factor
+    : magnitude * 10n ** BigInt(targetDecimals - sourceDecimals);
+  const digits = rounded.toString().padStart(targetDecimals + 1, '0');
+  const whole = targetDecimals === 0 ? digits : digits.slice(0, -targetDecimals);
+  const fraction = targetDecimals === 0
+    ? ''
+    : digits.slice(-targetDecimals);
+  const visibleFraction = trimTrailingZeros
+    ? fraction.replace(/0+$/u, '')
+    : fraction;
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+
+  return visibleFraction.length === 0
+    ? grouped
+    : `${grouped}.${visibleFraction}`;
+}
+
 function assertSameScale(left: Amount, right: Amount): void {
   if (left.decimals !== right.decimals) {
     throw new AmountError(

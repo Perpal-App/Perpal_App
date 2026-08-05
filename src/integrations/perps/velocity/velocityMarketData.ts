@@ -15,6 +15,7 @@ import { amountFromBaseUnits, type Amount } from '@/domain/money/amount';
 import { fetchPublicProgramAccounts } from '@/integrations/api/publicSolanaRpc';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
 import type { PublicMarketPrice } from '@/integrations/perps/markets/publicMarketData';
+import { normalizeVelocityAccount } from '@/integrations/perps/velocity/normalizeVelocityAccount';
 
 const coder = new CustomBorshAccountsCoder<'PerpMarket'>(
   velocityIdl as unknown as ConstructorParameters<
@@ -69,7 +70,9 @@ export async function fetchVelocityMarketSnapshots(
       throw new Error('Velocity venue data requires a current Pyth price.');
     }
 
-    const decoded = coder.decode<PerpMarketAccount>('PerpMarket', data);
+    const decoded = normalizeVelocityAccount<PerpMarketAccount>(
+      coder.decode<PerpMarketAccount>('PerpMarket', data),
+    );
 
     if (decoded.marketIndex !== index) {
       throw new Error('Velocity returned a mismatched market account.');

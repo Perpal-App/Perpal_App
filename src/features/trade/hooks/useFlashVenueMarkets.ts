@@ -1,37 +1,30 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import type { PerpsProviderId } from '@/config/appConfig';
 import {
-  fetchVelocityMarketSnapshots,
-  type VelocityMarketSnapshot,
-} from '@/integrations/perps/velocity/velocityMarketData';
+  fetchFlashMarketSnapshots,
+  type FlashMarketSnapshot,
+} from '@/integrations/perps/flash/flashMarketData';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
-import type { PublicMarketPrice } from '@/integrations/perps/markets/publicMarketData';
 
 type VenueState = 'idle' | 'loading' | 'ready' | 'error';
 const REFRESH_INTERVAL_MS = 3_000;
 
-export function useVelocityVenueMarkets(
+export function useFlashVenueMarkets(
   provider: PerpsProviderId,
-  rpcUrl: string,
+  erRpcUrl: string,
   programId: string,
   markets: readonly MainnetMarket[],
-  prices: readonly PublicMarketPrice[],
 ) {
-  const [snapshots, setSnapshots] = useState<readonly VelocityMarketSnapshot[]>([]);
+  const [snapshots, setSnapshots] = useState<readonly FlashMarketSnapshot[]>([]);
   const [status, setStatus] = useState<VenueState>('idle');
-  const pricesRef = useRef(prices);
   const hasSnapshotsRef = useRef(false);
   const lastLoggedErrorRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    pricesRef.current = prices;
-  }, [prices]);
-
   useFocusEffect(
     useCallback(() => {
-      if (provider !== 'velocity' || rpcUrl.length === 0 || programId.length === 0) {
+      if (provider !== 'flash' || erRpcUrl.length === 0 || programId.length === 0) {
         hasSnapshotsRef.current = false;
         setSnapshots([]);
         setStatus('idle');
@@ -40,8 +33,7 @@ export function useVelocityVenueMarkets(
 
       let active = true;
       let controller: AbortController | null = null;
-      let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-      lastLoggedErrorRef.current = null;
+      let timer: ReturnType<typeof setTimeout> | undefined;
 
       const load = async (): Promise<void> => {
         controller?.abort();
@@ -52,11 +44,10 @@ export function useVelocityVenueMarkets(
         }
 
         try {
-          const next = await fetchVelocityMarketSnapshots(
-            rpcUrl,
+          const next = await fetchFlashMarketSnapshots(
+            erRpcUrl,
             programId,
             markets,
-            pricesRef.current,
             controller.signal,
           );
 
@@ -68,11 +59,13 @@ export function useVelocityVenueMarkets(
           }
         } catch (cause) {
           if (active && !controller.signal.aborted) {
-            const diagnostic = venueErrorDiagnostic(cause);
+            const diagnostic = cause instanceof Error
+              ? `${cause.name}:${cause.message}`
+              : typeof cause;
 
             if (lastLoggedErrorRef.current !== diagnostic) {
               lastLoggedErrorRef.current = diagnostic;
-              logVenueError(cause);
+              logFlashError(cause);
             }
 
             if (!hasSnapshotsRef.current) {
@@ -81,7 +74,7 @@ export function useVelocityVenueMarkets(
           }
         } finally {
           if (active) {
-            refreshTimer = setTimeout(() => void load(), REFRESH_INTERVAL_MS);
+            timer = setTimeout(() => void load(), REFRESH_INTERVAL_MS);
           }
         }
       };
@@ -92,28 +85,22 @@ export function useVelocityVenueMarkets(
         active = false;
         controller?.abort();
 
-        if (refreshTimer !== undefined) {
-          clearTimeout(refreshTimer);
+        if (timer !== undefined) {
+          clearTimeout(timer);
         }
       };
-    }, [markets, programId, provider, rpcUrl]),
+    }, [erRpcUrl, markets, programId, provider]),
   );
 
   return { snapshots, status };
 }
 
-function logVenueError(cause: unknown): void {
+function logFlashError(cause: unknown): void {
   if (__DEV__) {
-    console.error('[Perpal Velocity venue data failed]', {
+    console.error('[Perpal Flash ER venue data failed]', {
       errorName: cause instanceof Error ? cause.name : typeof cause,
       errorMessage:
-        cause instanceof Error ? cause.message : 'Unknown venue-data failure.',
+        cause instanceof Error ? cause.message : 'Unknown Flash ER failure.',
     });
   }
-}
-
-function venueErrorDiagnostic(cause: unknown): string {
-  return cause instanceof Error
-    ? `${cause.name}:${cause.message}`
-    : typeof cause;
 }

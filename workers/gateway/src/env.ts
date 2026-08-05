@@ -48,7 +48,7 @@ export type ResolvedCluster = 'mainnet';
 
 export type GatewayConfig = {
   readonly cluster: ResolvedCluster;
-  readonly perpsProviders: readonly ['flash-v2', 'drift-v2'];
+  readonly perpsProviders: readonly ['flash-v2', 'velocity'];
   readonly providers: readonly ProviderEndpoint[];
   readonly marketData: MarketDataConfig;
   readonly redis: { readonly url: string; readonly token: string } | null;
@@ -190,8 +190,8 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
 
   const perpsProviders = env.PERPS_PROVIDERS?.trim() ?? '';
 
-  if (perpsProviders !== 'flash-v2,drift-v2') {
-    missing.push('PERPS_PROVIDERS (must be "flash-v2,drift-v2")');
+  if (perpsProviders !== 'flash-v2,velocity') {
+    missing.push('PERPS_PROVIDERS (must be "flash-v2,velocity")');
   }
 
   const heliusKey = env.HELIUS_API_KEY?.trim() ?? '';
@@ -247,7 +247,7 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
 
   return {
     cluster,
-    perpsProviders: ['flash-v2', 'drift-v2'],
+    perpsProviders: ['flash-v2', 'velocity'],
     providers,
     marketData,
     redis:

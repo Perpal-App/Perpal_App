@@ -4,7 +4,11 @@ import {
   amountFromBaseUnits,
   applyBasisPoints,
   compareAmounts,
+  formatAmountWithCommas,
   formatAmount,
+  formatCompactTokenPrice,
+  formatCompactUsd,
+  formatDetailedUsd,
   isNegativeAmount,
   parseAmount,
   subtractAmounts,
@@ -67,6 +71,18 @@ describe('formatAmount', () => {
 
   it('formats negatives', () => {
     expect(formatAmount(amountFromBaseUnits(-2_500_000_000n, 9))).toBe('-2.5');
+  });
+});
+
+describe('display formatting', () => {
+  it('keeps exact math while fitting live market and portfolio values', () => {
+    const btc = amountFromBaseUnits(64_628_266_872n, 6);
+    const openInterest = amountFromBaseUnits(395_855_907_958n, 6);
+
+    expect(formatCompactTokenPrice(btc)).toBe('$64,628.27');
+    expect(formatCompactUsd(openInterest)).toBe('$395.9K');
+    expect(formatDetailedUsd(openInterest)).toBe('$395,855.91');
+    expect(formatAmountWithCommas(openInterest)).toBe('395,855.907958');
   });
 });
 

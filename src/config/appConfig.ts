@@ -11,6 +11,7 @@ export type AppConfig = {
   readonly perps: {
     readonly velocityProgramId: string;
     readonly flashProgramId: string;
+    readonly flashErRpc: string;
   };
   readonly api: {
     readonly origin: string;
@@ -47,6 +48,7 @@ export type RawAppEnv = {
   readonly marketStreamPath: string;
   readonly velocityProgramId: string;
   readonly flashProgramId: string;
+  readonly flashErRpc: string;
   readonly telemetryEnabled: string;
   readonly telemetrySampleRate: string;
   readonly privyAppId: string;
@@ -67,6 +69,7 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_VELOCITY_PROGRAM_ID?.trim() ?? '',
     flashProgramId:
       process.env.EXPO_PUBLIC_FLASH_PROGRAM_ID?.trim() ?? '',
+    flashErRpc: process.env.EXPO_PUBLIC_FLASH_ER_RPC?.trim() ?? '',
     telemetryEnabled: process.env.EXPO_PUBLIC_TELEMETRY_ENABLED?.trim() ?? '',
     telemetrySampleRate:
       process.env.EXPO_PUBLIC_TELEMETRY_SAMPLE_RATE?.trim() ?? '',
@@ -141,6 +144,32 @@ function validateAddress(
   return raw;
 }
 
+function validateFlashErRpc(raw: string, issues: ConfigIssue[]): string {
+  try {
+    const parsed = new URL(raw);
+
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0 ||
+      parsed.search.length > 0 ||
+      parsed.hash.length > 0 ||
+      parsed.pathname !== '/' ||
+      raw.endsWith('/')
+    ) {
+      throw new Error('invalid Flash ER RPC');
+    }
+  } catch {
+    issues.push({
+      variable: 'EXPO_PUBLIC_FLASH_ER_RPC',
+      problem: 'must be an HTTPS origin without credentials or a trailing slash',
+    });
+    return '';
+  }
+
+  return raw;
+}
+
 function validateSampleRate(raw: string, issues: ConfigIssue[]): number {
   if (raw.length === 0) {
     return 0;
@@ -196,6 +225,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_FLASH_PROGRAM_ID',
     issues,
   );
+  const flashErRpc = validateFlashErRpc(raw.flashErRpc, issues);
   const sampleRate = validateSampleRate(raw.telemetrySampleRate, issues);
 
   if (raw.privyAppId.length === 0) {
@@ -218,7 +248,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     value: {
       cluster: 'mainnet',
       privy: { appId: raw.privyAppId, clientId: raw.privyClientId },
-      perps: { velocityProgramId, flashProgramId },
+      perps: { velocityProgramId, flashProgramId, flashErRpc },
       api: {
         origin,
         rpcPath,

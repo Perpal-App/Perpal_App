@@ -7,7 +7,15 @@ import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig } from '@/config/appConfig';
-import { amountFromBaseUnits, formatAmount, type Amount } from '@/domain/money/amount';
+import {
+  amountFromBaseUnits,
+  formatAmount,
+  type Amount,
+} from '@/domain/money/amount';
+import { FlashPortfolioContent } from '@/features/portfolio/components/FlashPortfolioContent';
+import { VelocityCollateralDepositAction } from '@/features/portfolio/components/VelocityCollateralDepositAction';
+import { useFlashPortfolio } from '@/features/portfolio/hooks/useFlashPortfolio';
+import { VelocityInitializationAction } from '@/features/portfolio/components/VelocityInitializationAction';
 import { useVelocityPortfolio } from '@/features/portfolio/hooks/useVelocityPortfolio';
 import { usePublicMarkets } from '@/features/trade/hooks/usePublicMarkets';
 import type {
@@ -24,8 +32,11 @@ export function PortfolioScreen() {
   const config = readAppConfig();
   const preferences = useAppPreferences();
   const session = useTradingSession();
+  const isSessionReady = session.status === 'ready';
   const isVelocityReady =
-    preferences.selectedPerpsProvider === 'velocity' && session.status === 'ready';
+    preferences.selectedPerpsProvider === 'velocity' && isSessionReady;
+  const isFlashReady =
+    preferences.selectedPerpsProvider === 'flash' && isSessionReady;
   const markets = useMemo(() => listMainnetMarkets('velocity'), []);
   const publicMarkets = usePublicMarkets(
     config.ok ? config.value.api.marketDataUrl : '',
@@ -39,21 +50,17 @@ export function PortfolioScreen() {
     markets,
     publicMarkets.prices,
   );
-
-  if (preferences.selectedPerpsProvider === 'flash') {
-    return (
-      <PortfolioState
-        title="Flash portfolio unavailable"
-        message="Flash account data requires the production ER endpoint supplied by Flash. Select Velocity in Markets to use the connected mainnet path."
-      />
-    );
-  }
+  const flashPortfolio = useFlashPortfolio(
+    config.ok ? config.value.perps.flashErRpc : '',
+    config.ok ? config.value.perps.flashProgramId : '',
+    isFlashReady ? session.address : null,
+  );
 
   if (!config.ok) {
     return (
       <PortfolioState
         title="Configuration required"
-        message="The mainnet gateway or Velocity program configuration is invalid."
+        message="The mainnet gateway or provider configuration is invalid."
       />
     );
   }
@@ -100,8 +107,35 @@ export function PortfolioScreen() {
     );
   }
 
-  if (portfolio.status === 'loading' || portfolio.snapshot === null) {
-    return <LoadingState label="Loading Velocity portfolio" />;
+  if (session.address === null || session.signer === null) {
+    return (
+      <PortfolioState
+        title="Trading signer unavailable"
+        message="Lock and unlock the trading wallet again before using provider actions."
+      />
+    );
+  }
+
+  if (preferences.selectedPerpsProvider === 'flash') {
+    if (flashPortfolio.status === 'error') {
+      return (
+        <PortfolioState
+          title="Flash portfolio unavailable"
+          message="The Flash basket could not be read from the public ER. The app will retry while this tab remains open."
+        />
+      );
+    }
+
+    if (flashPortfolio.status === 'loading' || flashPortfolio.snapshot === null) {
+      return <LoadingState label="Loading Flash portfolio" />;
+    }
+
+    return (
+      <FlashPortfolioContent
+        snapshot={flashPortfolio.snapshot}
+        walletAddress={session.address}
+      />
+    );
   }
 
   if (portfolio.status === 'error') {
@@ -113,10 +147,19 @@ export function PortfolioScreen() {
     );
   }
 
+  if (portfolio.status === 'loading' || portfolio.snapshot === null) {
+    return <LoadingState label="Loading Velocity portfolio" />;
+  }
+
   return (
     <PortfolioContent
       snapshot={portfolio.snapshot}
       walletAddress={session.address}
+      initialization={{
+        programId: config.value.perps.velocityProgramId,
+        rpcUrl: config.value.api.rpcUrl,
+        signer: session.signer,
+      }}
     />
   );
 }
@@ -124,9 +167,15 @@ export function PortfolioScreen() {
 function PortfolioContent({
   snapshot,
   walletAddress,
+  initialization,
 }: {
   readonly snapshot: VelocityPortfolioSnapshot;
-  readonly walletAddress: string | null;
+  readonly walletAddress: string;
+  readonly initialization: {
+    readonly programId: string;
+    readonly rpcUrl: string;
+    readonly signer: NonNullable<ReturnType<typeof useTradingSession>['signer']>;
+  };
 }) {
   return (
     <AppScreen>
@@ -152,19 +201,19 @@ function PortfolioContent({
             </Text>
             <StatusRow
               label="Total collateral"
-              value={usdc(snapshot.margin.totalCollateral)}
+              value={usdt(snapshot.margin.totalCollateral)}
             />
             <StatusRow
               label="Free collateral"
-              value={usdc(snapshot.margin.freeCollateral)}
+              value={usdt(snapshot.margin.freeCollateral)}
             />
             <StatusRow
               label="Initial margin"
-              value={usdc(snapshot.margin.initialMargin)}
+              value={usdt(snapshot.margin.initialMargin)}
             />
             <StatusRow
               label="Maintenance margin"
-              value={usdc(snapshot.margin.maintenanceMargin)}
+              value={usdt(snapshot.margin.maintenanceMargin)}
             />
             <StatusRow
               label="Account health"
@@ -175,10 +224,18 @@ function PortfolioContent({
         )}
 
         {!snapshot.initialized ? (
-          <InlineState
-            title="Velocity account not initialized"
-            message="No Velocity user account exists for this trading wallet. Account creation belongs to the explicit funding or first-trade flow."
-          />
+          <View style={styles.positions}>
+            <InlineState
+              title="Velocity account not initialized"
+              message="No Velocity user account exists for this trading wallet. Account creation is an explicit verified mainnet action."
+            />
+            <VelocityInitializationAction
+              owner={walletAddress}
+              programId={initialization.programId}
+              rpcUrl={initialization.rpcUrl}
+              signer={initialization.signer}
+            />
+          </View>
         ) : snapshot.positions.length === 0 ? (
           <InlineState
             title="No open positions"
@@ -194,6 +251,15 @@ function PortfolioContent({
             ))}
           </View>
         )}
+
+        {snapshot.initialized ? (
+          <VelocityCollateralDepositAction
+            owner={walletAddress}
+            programId={initialization.programId}
+            rpcUrl={initialization.rpcUrl}
+            signer={initialization.signer}
+          />
+        ) : null}
 
         {snapshot.margin === null && snapshot.initialized ? (
           <InlineState
@@ -311,8 +377,8 @@ function money(amount: Amount): string {
   return `$${formatAmount(amount)}`;
 }
 
-function usdc(amount: Amount): string {
-  return `${formatAmount(amount)} USDC`;
+function usdt(amount: Amount): string {
+  return `${formatAmount(amount)} USDT`;
 }
 
 function signedMoney(amount: Amount): string {

@@ -34,6 +34,7 @@ type SignedGatewayRequest = {
   readonly url: string;
   readonly idempotencyKey?: string;
   readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 };
 
 type GatewayHeaderRequest = {
@@ -110,6 +111,7 @@ export async function postSignedGatewayRequest<T>({
   url,
   idempotencyKey,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  signal,
 }: SignedGatewayRequest): Promise<T> {
   const body = JSON.stringify(bodyValue);
   const headers = await createGatewayRequestHeaders({
@@ -122,6 +124,12 @@ export async function postSignedGatewayRequest<T>({
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+
+  if (signal?.aborted) {
+    controller.abort();
+  }
 
   try {
     const response = await fetch(url, {
@@ -161,5 +169,6 @@ export async function postSignedGatewayRequest<T>({
     );
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
   }
 }

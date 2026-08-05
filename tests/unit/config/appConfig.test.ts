@@ -9,6 +9,7 @@ const VALID: RawAppEnv = {
   marketStreamPath: '/v1/markets/stream',
   velocityProgramId: '11111111111111111111111111111111',
   flashProgramId: '11111111111111111111111111111111',
+  flashErRpc: 'https://flash.magicblock.xyz',
   telemetryEnabled: 'false',
   telemetrySampleRate: '0',
   privyAppId: 'app-id',
@@ -55,6 +56,7 @@ describe('parseAppConfig', () => {
     const variables = issueVariables({
       velocityProgramId: '',
       flashProgramId: 'invalid',
+      flashErRpc: 'http://flash.magicblock.xyz',
       marketDataPath: 'v1/markets',
     });
 
@@ -62,6 +64,7 @@ describe('parseAppConfig', () => {
       expect.arrayContaining([
         'EXPO_PUBLIC_VELOCITY_PROGRAM_ID',
         'EXPO_PUBLIC_FLASH_PROGRAM_ID',
+        'EXPO_PUBLIC_FLASH_ER_RPC',
         'EXPO_PUBLIC_MARKET_DATA_PATH',
       ]),
     );
