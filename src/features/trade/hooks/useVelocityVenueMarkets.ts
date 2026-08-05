@@ -3,23 +3,23 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { PerpsProviderId } from '@/config/appConfig';
 import {
-  fetchDriftMarketSnapshots,
-  type DriftMarketSnapshot,
-} from '@/integrations/perps/drift/driftMarketData';
+  fetchVelocityMarketSnapshots,
+  type VelocityMarketSnapshot,
+} from '@/integrations/perps/velocity/velocityMarketData';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
 import type { PublicMarketPrice } from '@/integrations/perps/markets/publicMarketData';
 
 type VenueState = 'idle' | 'loading' | 'ready' | 'error';
 const REFRESH_INTERVAL_MS = 3_000;
 
-export function useDriftVenueMarkets(
+export function useVelocityVenueMarkets(
   provider: PerpsProviderId,
   rpcUrl: string,
   programId: string,
   markets: readonly MainnetMarket[],
   prices: readonly PublicMarketPrice[],
 ) {
-  const [snapshots, setSnapshots] = useState<readonly DriftMarketSnapshot[]>([]);
+  const [snapshots, setSnapshots] = useState<readonly VelocityMarketSnapshot[]>([]);
   const [status, setStatus] = useState<VenueState>('idle');
   const pricesRef = useRef(prices);
   const hasSnapshotsRef = useRef(false);
@@ -30,7 +30,7 @@ export function useDriftVenueMarkets(
 
   useFocusEffect(
     useCallback(() => {
-      if (provider !== 'drift' || rpcUrl.length === 0 || programId.length === 0) {
+      if (provider !== 'velocity' || rpcUrl.length === 0 || programId.length === 0) {
         hasSnapshotsRef.current = false;
         setSnapshots([]);
         setStatus('idle');
@@ -50,7 +50,7 @@ export function useDriftVenueMarkets(
         }
 
         try {
-          const next = await fetchDriftMarketSnapshots(
+          const next = await fetchVelocityMarketSnapshots(
             rpcUrl,
             programId,
             markets,
@@ -96,7 +96,7 @@ export function useDriftVenueMarkets(
 
 function logVenueError(cause: unknown): void {
   if (__DEV__) {
-    console.error('[Perpal Drift venue data failed]', {
+    console.error('[Perpal Velocity venue data failed]', {
       errorName: cause instanceof Error ? cause.name : typeof cause,
     });
   }

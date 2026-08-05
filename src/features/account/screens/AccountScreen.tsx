@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
@@ -28,7 +28,17 @@ export function AccountScreen() {
   const preferences = useAppPreferences();
   const [signingOut, setSigningOut] = useState(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
+  const [replacingIdentity, setReplacingIdentity] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setReplacementConfirmed(false);
+    setReplacingIdentity(false);
+  }, [
+    tradingSession.recovery?.derived.address,
+    tradingSession.recovery?.recorded.address,
+  ]);
 
   // Privy's logout promise can resolve before consumers observe the new user
   // value. Keep the action pending until the root guard removes this route; if
@@ -64,7 +74,7 @@ export function AccountScreen() {
   const confirmTradingWalletReplacement = () => {
     const recovery = tradingSession.recovery;
 
-    if (recovery === null) {
+    if (recovery === null || !replacementConfirmed || replacingIdentity) {
       return;
     }
 
@@ -77,9 +87,16 @@ export function AccountScreen() {
           text: 'Replace',
           style: 'destructive',
           onPress: () => {
-            void tradingSession.replaceRecordedIdentity().catch(() => {
-              setError('The recorded trading wallet could not be replaced.');
-            });
+            setReplacingIdentity(true);
+            setError(null);
+            void tradingSession
+              .replaceRecordedIdentity()
+              .catch(() => {
+                setError('The recorded trading wallet could not be replaced.');
+              })
+              .finally(() => {
+                setReplacingIdentity(false);
+              });
           },
         },
       ],
@@ -159,8 +176,22 @@ export function AccountScreen() {
                   selectable
                   value={tradingSession.recovery.derived.address}
                 />
+                <View style={styles.replacementConfirmation}>
+                  <Switch
+                    accessibilityHint="Required before replacing the recorded trading wallet"
+                    accessibilityLabel="I verified the recorded wallet is empty"
+                    onValueChange={setReplacementConfirmed}
+                    value={replacementConfirmed}
+                  />
+                  <Text style={styles.replacementConfirmationText}>
+                    I verified the recorded wallet has no SOL, tokens, positions,
+                    or open orders.
+                  </Text>
+                </View>
                 <Button
+                  disabled={!replacementConfirmed || replacingIdentity}
                   label="Review wallet replacement"
+                  loading={replacingIdentity}
                   onPress={confirmTradingWalletReplacement}
                   variant="secondary"
                 />
@@ -196,7 +227,7 @@ export function AccountScreen() {
               value={
                 preferences.selectedPerpsProvider === 'flash'
                   ? 'Flash Trade v2'
-                  : 'Drift'
+                  : 'Velocity'
               }
             />
             <StatusRow label="Network" value="Solana mainnet" />
@@ -269,6 +300,17 @@ const styles = StyleSheet.create({
   walletStatus: {
     ...typography.bodyCompact,
     color: colors.textSecondary,
+  },
+  replacementConfirmation: {
+    minHeight: layout.minTouchTarget,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  replacementConfirmationText: {
+    ...typography.bodyCompact,
+    flex: 1,
+    color: colors.textPrimary,
   },
   footer: {
     gap: spacing.sm,

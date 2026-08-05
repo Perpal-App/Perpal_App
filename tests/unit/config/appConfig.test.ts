@@ -7,7 +7,7 @@ const VALID: RawAppEnv = {
   publicRpcPath: '/v1/rpc/public',
   marketDataPath: '/v1/markets',
   marketStreamPath: '/v1/markets/stream',
-  driftProgramId: '11111111111111111111111111111111',
+  velocityProgramId: '11111111111111111111111111111111',
   flashProgramId: '11111111111111111111111111111111',
   telemetryEnabled: 'false',
   telemetrySampleRate: '0',
@@ -53,14 +53,14 @@ describe('parseAppConfig', () => {
 
   it('rejects missing provider addresses and malformed paths', () => {
     const variables = issueVariables({
-      driftProgramId: '',
+      velocityProgramId: '',
       flashProgramId: 'invalid',
       marketDataPath: 'v1/markets',
     });
 
     expect(variables).toEqual(
       expect.arrayContaining([
-        'EXPO_PUBLIC_DRIFT_PROGRAM_ID',
+        'EXPO_PUBLIC_VELOCITY_PROGRAM_ID',
         'EXPO_PUBLIC_FLASH_PROGRAM_ID',
         'EXPO_PUBLIC_MARKET_DATA_PATH',
       ]),

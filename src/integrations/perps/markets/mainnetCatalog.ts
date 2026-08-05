@@ -1,5 +1,5 @@
-import { MainnetPerpMarkets } from '@drift-labs/sdk/lib/browser/constants/perpMarkets';
 import { PoolConfig } from '@flash_trade/flash-sdk-v2/dist/PoolConfig';
+import { MainnetPerpMarkets } from '@velocity-exchange/sdk/lib/browser/constants/perpMarkets';
 
 import type { PerpsProviderId } from '@/config/appConfig';
 
@@ -10,7 +10,7 @@ export type MainnetMarket = {
   readonly symbol: `${CoreAsset}-PERP`;
   readonly baseAsset: CoreAsset;
   readonly provider: PerpsProviderId;
-  readonly providerLabel: 'Flash Trade v2' | 'Drift';
+  readonly providerLabel: 'Flash Trade v2' | 'Velocity';
   readonly maxLeverage: number | null;
   readonly venueRef: string;
 };
@@ -18,7 +18,7 @@ export type MainnetMarket = {
 export function listMainnetMarkets(
   provider: PerpsProviderId,
 ): readonly MainnetMarket[] {
-  return provider === 'flash' ? listFlashMarkets() : listDriftMarkets();
+  return provider === 'flash' ? listFlashMarkets() : listVelocityMarkets();
 }
 
 function listFlashMarkets(): readonly MainnetMarket[] {
@@ -44,20 +44,20 @@ function listFlashMarkets(): readonly MainnetMarket[] {
   });
 }
 
-function listDriftMarkets(): readonly MainnetMarket[] {
+function listVelocityMarkets(): readonly MainnetMarket[] {
   return CORE_ASSETS.map((asset) => {
     const symbol = `${asset}-PERP` as const;
     const market = MainnetPerpMarkets.find((entry) => entry.symbol === symbol);
 
     if (market === undefined) {
-      throw new Error(`Drift does not configure ${symbol} on mainnet.`);
+      throw new Error(`Velocity does not configure ${symbol} on mainnet.`);
     }
 
     return {
       symbol,
       baseAsset: asset,
-      provider: 'drift',
-      providerLabel: 'Drift',
+      provider: 'velocity',
+      providerLabel: 'Velocity',
       maxLeverage: null,
       venueRef: market.marketIndex.toString(),
     };

@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
 import { formatAmount, type Amount } from '@/domain/money/amount';
-import { useDriftVenueMarkets } from '@/features/trade/hooks/useDriftVenueMarkets';
+import { useVelocityVenueMarkets } from '@/features/trade/hooks/useVelocityVenueMarkets';
 import { usePublicMarkets } from '@/features/trade/hooks/usePublicMarkets';
-import type { DriftMarketSnapshot } from '@/integrations/perps/drift/driftMarketData';
+import type { VelocityMarketSnapshot } from '@/integrations/perps/velocity/velocityMarketData';
 import {
   listMainnetMarkets,
   type MainnetMarket,
@@ -26,12 +26,12 @@ export function TradeScreen() {
   const marketDataUrl = config.ok ? config.value.api.marketDataUrl : '';
   const marketStreamUrl = config.ok ? config.value.api.marketStreamUrl : '';
   const publicRpcUrl = config.ok ? config.value.api.publicRpcUrl : '';
-  const driftProgramId = config.ok ? config.value.perps.driftProgramId : '';
+  const velocityProgramId = config.ok ? config.value.perps.velocityProgramId : '';
   const publicMarkets = usePublicMarkets(marketDataUrl, marketStreamUrl);
-  const venueMarkets = useDriftVenueMarkets(
+  const venueMarkets = useVelocityVenueMarkets(
     provider,
     publicRpcUrl,
-    driftProgramId,
+    velocityProgramId,
     markets,
     publicMarkets.prices,
   );
@@ -69,8 +69,8 @@ export function TradeScreen() {
             </View>
             <View style={styles.providerButton}>
               <ProviderButton
-                label="Drift"
-                provider="drift"
+                label="Velocity"
+                provider="velocity"
                 selected={provider}
                 select={preferences.selectPerpsProvider}
               />
@@ -131,7 +131,7 @@ export function TradeScreen() {
         <Text style={styles.footerNote}>
           {provider === 'flash'
             ? 'Flash venue metrics require the mainnet ER trading endpoint supplied by Flash. Pyth reference prices remain live and need no wallet.'
-            : 'Drift mark, bid, ask, funding, risk, and volume come from live mainnet market accounts. Pyth provides the current oracle input.'}
+            : 'Velocity mark, bid, ask, funding, risk, and volume come from live mainnet market accounts. Pyth provides the current oracle input.'}
         </Text>
       </View>
     </AppScreen>
@@ -165,7 +165,7 @@ function MarketCard({
 }: {
   readonly market: MainnetMarket;
   readonly price: PublicMarketPrice | null;
-  readonly venue: DriftMarketSnapshot | null;
+  readonly venue: VelocityMarketSnapshot | null;
 }) {
   const headlinePrice = venue?.markPrice ?? price?.price ?? null;
 
@@ -189,7 +189,7 @@ function MarketCard({
       {venue === null ? (
         <ReferenceRows market={market} price={price} />
       ) : (
-        <DriftRows price={price} venue={venue} />
+        <VenueRows price={price} venue={venue} />
       )}
     </View>
   );
@@ -224,12 +224,12 @@ function ReferenceRows({
   );
 }
 
-function DriftRows({
+function VenueRows({
   price,
   venue,
 }: {
   readonly price: PublicMarketPrice | null;
-  readonly venue: DriftMarketSnapshot;
+  readonly venue: VelocityMarketSnapshot;
 }) {
   return (
     <>
@@ -263,7 +263,7 @@ function DriftRows({
 function venueStatus(
   provider: PerpsProviderId,
   status: 'idle' | 'loading' | 'ready' | 'error',
-  snapshots: readonly DriftMarketSnapshot[],
+  snapshots: readonly VelocityMarketSnapshot[],
 ): string {
   if (provider === 'flash') {
     return 'Reference prices · ER endpoint required';

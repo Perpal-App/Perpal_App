@@ -5,7 +5,7 @@ import type { Amount } from '@/domain/money/amount';
  *
  * Everything above this boundary — screens, domain logic, the AI draft pipeline —
  * depends only on these types. Nothing here references a protocol SDK, so a
- * both Drift and Flash Trade v2 present an identical mainnet surface.
+ * both Velocity and Flash Trade v2 present an identical mainnet surface.
  *
  * Two deliberate choices:
  *
@@ -13,7 +13,7 @@ import type { Amount } from '@/domain/money/amount';
  *    A limit order without a price, or a stop without a trigger, is
  *    unrepresentable rather than validated at runtime.
  * 2. Venues declare capabilities instead of silently emulating what they lack.
- *    If Flash supports something Drift does not, the difference surfaces as an
+ *    If Flash supports something Velocity does not, the difference surfaces as an
  *    explicit refusal, never as a quietly different execution.
  */
 
@@ -192,7 +192,7 @@ export type MarginSummary = {
 /* ------------------------------------------------------------ capability --- */
 
 /**
- * Declared per venue so unsupported operations fail loudly. Drift and Flash
+ * Declared per venue so unsupported operations fail loudly. Velocity and Flash
  * differ, and pretending otherwise is how a "supported" order type
  * silently becomes a different one.
  */

@@ -2,23 +2,23 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
-  fetchDriftPortfolio,
-  type DriftPortfolioSnapshot,
-} from '@/integrations/perps/drift/driftPortfolio';
+  fetchVelocityPortfolio,
+  type VelocityPortfolioSnapshot,
+} from '@/integrations/perps/velocity/velocityPortfolio';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
 import type { PublicMarketPrice } from '@/integrations/perps/markets/publicMarketData';
 
 type PortfolioState = 'idle' | 'loading' | 'ready' | 'error';
 const REFRESH_INTERVAL_MS = 5_000;
 
-export function useDriftPortfolio(
+export function useVelocityPortfolio(
   rpcUrl: string,
   programId: string,
   walletAddress: string | null,
   markets: readonly MainnetMarket[],
   prices: readonly PublicMarketPrice[],
 ) {
-  const [snapshot, setSnapshot] = useState<DriftPortfolioSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<VelocityPortfolioSnapshot | null>(null);
   const [status, setStatus] = useState<PortfolioState>('idle');
   const marketsRef = useRef(markets);
   const pricesRef = useRef(prices);
@@ -61,7 +61,7 @@ export function useDriftPortfolio(
         }
 
         try {
-          const next = await fetchDriftPortfolio(
+          const next = await fetchVelocityPortfolio(
             rpcUrl,
             programId,
             walletAddress,
@@ -108,7 +108,7 @@ export function useDriftPortfolio(
 
 function logPortfolioError(cause: unknown): void {
   if (__DEV__) {
-    console.error('[Perpal Drift portfolio failed]', {
+    console.error('[Perpal Velocity portfolio failed]', {
       errorName: cause instanceof Error ? cause.name : typeof cause,
     });
   }

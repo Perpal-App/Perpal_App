@@ -30,8 +30,10 @@ export function writeOnboardingIntroSeen() {
 }
 
 export function readPerpsProvider(): PerpsProviderId {
-  return getPreferencesStorage().getString(PERPS_PROVIDER_KEY) === 'drift'
-    ? 'drift'
+  const persisted = getPreferencesStorage().getString(PERPS_PROVIDER_KEY);
+
+  return persisted === 'velocity' || persisted === 'drift'
+    ? 'velocity'
     : 'flash';
 }
 

@@ -8,14 +8,12 @@ import { AppScreen } from '@/components/layout/AppScreen';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmount, type Amount } from '@/domain/money/amount';
-import { useDriftPortfolio } from '@/features/portfolio/hooks/useDriftPortfolio';
-import { useDriftVenueMarkets } from '@/features/trade/hooks/useDriftVenueMarkets';
+import { useVelocityPortfolio } from '@/features/portfolio/hooks/useVelocityPortfolio';
 import { usePublicMarkets } from '@/features/trade/hooks/usePublicMarkets';
 import type {
-  DriftPortfolioPosition,
-  DriftPortfolioSnapshot,
-} from '@/integrations/perps/drift/driftPortfolio';
-import type { DriftMarketSnapshot } from '@/integrations/perps/drift/driftMarketData';
+  VelocityPortfolioPosition,
+  VelocityPortfolioSnapshot,
+} from '@/integrations/perps/velocity/velocityPortfolio';
 import { listMainnetMarkets } from '@/integrations/perps/markets/mainnetCatalog';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
@@ -26,25 +24,18 @@ export function PortfolioScreen() {
   const config = readAppConfig();
   const preferences = useAppPreferences();
   const session = useTradingSession();
-  const isDriftReady =
-    preferences.selectedPerpsProvider === 'drift' && session.status === 'ready';
-  const markets = useMemo(() => listMainnetMarkets('drift'), []);
+  const isVelocityReady =
+    preferences.selectedPerpsProvider === 'velocity' && session.status === 'ready';
+  const markets = useMemo(() => listMainnetMarkets('velocity'), []);
   const publicMarkets = usePublicMarkets(
     config.ok ? config.value.api.marketDataUrl : '',
     config.ok ? config.value.api.marketStreamUrl : '',
-    isDriftReady,
+    isVelocityReady,
   );
-  const venueMarkets = useDriftVenueMarkets(
-    isDriftReady ? 'drift' : 'flash',
+  const portfolio = useVelocityPortfolio(
     config.ok ? config.value.api.publicRpcUrl : '',
-    config.ok ? config.value.perps.driftProgramId : '',
-    markets,
-    publicMarkets.prices,
-  );
-  const portfolio = useDriftPortfolio(
-    config.ok ? config.value.api.publicRpcUrl : '',
-    config.ok ? config.value.perps.driftProgramId : '',
-    isDriftReady ? session.address : null,
+    config.ok ? config.value.perps.velocityProgramId : '',
+    isVelocityReady ? session.address : null,
     markets,
     publicMarkets.prices,
   );
@@ -53,7 +44,7 @@ export function PortfolioScreen() {
     return (
       <PortfolioState
         title="Flash portfolio unavailable"
-        message="Flash account data requires the production ER endpoint supplied by Flash. Select Drift in Markets to use the connected mainnet path."
+        message="Flash account data requires the production ER endpoint supplied by Flash. Select Velocity in Markets to use the connected mainnet path."
       />
     );
   }
@@ -62,7 +53,7 @@ export function PortfolioScreen() {
     return (
       <PortfolioState
         title="Configuration required"
-        message="The mainnet gateway or Drift program configuration is invalid."
+        message="The mainnet gateway or Velocity program configuration is invalid."
       />
     );
   }
@@ -110,14 +101,14 @@ export function PortfolioScreen() {
   }
 
   if (portfolio.status === 'loading' || portfolio.snapshot === null) {
-    return <LoadingState label="Loading Drift portfolio" />;
+    return <LoadingState label="Loading Velocity portfolio" />;
   }
 
   if (portfolio.status === 'error') {
     return (
       <PortfolioState
         title="Portfolio unavailable"
-        message="The Drift account could not be read. The app will retry while this tab remains open."
+        message="The Velocity account could not be read. The app will retry while this tab remains open."
       />
     );
   }
@@ -125,7 +116,6 @@ export function PortfolioScreen() {
   return (
     <PortfolioContent
       snapshot={portfolio.snapshot}
-      venues={venueMarkets.snapshots}
       walletAddress={session.address}
     />
   );
@@ -133,15 +123,11 @@ export function PortfolioScreen() {
 
 function PortfolioContent({
   snapshot,
-  venues,
   walletAddress,
 }: {
-  readonly snapshot: DriftPortfolioSnapshot;
-  readonly venues: readonly DriftMarketSnapshot[];
+  readonly snapshot: VelocityPortfolioSnapshot;
   readonly walletAddress: string | null;
 }) {
-  const venueBySymbol = new Map(venues.map((venue) => [venue.symbol, venue]));
-
   return (
     <AppScreen>
       <View style={styles.container}>
@@ -149,42 +135,84 @@ function PortfolioContent({
           <Text accessibilityRole="header" style={styles.title}>
             Portfolio
           </Text>
-          <Text style={styles.subtitle}>Drift · Solana mainnet</Text>
+          <Text style={styles.subtitle}>Velocity · Solana mainnet</Text>
         </View>
 
         <View style={styles.summary}>
           <StatusRow label="Trading wallet" value={shortAddress(walletAddress)} />
-          <StatusRow label="Drift account" value={shortAddress(snapshot.accountAddress)} />
+          <StatusRow label="Velocity account" value={shortAddress(snapshot.accountAddress)} />
           <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
           <StatusRow label="Account slot" value={snapshot.slot.toLocaleString()} />
         </View>
 
+        {snapshot.margin === null ? null : (
+          <View style={styles.summary}>
+            <Text accessibilityRole="header" style={styles.positionTitle}>
+              Margin and risk
+            </Text>
+            <StatusRow
+              label="Total collateral"
+              value={usdc(snapshot.margin.totalCollateral)}
+            />
+            <StatusRow
+              label="Free collateral"
+              value={usdc(snapshot.margin.freeCollateral)}
+            />
+            <StatusRow
+              label="Initial margin"
+              value={usdc(snapshot.margin.initialMargin)}
+            />
+            <StatusRow
+              label="Maintenance margin"
+              value={usdc(snapshot.margin.maintenanceMargin)}
+            />
+            <StatusRow
+              label="Account health"
+              value={`${snapshot.margin.healthPercent}%`}
+            />
+            <StatusRow label="Risk source" value="Velocity SDK · current Pyth" />
+          </View>
+        )}
+
         {!snapshot.initialized ? (
           <InlineState
-            title="Drift account not initialized"
-            message="No Drift user account exists for this trading wallet. Account creation belongs to the explicit funding or first-trade flow."
+            title="Velocity account not initialized"
+            message="No Velocity user account exists for this trading wallet. Account creation belongs to the explicit funding or first-trade flow."
           />
         ) : snapshot.positions.length === 0 ? (
           <InlineState
             title="No open positions"
-            message="This Drift account is live and currently has no core perpetual position."
+            message="This Velocity account is live and currently has no core perpetual position."
           />
         ) : (
           <View style={styles.positions}>
             {snapshot.positions.map((position) => (
               <PositionPanel
-                key={position.symbol}
+                key={position.marketIndex}
                 position={position}
-                venue={venueBySymbol.get(position.symbol) ?? null}
               />
             ))}
           </View>
         )}
 
-        {snapshot.unsupportedPositionCount > 0 ? (
+        {snapshot.margin === null && snapshot.initialized ? (
+          <InlineState
+            title="Aggregate risk unavailable"
+            message="The account contains a non-core perpetual or spot position. Those positions are shown where possible, but PerPal will not publish incomplete collateral or liquidation totals."
+          />
+        ) : null}
+
+        {snapshot.nonCorePositionCount > 0 ? (
           <Text accessibilityRole="alert" style={styles.warning}>
-            {snapshot.unsupportedPositionCount} non-core Drift position is not yet
-            rendered. It has not been included in the values above.
+            {snapshot.nonCorePositionCount} non-core Velocity position is shown with
+            the values that can be verified. It is excluded from aggregate risk.
+          </Text>
+        ) : null}
+
+        {snapshot.unsupportedSpotPositionCount > 0 ? (
+          <Text accessibilityRole="alert" style={styles.warning}>
+            {snapshot.unsupportedSpotPositionCount} non-USDT spot position is not
+            included in aggregate risk.
           </Text>
         ) : null}
       </View>
@@ -194,10 +222,8 @@ function PortfolioContent({
 
 function PositionPanel({
   position,
-  venue,
 }: {
-  readonly position: DriftPortfolioPosition;
-  readonly venue: DriftMarketSnapshot | null;
+  readonly position: VelocityPortfolioPosition;
 }) {
   return (
     <View style={styles.positionPanel}>
@@ -217,10 +243,18 @@ function PositionPanel({
         value={position.unrealizedPnl === null ? 'Unavailable' : signedMoney(position.unrealizedPnl)}
       />
       <StatusRow
-        label="Initial margin"
-        value={venue === null ? 'Loading venue risk' : money(initialMargin(position, venue))}
+        label="Estimated liquidation"
+        value={
+          position.liquidationPrice === null
+            ? 'Unavailable'
+            : money(position.liquidationPrice)
+        }
       />
       <StatusRow label="Open orders" value={position.openOrders.toString()} />
+      <StatusRow
+        label="Risk coverage"
+        value={position.coreMarket ? 'Core market · included' : 'Non-core · partial'}
+      />
     </View>
   );
 }
@@ -269,24 +303,16 @@ function InlineState({ title, message }: { readonly title: string; readonly mess
   );
 }
 
-function initialMargin(
-  position: DriftPortfolioPosition,
-  venue: DriftMarketSnapshot,
-): Amount {
-  const notional =
-    (position.size.baseUnits * venue.markPrice.baseUnits) / 1_000_000_000n;
-  return amountFromBaseUnits(
-    (notional * BigInt(venue.initialMarginBps)) / 10_000n,
-    6,
-  );
-}
-
 function shortAddress(address: string | null): string {
   return address === null ? '—' : `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
 function money(amount: Amount): string {
   return `$${formatAmount(amount)}`;
+}
+
+function usdc(amount: Amount): string {
+  return `${formatAmount(amount)} USDC`;
 }
 
 function signedMoney(amount: Amount): string {

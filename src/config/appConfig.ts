@@ -2,14 +2,14 @@ import { base58 } from '@scure/base';
 
 import type { PrivyPublicConfig } from '@/config/publicEnv';
 
-export type PerpsProviderId = 'flash' | 'drift';
+export type PerpsProviderId = 'flash' | 'velocity';
 export type SolanaCluster = 'mainnet';
 
 export type AppConfig = {
   readonly cluster: SolanaCluster;
   readonly privy: PrivyPublicConfig;
   readonly perps: {
-    readonly driftProgramId: string;
+    readonly velocityProgramId: string;
     readonly flashProgramId: string;
   };
   readonly api: {
@@ -45,7 +45,7 @@ export type RawAppEnv = {
   readonly publicRpcPath: string;
   readonly marketDataPath: string;
   readonly marketStreamPath: string;
-  readonly driftProgramId: string;
+  readonly velocityProgramId: string;
   readonly flashProgramId: string;
   readonly telemetryEnabled: string;
   readonly telemetrySampleRate: string;
@@ -63,8 +63,8 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_MARKET_DATA_PATH?.trim() ?? '',
     marketStreamPath:
       process.env.EXPO_PUBLIC_MARKET_STREAM_PATH?.trim() ?? '',
-    driftProgramId:
-      process.env.EXPO_PUBLIC_DRIFT_PROGRAM_ID?.trim() ?? '',
+    velocityProgramId:
+      process.env.EXPO_PUBLIC_VELOCITY_PROGRAM_ID?.trim() ?? '',
     flashProgramId:
       process.env.EXPO_PUBLIC_FLASH_PROGRAM_ID?.trim() ?? '',
     telemetryEnabled: process.env.EXPO_PUBLIC_TELEMETRY_ENABLED?.trim() ?? '',
@@ -126,7 +126,7 @@ function validatePath(
 
 function validateAddress(
   raw: string,
-  variable: 'EXPO_PUBLIC_DRIFT_PROGRAM_ID' | 'EXPO_PUBLIC_FLASH_PROGRAM_ID',
+  variable: 'EXPO_PUBLIC_VELOCITY_PROGRAM_ID' | 'EXPO_PUBLIC_FLASH_PROGRAM_ID',
   issues: ConfigIssue[],
 ): string {
   try {
@@ -186,9 +186,9 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_MARKET_STREAM_PATH',
     issues,
   );
-  const driftProgramId = validateAddress(
-    raw.driftProgramId,
-    'EXPO_PUBLIC_DRIFT_PROGRAM_ID',
+  const velocityProgramId = validateAddress(
+    raw.velocityProgramId,
+    'EXPO_PUBLIC_VELOCITY_PROGRAM_ID',
     issues,
   );
   const flashProgramId = validateAddress(
@@ -218,7 +218,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     value: {
       cluster: 'mainnet',
       privy: { appId: raw.privyAppId, clientId: raw.privyClientId },
-      perps: { driftProgramId, flashProgramId },
+      perps: { velocityProgramId, flashProgramId },
       api: {
         origin,
         rpcPath,

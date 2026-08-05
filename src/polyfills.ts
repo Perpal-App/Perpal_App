@@ -9,7 +9,7 @@
  * - `react-native-get-random-values`  crypto.getRandomValues (required by Privy
  *                             and by the audited key-derivation libraries)
  * - `@ethersproject/shims`    misc runtime shims required by Privy's peer set
- * - `buffer`                  required by Drift's `web3.js` transaction model
+ * - `buffer`                  required by the Solana SDK transaction models
  */
 import 'fast-text-encoding';
 import 'react-native-get-random-values';
