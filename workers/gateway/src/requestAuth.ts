@@ -23,10 +23,15 @@ type AuthenticationFailure = {
 };
 
 export type AuthenticationResult =
-  | { readonly ok: true; readonly actorHash: string; readonly bodyHash: string }
+  | {
+      readonly ok: true;
+      readonly actorHash: string;
+      readonly actorPublicKey: Uint8Array;
+      readonly bodyHash: string;
+    }
   | AuthenticationFailure;
 
-async function sha256Hex(value: string): Promise<string> {
+export async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(value),
@@ -132,7 +137,12 @@ export async function authenticateRequest({
     );
 
     return fresh
-      ? { ok: true, actorHash, bodyHash }
+      ? {
+          ok: true,
+          actorHash,
+          actorPublicKey: publicKeyBytes,
+          bodyHash,
+        }
       : { ok: false, code: 'replay_detected', status: 409 };
   } catch {
     return { ok: false, code: 'state_unavailable', status: 503 };

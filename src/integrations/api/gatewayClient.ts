@@ -35,6 +35,7 @@ type SignedGatewayRequest = {
   readonly idempotencyKey?: string;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  readonly authorizationToken?: string;
 };
 
 type GatewayHeaderRequest = {
@@ -112,6 +113,7 @@ export async function postSignedGatewayRequest<T>({
   idempotencyKey,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   signal,
+  authorizationToken,
 }: SignedGatewayRequest): Promise<T> {
   const body = JSON.stringify(bodyValue);
   const headers = await createGatewayRequestHeaders({
@@ -134,7 +136,12 @@ export async function postSignedGatewayRequest<T>({
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers,
+      headers: {
+        ...headers,
+        ...(authorizationToken === undefined
+          ? {}
+          : { authorization: `Bearer ${authorizationToken}` }),
+      },
       body,
       signal: controller.signal,
     });

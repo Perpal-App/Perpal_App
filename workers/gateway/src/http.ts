@@ -1,6 +1,7 @@
 import { gatewayHeaders } from '../../../src/integrations/api/gatewayProtocol';
 
 const ALLOWED_REQUEST_HEADERS = [
+  'authorization',
   'content-type',
   gatewayHeaders.idempotencyKey,
   gatewayHeaders.network,

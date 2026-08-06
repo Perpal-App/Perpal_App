@@ -50,6 +50,15 @@ export const DEFAULT_ROUTER_OPTIONS: RouterOptions = {
   timeoutMs: 8_000,
 };
 
+let sharedRouter: ProviderRouter | null = null;
+
+export function getProviderRouter(
+  providers: readonly ProviderEndpoint[],
+): ProviderRouter {
+  sharedRouter ??= new ProviderRouter(providers, DEFAULT_ROUTER_OPTIONS);
+  return sharedRouter;
+}
+
 const EWMA_ALPHA = 0.2;
 
 export class AllProvidersUnavailableError extends Error {

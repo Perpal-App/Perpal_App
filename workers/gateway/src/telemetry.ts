@@ -1,4 +1,5 @@
 import type { AnalyticsEngineBinding } from './env';
+import { errorResponse, jsonResponse } from './gatewayResponses';
 
 const MAX_EVENTS = 20;
 const MAX_TEXT = 96;
@@ -88,4 +89,42 @@ export function writeTelemetry(
       indexes: [event.operation],
     });
   }
+}
+
+export function handleTelemetryRequest(input: {
+  readonly dataset: AnalyticsEngineBinding | undefined;
+  readonly payload: unknown;
+  readonly traceId: string;
+}): { readonly response: Response; readonly outcome: 'ok' | 'error' | 'rejected' } {
+  const events = parseTelemetryEvents(input.payload);
+
+  if (events === null) {
+    return {
+      response: errorResponse(
+        400,
+        'invalid_telemetry',
+        'Telemetry payload is invalid.',
+        input.traceId,
+      ),
+      outcome: 'rejected',
+    };
+  }
+
+  if (input.dataset === undefined) {
+    return {
+      response: errorResponse(
+        503,
+        'telemetry_unavailable',
+        'Telemetry is unavailable.',
+        input.traceId,
+      ),
+      outcome: 'error',
+    };
+  }
+
+  writeTelemetry(input.dataset, events);
+  return {
+    response: jsonResponse({ accepted: events.length }, 202),
+    outcome: 'ok',
+  };
 }

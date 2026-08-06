@@ -2,7 +2,6 @@ import { gatewayHeaders } from '../../../src/integrations/api/gatewayProtocol';
 
 import {
   ConfigurationError,
-  redactUrl,
   resolveConfig,
   type WorkerEnv,
 } from './env';
@@ -14,9 +13,7 @@ import {
 } from './http';
 import {
   AllProvidersUnavailableError,
-  DEFAULT_ROUTER_OPTIONS,
-  ProviderRouter,
-  type ProviderEndpoint,
+  getProviderRouter,
 } from './providerRouter';
 import {
   beginIdempotentRequest,
@@ -30,41 +27,22 @@ import {
   validateRpcPayload,
   type JsonRpcRequest,
 } from './rpcValidation';
-import { parseTelemetryEvents, writeTelemetry } from './telemetry';
+import { handleTelemetryRequest } from './telemetry';
 import { MARKET_DATA_PATH, MARKET_STREAM_PATH } from './marketData';
 import { handlePublicMarketsRequest } from './publicMarketsHandler';
 import {
   handlePublicRpcRequest,
   PUBLIC_RPC_PATH,
 } from './publicRpcHandler';
+import {
+  errorResponse,
+  healthResponse,
+  JSON_HEADERS,
+  logGatewayRequest,
+} from './gatewayResponses';
 
-const JSON_HEADERS = { 'content-type': 'application/json' } as const;
 const MAX_RPC_BODY_BYTES = 256 * 1024;
 const MAX_TELEMETRY_BODY_BYTES = 16 * 1024;
-
-let router: ProviderRouter | null = null;
-
-function getRouter(providers: readonly ProviderEndpoint[]): ProviderRouter {
-  router ??= new ProviderRouter(providers, DEFAULT_ROUTER_OPTIONS);
-  return router;
-}
-
-function jsonResponse(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });
-}
-
-function errorResponse(
-  status: number,
-  code: string,
-  message: string,
-  traceId: string,
-): Response {
-  return jsonResponse({ error: { code, message }, traceId }, status);
-}
-
-function safeLog(fields: Readonly<Record<string, string | number | boolean>>) {
-  console.log(JSON.stringify(fields));
-}
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -88,7 +66,7 @@ export default {
 
       response.headers.set('server-timing', serverTiming({ ...timings, total }));
       response.headers.set('x-perpal-trace-id', traceId);
-      safeLog({
+      logGatewayRequest({
         traceId,
         route: url.pathname,
         operation,
@@ -136,7 +114,7 @@ export default {
       const result = await handlePublicRpcRequest(
         request,
         env,
-        getRouter(config.providers),
+        getProviderRouter(config.providers),
         allowedOrigins,
         traceId,
       );
@@ -169,24 +147,11 @@ export default {
         );
       }
 
-      const activeRouter = getRouter(config.providers);
       return complete(
-        jsonResponse({
-          status:
-            config.redis !== null &&
-            env.RATE_LIMITER !== undefined &&
-            env.GLOBAL_RATE_LIMITER !== undefined
-              ? 'ok'
-              : 'degraded',
-          cluster: config.cluster,
-          perpsProviders: config.perpsProviders,
-          providers: activeRouter.snapshot(),
-          endpoints: config.providers.map((provider) => redactUrl(provider.url)),
-          redisConfigured: config.redis !== null,
-          rateLimiterConfigured: env.RATE_LIMITER !== undefined,
-          globalRateLimiterConfigured: env.GLOBAL_RATE_LIMITER !== undefined,
-          telemetryConfigured: env.TELEMETRY !== undefined,
-          pythApiKeyConfigured: Boolean(config.marketData.apiKey),
+        await healthResponse({
+          config,
+          env,
+          router: getProviderRouter(config.providers),
           traceId,
         }),
         'ok',
@@ -319,28 +284,12 @@ export default {
     }
 
     if (url.pathname === '/v1/telemetry') {
-      const events = parseTelemetryEvents(bodyResult.payload);
-
-      if (events === null) {
-        return complete(
-          errorResponse(400, 'invalid_telemetry', 'Telemetry payload is invalid.', traceId),
-          'rejected',
-          operation,
-          { auth: authDuration },
-        );
-      }
-
-      if (env.TELEMETRY === undefined) {
-        return complete(
-          errorResponse(503, 'telemetry_unavailable', 'Telemetry is unavailable.', traceId),
-          'error',
-          operation,
-          { auth: authDuration },
-        );
-      }
-
-      writeTelemetry(env.TELEMETRY, events);
-      return complete(jsonResponse({ accepted: events.length }, 202), 'ok', operation, {
+      const result = handleTelemetryRequest({
+        dataset: env.TELEMETRY,
+        payload: bodyResult.payload,
+        traceId,
+      });
+      return complete(result.response, result.outcome, operation, {
         auth: authDuration,
       });
     }
@@ -429,7 +378,7 @@ export default {
     }
 
     const upstreamStarted = performance.now();
-    const activeRouter = getRouter(config.providers);
+    const activeRouter = getProviderRouter(config.providers);
 
     try {
       const result = await dispatchRpc(
@@ -477,13 +426,15 @@ export default {
 
       return complete(
         errorResponse(
-          cause instanceof AllProvidersUnavailableError ? 503 : 502,
           cause instanceof AllProvidersUnavailableError
-            ? 'providers_unavailable'
-            : 'upstream_failure',
+              ? 503
+              : 502,
           cause instanceof AllProvidersUnavailableError
-            ? 'All RPC providers are currently unavailable.'
-            : 'The RPC provider request failed.',
+              ? 'providers_unavailable'
+              : 'upstream_failure',
+          cause instanceof AllProvidersUnavailableError
+              ? 'All RPC providers are currently unavailable.'
+              : 'The RPC provider request failed.',
           traceId,
         ),
         'error',

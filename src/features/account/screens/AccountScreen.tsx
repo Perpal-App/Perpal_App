@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
+import { PrivateFundingPanel } from '@/features/account/components/PrivateFundingPanel';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
@@ -91,6 +92,11 @@ export function AccountScreen() {
               />
             ) : null}
           </View>
+
+          <PrivateFundingPanel
+            provider={preferences.selectedPerpsProvider}
+            tradingReady={tradingSession.status === 'ready'}
+          />
 
           <View style={styles.walletPanel}>
             <Text accessibilityRole="header" style={styles.walletTitle}>
