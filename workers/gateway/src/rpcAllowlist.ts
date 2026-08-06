@@ -28,6 +28,7 @@ const METHODS: Readonly<Record<string, MethodClass>> = {
   getMinimumBalanceForRentExemption: 'read',
   getFeeForMessage: 'read',
   getSignatureStatuses: 'read',
+  getSignaturesForAddress: 'read',
   getTransaction: 'read',
   getEpochInfo: 'read',
   getRecentPrioritizationFees: 'read',

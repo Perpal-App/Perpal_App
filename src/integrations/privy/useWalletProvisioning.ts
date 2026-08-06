@@ -40,9 +40,8 @@ const WalletProvisioningContext = createContext<WalletProvisioning | null>(null)
  * Privy links the wallet to the authenticated user. New users get M with Privy
  * recovery, while an existing M is provisioned onto a new device automatically.
  *
- * Creation/recovery is single-flight and guarded by Privy's wallet state. A
- * failed automatic attempt stays stopped until the user retries or signs in
- * again, preventing a network/configuration failure from becoming a retry loop.
+ * Privy creates missing wallets during login. Recovery is single-flight and a
+ * failed attempt stays stopped until the user retries or signs in again.
  */
 function useWalletProvisioningState(): WalletProvisioning {
   const { isReady, user } = usePrivy();
@@ -116,7 +115,7 @@ function useWalletProvisioningState(): WalletProvisioning {
       return;
     }
 
-    if (isNotCreated(wallet) || needsRecovery(wallet)) {
+    if (needsRecovery(wallet)) {
       void provision();
     }
   }, [isAuthenticated, provision, wallet]);
@@ -134,9 +133,7 @@ function useWalletProvisioningState(): WalletProvisioning {
         walletStatus: wallet.status,
       }),
       isProvisioning: provisioning || isCreating(wallet),
-      embeddedWalletAddress: isConnected(wallet)
-        ? (wallet.wallets[0]?.address ?? null)
-        : null,
+      embeddedWalletAddress: wallet.wallets?.[0]?.address ?? null,
       retry,
     }),
     [failed, isAuthenticated, provisioning, retry, wallet],

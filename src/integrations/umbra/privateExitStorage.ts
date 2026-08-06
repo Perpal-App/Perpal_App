@@ -22,6 +22,7 @@ export type PrivateExitRecord = {
   readonly phase: PrivateExitPhase;
   readonly generationIndex: string | null;
   readonly excludedNoteIds: readonly string[];
+  readonly scanStartLeafCounts: readonly string[] | null;
   readonly populateSignature: string | null;
   readonly depositSignature: string | null;
   readonly relayRequestId: string | null;
@@ -59,6 +60,7 @@ export async function writePrivateExitRecord(
 function parseRecord(value: string): PrivateExitRecord | null {
   try {
     const record = JSON.parse(value) as Record<string, unknown>;
+    const scanStartLeafCounts = record.scanStartLeafCounts ?? null;
     if (
       record.version !== 1 ||
       typeof record.id !== 'string' ||
@@ -71,6 +73,7 @@ function parseRecord(value: string): PrivateExitRecord | null {
       !nullableString(record.generationIndex) ||
       !Array.isArray(record.excludedNoteIds) ||
       !record.excludedNoteIds.every((entry) => typeof entry === 'string') ||
+      !nullableScanBoundary(scanStartLeafCounts) ||
       !nullableString(record.populateSignature) ||
       !nullableString(record.depositSignature) ||
       !nullableString(record.relayRequestId) ||
@@ -82,7 +85,7 @@ function parseRecord(value: string): PrivateExitRecord | null {
     ) {
       return null;
     }
-    return record as unknown as PrivateExitRecord;
+    return { ...record, scanStartLeafCounts } as unknown as PrivateExitRecord;
   } catch {
     return null;
   }
@@ -110,4 +113,10 @@ function unsigned(value: unknown): value is string {
 }
 function nullableUnsigned(value: unknown): value is string | null {
   return value === null || unsigned(value);
+}
+function nullableScanBoundary(value: unknown): value is readonly string[] | null {
+  return value === null || (
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === 'string' && /^\d+:\d+$/u.test(entry))
+  );
 }

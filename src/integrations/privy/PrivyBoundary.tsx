@@ -31,7 +31,7 @@ export function PrivyBoundary({ children }: PrivyBoundaryProps) {
       clientId={config.value.clientId}
       config={{
         embedded: {
-          solana: { createOnLogin: 'all-users' },
+          solana: { createOnLogin: 'users-without-wallets' },
         },
       }}
     >

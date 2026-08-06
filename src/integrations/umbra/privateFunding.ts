@@ -7,8 +7,6 @@ import {
   listTradingCollateralOptions,
   type ProviderCollateral,
 } from '@/integrations/perps/providerCollateral';
-import { fundSelectedProvider } from '@/integrations/perps/providerFunding';
-import { ensureProviderCollateral } from '@/integrations/perps/providerCollateralConversion';
 import {
   classifyPrivateFundingFailure,
   PrivateFundingError,
@@ -23,6 +21,11 @@ import {
   type PrivateFundingLegPhase,
   type PrivateFundingLegState,
 } from '@/integrations/umbra/privateFundingLeg';
+import { ensurePrivateFundingRegistration } from '@/integrations/umbra/privateFundingRegistration';
+import {
+  assertPrivateFundingPreflight,
+  preparePrivateFundingPreflight,
+} from '@/integrations/umbra/privateFundingPreflight';
 import {
   ensureWrappedSolReserve,
   WRAPPED_SOL_MINT,
@@ -64,7 +67,7 @@ export async function beginPrivateFunding(
 
   if (
     existing !== null &&
-    (existing.phase !== 'complete' || existing.providerDepositSignature === null)
+    existing.phase !== 'complete'
   ) {
     throw new PrivateFundingError(
       'Resume the pending private funding operation first.',
@@ -99,6 +102,7 @@ export async function beginPrivateFunding(
     phase: 'depositing',
     generationIndex: null,
     excludedNoteIds: [],
+    scanStartLeafCounts: null,
     populateSignature: null,
     depositSignature: null,
     relayRequestId: null,
@@ -109,6 +113,7 @@ export async function beginPrivateFunding(
     feeFundingWrapSignature: null,
     feeFundingGenerationIndex: null,
     feeFundingExcludedNoteIds: [],
+    feeFundingScanStartLeafCounts: null,
     feeFundingPopulateSignature: null,
     feeFundingDepositSignature: null,
     feeFundingRelayRequestId: null,
@@ -210,6 +215,18 @@ async function runPrivateFunding(
 
   try {
     await save(record);
+    if (hasNoSubmittedFundingStage(record)) {
+      assertPrivateFundingPreflight(await preparePrivateFundingPreflight({
+        amountBaseUnits: BigInt(record.amountBaseUnits),
+        collateralLegPending: true,
+        feeLegPending: true,
+        feeReserveLamports: input.feeReserveLamports,
+        mint: record.mint,
+        rpcUrl: input.config.api.rpcUrl,
+        signer: input.gatewaySigner,
+        walletAddress: input.mainWalletAddress,
+      }));
+    }
     const dependencies = createUmbraGatewayDependencies({
       gatewaySigner: input.gatewaySigner,
       mainWalletAddress: input.mainWalletAddress,
@@ -219,8 +236,16 @@ async function runPrivateFunding(
     const client = await createPrivateFundingClient({
       config: input.config,
       dependencies,
+      gatewaySigner: input.gatewaySigner,
       mainWalletAddress: input.mainWalletAddress,
     });
+    await save({ ...record, phase: 'proving', updatedAtMs: Date.now() });
+    await ensurePrivateFundingRegistration({
+      client,
+      config: input.config,
+      dependencies,
+    });
+    await save({ ...record, phase: 'depositing', updatedAtMs: Date.now() });
     const relayer = getUmbraRelayer({
       apiEndpoint: input.config.privacy.umbraRelayerUrl,
     });
@@ -267,26 +292,37 @@ async function runPrivateFunding(
         await save(withFeeReserveLeg(record, state));
       },
     });
-    record = await ensureProviderCollateral({
-      config: input.config,
-      onRecord: save,
-      record,
-      signer: input.gatewaySigner,
-    });
-    record = await fundSelectedProvider({
-      config: input.config,
-      record,
-      signer: input.gatewaySigner,
-      onRecord: save,
+    await save({
+      ...record,
+      phase: 'complete',
+      errorCode: null,
+      updatedAtMs: Date.now(),
     });
     return record;
   } catch (cause) {
-    const code = classifyPrivateFundingFailure(cause);
+    const classifiedCode = classifyPrivateFundingFailure(cause);
+    const code = classifiedCode === 'simulation_failed' && record.phase === 'provider-depositing'
+      ? `${record.provider}_deposit_simulation_failed`
+      : classifiedCode;
     await save({ ...record, errorCode: code, updatedAtMs: Date.now() });
     throw cause instanceof PrivateFundingError
       ? cause
       : new PrivateFundingError(privateFundingUserMessage(code), code);
   }
+}
+
+function hasNoSubmittedFundingStage(record: PrivateFundingRecord): boolean {
+  return [
+    record.populateSignature,
+    record.depositSignature,
+    record.relayRequestId,
+    record.claimSignature,
+    record.feeFundingWrapSignature,
+    record.feeFundingPopulateSignature,
+    record.feeFundingDepositSignature,
+    record.feeFundingRelayRequestId,
+    record.feeFundingSignature,
+  ].every((value) => value === null);
 }
 
 function collateralLeg(record: PrivateFundingRecord): PrivateFundingLegState {
@@ -301,6 +337,7 @@ function collateralLeg(record: PrivateFundingRecord): PrivateFundingLegState {
     populateSignature: record.populateSignature,
     relayRequestId: record.relayRequestId,
     relayerFixedFeeLamports: record.relayerFixedFeeLamports,
+    scanStartLeafCounts: record.scanStartLeafCounts,
     tradingWalletAddress: record.tradingWalletAddress,
   };
 }
@@ -317,6 +354,7 @@ function feeReserveLeg(record: PrivateFundingRecord): PrivateFundingLegState {
     populateSignature: record.feeFundingPopulateSignature,
     relayRequestId: record.feeFundingRelayRequestId,
     relayerFixedFeeLamports: record.feeFundingRelayerFixedFeeLamports,
+    scanStartLeafCounts: record.feeFundingScanStartLeafCounts,
     tradingWalletAddress: record.tradingWalletAddress,
   };
 }
@@ -331,6 +369,7 @@ function withCollateralLeg(
     phase,
     generationIndex: state.generationIndex,
     excludedNoteIds: state.excludedNoteIds,
+    scanStartLeafCounts: state.scanStartLeafCounts,
     populateSignature: state.populateSignature,
     depositSignature: state.depositSignature,
     relayRequestId: state.relayRequestId,
@@ -350,6 +389,7 @@ function withFeeReserveLeg(
     phase: 'fee-funding',
     feeFundingGenerationIndex: state.generationIndex,
     feeFundingExcludedNoteIds: state.excludedNoteIds,
+    feeFundingScanStartLeafCounts: state.scanStartLeafCounts,
     feeFundingPopulateSignature: state.populateSignature,
     feeFundingDepositSignature: state.depositSignature,
     feeFundingRelayRequestId: state.relayRequestId,

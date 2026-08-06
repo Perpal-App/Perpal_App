@@ -71,10 +71,7 @@ export async function assertTradingWalletRotationSafe(input: {
   if (tokenBalance !== 0n || token2022Balance !== 0n) {
     throw new TradingWalletRotationError('Withdraw every token balance from T first.');
   }
-  if (
-    funding !== null &&
-    (funding.phase !== 'complete' || funding.providerDepositSignature === null)
-  ) {
+  if (funding !== null && funding.phase !== 'complete') {
     throw new TradingWalletRotationError('Private funding is still pending.');
   }
   if (exit !== null && exit.phase !== 'complete') {

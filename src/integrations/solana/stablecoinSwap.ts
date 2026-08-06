@@ -171,6 +171,7 @@ export async function readTokenBalance(input: {
   readonly mint: string;
   readonly owner: string;
   readonly rpcUrl: string;
+  readonly signal?: AbortSignal;
   readonly signer: GatewayRequestSigner;
 }): Promise<bigint> {
   const tokenAccount = getAssociatedTokenAddressSync(
@@ -184,6 +185,7 @@ export async function readTokenBalance(input: {
     params: [tokenAccount.toBase58(), { commitment: 'confirmed', encoding: 'base64' }],
     rpcUrl: input.rpcUrl,
     signer: input.signer,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 
   if (account.value === null) {
@@ -197,6 +199,7 @@ export async function readTokenBalance(input: {
     params: [tokenAccount.toBase58(), { commitment: 'confirmed' }],
     rpcUrl: input.rpcUrl,
     signer: input.signer,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 
   if (balance.value.decimals !== 6 || !/^\d+$/u.test(balance.value.amount)) {

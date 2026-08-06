@@ -3,6 +3,7 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 import type { PerpsProviderId } from '@/config/appConfig';
+import { hasCompletedPrivateWalletFunding } from '@/integrations/umbra/privateFundingState';
 
 const MASTER_SEED_PREFIX = 'perpal.umbra.master-seed.v1.';
 const OPERATION_PREFIX = 'perpal.umbra.private-funding.v1.';
@@ -30,6 +31,7 @@ export type PrivateFundingRecord = {
   readonly phase: PrivateFundingPhase;
   readonly generationIndex: string | null;
   readonly excludedNoteIds: readonly string[];
+  readonly scanStartLeafCounts: readonly string[] | null;
   readonly populateSignature: string | null;
   readonly depositSignature: string | null;
   readonly relayRequestId: string | null;
@@ -40,6 +42,7 @@ export type PrivateFundingRecord = {
   readonly feeFundingWrapSignature: string | null;
   readonly feeFundingGenerationIndex: string | null;
   readonly feeFundingExcludedNoteIds: readonly string[];
+  readonly feeFundingScanStartLeafCounts: readonly string[] | null;
   readonly feeFundingPopulateSignature: string | null;
   readonly feeFundingDepositSignature: string | null;
   readonly feeFundingRelayRequestId: string | null;
@@ -111,6 +114,17 @@ export async function readPrivateFundingRecord(
     throw new Error('Stored private-funding recovery state is invalid.');
   }
 
+  if (parsed.phase !== 'complete' && hasCompletedPrivateWalletFunding(parsed)) {
+    const completed: PrivateFundingRecord = {
+      ...parsed,
+      phase: 'complete',
+      errorCode: null,
+      updatedAtMs: Date.now(),
+    };
+    await writePrivateFundingRecord(completed);
+    return completed;
+  }
+
   return parsed;
 }
 
@@ -133,10 +147,13 @@ function parseRecord(value: string): PrivateFundingRecord | null {
     const phase = record.phase;
     const noteAmountBaseUnits = record.noteAmountBaseUnits ?? null;
     const relayerFixedFeeLamports = record.relayerFixedFeeLamports ?? null;
+    const scanStartLeafCounts = record.scanStartLeafCounts ?? null;
     const feeFundingLamports = record.feeFundingLamports ?? null;
     const feeFundingWrapSignature = record.feeFundingWrapSignature ?? null;
     const feeFundingGenerationIndex = record.feeFundingGenerationIndex ?? null;
     const feeFundingExcludedNoteIds = record.feeFundingExcludedNoteIds ?? [];
+    const feeFundingScanStartLeafCounts =
+      record.feeFundingScanStartLeafCounts ?? null;
     const feeFundingPopulateSignature = record.feeFundingPopulateSignature ?? null;
     const feeFundingDepositSignature = record.feeFundingDepositSignature ?? null;
     const feeFundingRelayRequestId = record.feeFundingRelayRequestId ?? null;
@@ -172,6 +189,7 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       !nullableString(record.generationIndex) ||
       !Array.isArray(record.excludedNoteIds) ||
       !record.excludedNoteIds.every((entry) => typeof entry === 'string') ||
+      !nullableScanBoundary(scanStartLeafCounts) ||
       !nullableString(record.populateSignature) ||
       !nullableString(record.depositSignature) ||
       !nullableString(record.relayRequestId) ||
@@ -183,6 +201,7 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       !nullableString(feeFundingGenerationIndex) ||
       !Array.isArray(feeFundingExcludedNoteIds) ||
       !feeFundingExcludedNoteIds.every((entry) => typeof entry === 'string') ||
+      !nullableScanBoundary(feeFundingScanStartLeafCounts) ||
       !nullableString(feeFundingPopulateSignature) ||
       !nullableString(feeFundingDepositSignature) ||
       !nullableString(feeFundingRelayRequestId) ||
@@ -209,10 +228,12 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       ...record,
       noteAmountBaseUnits,
       relayerFixedFeeLamports,
+      scanStartLeafCounts,
       feeFundingLamports,
       feeFundingWrapSignature,
       feeFundingGenerationIndex,
       feeFundingExcludedNoteIds,
+      feeFundingScanStartLeafCounts,
       feeFundingPopulateSignature,
       feeFundingDepositSignature,
       feeFundingRelayRequestId,
@@ -256,6 +277,15 @@ function nullableString(value: unknown): value is string | null {
 
 function nullableUnsignedInteger(value: unknown): value is string | null {
   return value === null || (typeof value === 'string' && /^\d+$/u.test(value));
+}
+
+function nullableScanBoundary(
+  value: unknown,
+): value is readonly string[] | null {
+  return value === null || (
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === 'string' && /^\d+:\d+$/u.test(entry))
+  );
 }
 
 function isPhase(value: unknown): value is PrivateFundingPhase {

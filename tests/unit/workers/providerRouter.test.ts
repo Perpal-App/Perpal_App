@@ -133,6 +133,7 @@ describe('ProviderRouter', () => {
 describe('rpcAllowlist', () => {
   it('classifies reads, heavy reads, and writes', () => {
     expect(classifyMethod('getAccountInfo')).toBe('read');
+    expect(classifyMethod('getSignaturesForAddress')).toBe('read');
     expect(classifyMethod('simulateTransaction')).toBe('heavy-read');
     expect(classifyMethod('sendTransaction')).toBe('write');
   });

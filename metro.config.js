@@ -10,24 +10,23 @@ const nativePlatforms = ['ios', 'android', 'tvos', 'macos'];
 // extension so lottie-react-native can load them.
 config.resolver.assetExts.push('lottie');
 
-// React Native supplies Web APIs, not Node's `crypto` module. Privy's `jose`
-// dependency explicitly exports a browser/WebCrypto build, but package exports
-// otherwise fall through from the native-only `react-native` condition to its
-// Node `import` build. Assert `browser` for native platforms so Metro selects the
-// intended WebCrypto entry instead of trying to bundle Node `crypto`/`buffer`.
-for (const platform of nativePlatforms) {
-  const conditions = config.resolver.unstable_conditionsByPlatform[platform];
-
-  if (!conditions.includes('browser')) {
-    conditions.push('browser');
-  }
-}
-
-// @noble/hashes 1.8 maps its valid `./crypto` export to `./crypto.js` in
-// browsers, but does not export that redirected subpath. Metro warns before
-// falling back to this same file. Resolve only Noble's internal request to the
-// intended browser implementation, preserving package exports everywhere else.
+// Privy's `jose` needs its WebCrypto build, but enabling the `browser` condition
+// globally makes Solana Kit bypass its React Native assertions. Keep both
+// resolver workarounds package-scoped so native exports remain authoritative.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (nativePlatforms.includes(platform) && moduleName === 'jose') {
+    const packageRoot = path.dirname(
+      require.resolve('jose/package.json', {
+        paths: [path.dirname(context.originModulePath)],
+      }),
+    );
+
+    return {
+      filePath: path.join(packageRoot, 'dist', 'browser', 'index.js'),
+      type: 'sourceFile',
+    };
+  }
+
   const isNobleCryptoRequest =
     moduleName === '@noble/hashes/crypto' ||
     moduleName === '@noble/hashes/crypto.js';

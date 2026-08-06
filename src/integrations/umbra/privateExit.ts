@@ -55,6 +55,7 @@ export async function beginPrivateExit(
     phase: 'depositing',
     generationIndex: null,
     excludedNoteIds: [],
+    scanStartLeafCounts: null,
     populateSignature: null,
     depositSignature: null,
     relayRequestId: null,
@@ -113,6 +114,7 @@ async function runExit(
     const client = await createPrivateFundingClient({
       config: input.config,
       dependencies,
+      gatewaySigner: input.gatewaySigner,
       mainWalletAddress: input.sourceWalletAddress,
     });
     const relayer = getUmbraRelayer({ apiEndpoint: input.config.privacy.umbraRelayerUrl });
@@ -146,6 +148,7 @@ function leg(record: PrivateExitRecord): PrivateFundingLegState {
     populateSignature: record.populateSignature,
     relayRequestId: record.relayRequestId,
     relayerFixedFeeLamports: record.relayerFixedFeeLamports,
+    scanStartLeafCounts: record.scanStartLeafCounts,
     tradingWalletAddress: record.destinationAddress,
   };
 }
@@ -160,6 +163,7 @@ function withLeg(
     phase,
     generationIndex: state.generationIndex,
     excludedNoteIds: state.excludedNoteIds,
+    scanStartLeafCounts: state.scanStartLeafCounts,
     populateSignature: state.populateSignature,
     depositSignature: state.depositSignature,
     relayRequestId: state.relayRequestId,

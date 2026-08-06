@@ -4,9 +4,13 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
+import { amountFromBaseUnits, formatAmount } from '@/domain/money/amount';
 import { PrivateFundingPanel } from '@/features/account/components/PrivateFundingPanel';
+import { useWalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
+import { usePrivateFunding } from '@/integrations/umbra/PrivateFundingProvider';
+import type { PrivateFundingRecord } from '@/integrations/umbra/umbraSecureStorage';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 import {
@@ -21,6 +25,12 @@ export function AccountScreen() {
   const walletProvisioning = useWalletProvisioning();
   const tradingSession = useTradingSession();
   const preferences = useAppPreferences();
+  const funding = usePrivateFunding();
+  const walletBalances = useWalletBalances({
+    privateAddress: tradingSession.address,
+    publicAddress: walletProvisioning.embeddedWalletAddress,
+    signer: tradingSession.signer,
+  });
   const [signingOut, setSigningOut] = useState(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +76,7 @@ export function AccountScreen() {
         <View style={styles.body}>
           <View style={styles.section}>
             <Text accessibilityRole="header" style={styles.walletTitle}>
-              Public wallet
+              Public wallet (M)
             </Text>
             {walletProvisioning.embeddedWalletAddress ? (
               <StatusRow
@@ -100,13 +110,13 @@ export function AccountScreen() {
 
           <View style={styles.section}>
             <Text accessibilityRole="header" style={styles.walletTitle}>
-              Private trading
+              Private trading wallet (T)
             </Text>
             <Text style={styles.walletStatus}>
               {tradingSessionMessage(tradingSession.status)}
             </Text>
             {tradingSession.address ? (
-              <StatusRow label="Address" selectable value={tradingSession.address} />
+              <StatusRow label="T address" selectable value={tradingSession.address} />
             ) : null}
             {tradingSession.recovery ? (
               <View style={styles.notice}>
@@ -152,6 +162,47 @@ export function AccountScreen() {
               <Button label="Verifying zero balances" loading onPress={() => undefined} />
             ) : null}
           </View>
+
+          {tradingSession.status === 'ready' ? (
+            <View style={styles.section}>
+              <Text accessibilityRole="header" style={styles.walletTitle}>
+                Funds location
+              </Text>
+              <StatusRow
+                label="Private funding"
+                value={privateFundingLocation(funding.record)}
+              />
+              {walletBalances.balances ? (
+                <>
+                  <StatusRow
+                    label="Public M"
+                    value={stablecoinBalances(walletBalances.balances.publicWallet)}
+                  />
+                  <StatusRow
+                    label="M fee balance"
+                    value={solBalance(walletBalances.balances.publicWallet.solLamports)}
+                  />
+                  <StatusRow
+                    label="Private T"
+                    value={stablecoinBalances(walletBalances.balances.privateWallet)}
+                  />
+                  <StatusRow
+                    label="T fee balance"
+                    value={solBalance(walletBalances.balances.privateWallet.solLamports)}
+                  />
+                </>
+              ) : (
+                <Text accessibilityLiveRegion="polite" style={styles.walletStatus}>
+                  {walletBalances.status === 'error'
+                    ? 'Balances unavailable. Retrying.'
+                    : 'Loading wallet balances.'}
+                </Text>
+              )}
+              <Text style={styles.walletStatus}>
+                Venue collateral appears in Portfolio only while allocated to a trade.
+              </Text>
+            </View>
+          ) : null}
 
           {tradingSession.status === 'ready' ? (
             <PrivateFundingPanel
@@ -219,12 +270,35 @@ function tradingSessionMessage(status: TradingSessionStatus): string {
     case 'rotating':
       return 'Checking balances, positions, orders, and pending private transfers.';
     case 'ready':
-      return 'Ready. Add funds below, then trade from Markets.';
+      return 'Ready. Private funds stay in T until a trade allocates collateral.';
     case 'recovery-required':
       return 'The recovered identity differs from the recorded wallet, so trading is blocked.';
     case 'error':
       return 'The saved private trading wallet could not be verified.';
   }
+}
+
+function privateFundingLocation(record: PrivateFundingRecord | null): string {
+  if (record === null) return 'No private transfer';
+  if (record.providerDepositSignature !== null) {
+    return record.provider === 'flash'
+      ? 'Flash execution account'
+      : 'Velocity execution account';
+  }
+  if (record.claimSignature !== null) return 'Private wallet T';
+  if (record.depositSignature !== null) return 'Umbra pool';
+  return 'Public wallet M';
+}
+
+function stablecoinBalances(balance: {
+  readonly usdcBaseUnits: bigint;
+  readonly usdtBaseUnits: bigint;
+}): string {
+  return `${formatAmount(amountFromBaseUnits(balance.usdcBaseUnits, 6))} USDC · ${formatAmount(amountFromBaseUnits(balance.usdtBaseUnits, 6))} USDT`;
+}
+
+function solBalance(lamports: bigint): string {
+  return `${formatAmount(amountFromBaseUnits(lamports, 9))} SOL`;
 }
 
 const styles = StyleSheet.create({

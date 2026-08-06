@@ -12,13 +12,23 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { AppState } from 'react-native';
 
 import { readAppConfig } from '@/config/appConfig';
 import {
   beginPrivateFunding,
   resumePrivateFunding,
 } from '@/integrations/umbra/privateFunding';
-import { PrivateFundingError } from '@/integrations/umbra/privateFundingErrors';
+import {
+  classifyPrivateFundingFailure,
+  PrivateFundingError,
+  privateFundingUserMessage,
+} from '@/integrations/umbra/privateFundingErrors';
+import {
+  preparePrivateFundingPreflight,
+  type PrivateFundingPreflight,
+  type PrivateFundingPreflightInput,
+} from '@/integrations/umbra/privateFundingPreflight';
 import {
   readPrivateFundingRecord,
   type PrivateFundingRecord,
@@ -27,10 +37,23 @@ import type { PerpsProviderId } from '@/config/appConfig';
 import type { ProviderCollateral } from '@/integrations/perps/providerCollateral';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
+type BalanceCheckInput = Pick<
+  PrivateFundingPreflightInput,
+  | 'amountBaseUnits'
+  | 'collateralLegPending'
+  | 'feeLegPending'
+  | 'feeReserveLamports'
+  | 'mint'
+>;
+
 type PrivateFundingState = {
   readonly record: PrivateFundingRecord | null;
+  readonly preflight: PrivateFundingPreflight | null;
+  readonly preflightError: string | null;
+  readonly isChecking: boolean;
   readonly isRunning: boolean;
   readonly error: string | null;
+  readonly check: (input: BalanceCheckInput) => Promise<PrivateFundingPreflight>;
   readonly start: (
     amountBaseUnits: bigint,
     feeReserveLamports: bigint,
@@ -49,19 +72,32 @@ export function PrivateFundingProvider({
 }) {
   const wallet = useEmbeddedSolanaWallet();
   const tradingSession = useTradingSession();
-  const mainWalletAddress = isConnected(wallet)
-    ? (wallet.wallets[0]?.address ?? null)
-    : null;
+  const mainWalletAddress = wallet.wallets?.[0]?.address ?? null;
   const [record, setRecord] = useState<PrivateFundingRecord | null>(null);
+  const [preflight, setPreflight] = useState<PrivateFundingPreflight | null>(null);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [activeRefresh, setActiveRefresh] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const runningRef = useRef(false);
-  const autoResumedRef = useRef<string | null>(null);
+  const preflightRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    autoResumedRef.current = null;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        setActiveRefresh((value) => value + 1);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
     setRecord(null);
+    setPreflight(null);
+    setPreflightError(null);
     setError(null);
+    preflightRef.current?.abort();
 
     if (mainWalletAddress === null) {
       return;
@@ -84,6 +120,82 @@ export function PrivateFundingProvider({
       cancelled = true;
     };
   }, [mainWalletAddress]);
+
+  const check = useCallback(async (
+    input: BalanceCheckInput,
+  ): Promise<PrivateFundingPreflight> => {
+    const config = readAppConfig();
+
+    if (!config.ok || mainWalletAddress === null || tradingSession.signer === null) {
+      throw new PrivateFundingError(
+        'Public-wallet balances are unavailable.',
+        'balance_unavailable',
+      );
+    }
+
+    preflightRef.current?.abort();
+    const controller = new AbortController();
+    preflightRef.current = controller;
+    setIsChecking(true);
+    setPreflight(null);
+    setPreflightError(null);
+
+    try {
+      const result = await preparePrivateFundingPreflight({
+        ...input,
+        rpcUrl: config.value.api.rpcUrl,
+        signer: tradingSession.signer,
+        signal: controller.signal,
+        walletAddress: mainWalletAddress,
+      });
+
+      if (preflightRef.current === controller) {
+        setPreflight(result);
+      }
+      return result;
+    } catch (cause) {
+      const safeCause = cause instanceof PrivateFundingError
+        ? cause
+        : new PrivateFundingError(
+          'Public-wallet balances could not be checked.',
+          'balance_unavailable',
+        );
+      if (!controller.signal.aborted && preflightRef.current === controller) {
+        setPreflightError(safeCause.message);
+      }
+      throw safeCause;
+    } finally {
+      if (preflightRef.current === controller) {
+        preflightRef.current = null;
+        setIsChecking(false);
+      }
+    }
+  }, [mainWalletAddress, tradingSession.signer]);
+
+  useEffect(() => {
+    if (
+      record === null ||
+      record.feeFundingLamports === null ||
+      record.phase === 'complete'
+    ) {
+      return;
+    }
+
+    void check({
+      amountBaseUnits: BigInt(record.amountBaseUnits),
+      collateralLegPending:
+        record.depositSignature === null && record.claimSignature === null,
+      feeLegPending:
+        record.feeFundingDepositSignature === null &&
+        record.feeFundingSignature === null,
+      feeReserveLamports: BigInt(record.feeFundingLamports),
+      mint: record.mint,
+    }).catch(() => undefined);
+
+    return () => {
+      preflightRef.current?.abort();
+    };
+  }, [activeRefresh, check, record]);
 
   const operationInput = useCallback(async () => {
     const config = readAppConfig();
@@ -129,10 +241,16 @@ export function PrivateFundingProvider({
     try {
       setRecord(await action());
     } catch (cause) {
+      const errorCode = classifyPrivateFundingFailure(cause);
+      console.error('[Perpal private funding]', JSON.stringify({
+        event: 'failed',
+        errorCode,
+        errorName: cause instanceof Error ? cause.name : typeof cause,
+      }));
       setError(
-        cause instanceof PrivateFundingError
+        `${cause instanceof PrivateFundingError
           ? cause.message
-          : 'Private funding did not complete. Resume it safely.',
+          : privateFundingUserMessage(errorCode)} Error reference: ${errorCode}.`,
       );
     } finally {
       runningRef.current = false;
@@ -166,7 +284,7 @@ export function PrivateFundingProvider({
   const resume = useCallback(async (feeReserveLamports?: bigint) => {
     if (
       record === null ||
-      (record.phase === 'complete' && record.providerDepositSignature !== null)
+      record.phase === 'complete'
     ) {
       return;
     }
@@ -181,30 +299,29 @@ export function PrivateFundingProvider({
     );
   }, [operationInput, record, run]);
 
-  useEffect(() => {
-    if (
-      record === null ||
-      (record.phase === 'complete' && record.providerDepositSignature !== null) ||
-      record.phase === 'depositing' ||
-      record.feeFundingLamports === null ||
-      autoResumedRef.current === record.id ||
-      isRunning
-    ) {
-      return;
-    }
-
-    autoResumedRef.current = record.id;
-    console.info('[Perpal recovery]', JSON.stringify({
-      event: 'auto_resume',
-      operation: 'private_funding',
-      phase: record.phase,
-    }));
-    void resume();
-  }, [isRunning, record, resume]);
-
   const value = useMemo(
-    () => ({ record, isRunning, error, start, resume }),
-    [error, isRunning, record, resume, start],
+    () => ({
+      check,
+      error,
+      isChecking,
+      isRunning,
+      preflight,
+      preflightError,
+      record,
+      resume,
+      start,
+    }),
+    [
+      check,
+      error,
+      isChecking,
+      isRunning,
+      preflight,
+      preflightError,
+      record,
+      resume,
+      start,
+    ],
   );
 
   return (

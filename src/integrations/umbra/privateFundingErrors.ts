@@ -16,18 +16,26 @@ export function classifyPrivateFundingFailure(cause: unknown): string {
   if (
     typeof cause === 'object' &&
     cause !== null &&
-    typeof (cause as { code?: unknown }).code === 'string' &&
-    (
-      (cause as { code: string }).code.includes('fee_') ||
-      (cause as { code: string }).code.startsWith('swap_') ||
+    typeof (cause as { code?: unknown }).code === 'string'
+  ) {
+    const code = (cause as { code: string }).code.toLowerCase();
+
+    if (
+      code.includes('fee_') ||
+      code.startsWith('swap_') ||
+      code.startsWith('create_utxo_') ||
+      code.startsWith('fetch_utxos_') ||
+      code.startsWith('relayer_') ||
+      code.startsWith('rpc_') ||
+      code.startsWith('master_seed_') ||
       [
         'balance_invalid',
         'plan_invalid',
         'simulation_failed',
-      ].includes((cause as { code: string }).code)
-    )
-  ) {
-    return (cause as { code: string }).code;
+      ].includes(code)
+    ) {
+      return code;
+    }
   }
 
   const serialized = safeErrorText(cause).toLowerCase();
@@ -52,16 +60,40 @@ export function classifyPrivateFundingFailure(cause: unknown): string {
 }
 
 export function privateFundingUserMessage(code: string): string {
+  if (code === 'insufficient_sol') {
+    return 'The public wallet needs more SOL for the reserve, temporary rent, and network fees.';
+  }
+
+  if (code === 'insufficient_collateral') {
+    return 'The public wallet does not have enough selected collateral.';
+  }
+
   if (code === 'proof_verification_failed') {
     return 'Umbra rejected the privacy proof. It was not retried.';
   }
 
-  if (code === 'proof_failed') {
+  if (code === 'proof_failed' || code.endsWith('_zk_proof_generation')) {
     return 'The native privacy proof could not be prepared.';
   }
 
-  if (code === 'signature_rejected') {
+  if (code === 'signature_rejected' || code.endsWith('_transaction_sign')) {
     return 'Private funding was not approved.';
+  }
+
+  if (code === 'fetch_utxos_key_derivation') {
+    return 'The Umbra recovery key could not be prepared. No transaction was submitted.';
+  }
+
+  if (code.startsWith('fetch_utxos_')) {
+    return 'Umbra could not scan the encrypted pool. No transaction was submitted.';
+  }
+
+  if (code.startsWith('relayer_')) {
+    return 'The Umbra relayer is unavailable. No transaction was submitted.';
+  }
+
+  if (code.startsWith('rpc_')) {
+    return 'Umbra could not read the required on-chain state. No transaction was submitted.';
   }
 
   if (code.includes('fee_')) {
@@ -73,6 +105,22 @@ export function privateFundingUserMessage(code: string): string {
     ['balance_invalid', 'plan_invalid', 'simulation_failed'].includes(code)
   ) {
     return 'The stablecoin conversion could not be verified. Resume funding to prepare a fresh route.';
+  }
+
+  if (code === 'flash_deposit_simulation_failed') {
+    return 'Flash rejected the collateral deposit preview. Resume funding after checking the detailed error.';
+  }
+
+  if (code === 'velocity_deposit_simulation_failed') {
+    return 'Velocity rejected the collateral deposit preview. Resume funding after checking the detailed error.';
+  }
+
+  if (code.endsWith('_account_fetch') || code.endsWith('_mint_fetch')) {
+    return 'Umbra could not read the required on-chain accounts. Your funds were not submitted.';
+  }
+
+  if (code.endsWith('_transaction_send')) {
+    return 'The funding transaction was not confirmed. Resume to reconcile it before resubmitting.';
   }
 
   return 'Private funding did not complete. Resume it safely.';

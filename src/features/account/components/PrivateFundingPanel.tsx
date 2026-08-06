@@ -1,7 +1,5 @@
 import { useMemo, useState } from 'react';
 import {
-  Alert,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -11,13 +9,27 @@ import {
 
 import { Button } from '@/components/ui/Button';
 import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
-import { parseAmount } from '@/domain/money/amount';
+import {
+  amountFromBaseUnits,
+  formatAmount,
+  parseAmount,
+} from '@/domain/money/amount';
+import { CollateralSelector } from '@/features/account/components/CollateralSelector';
+import {
+  PrivateFundingConfirmationModal,
+  type PrivateFundingConfirmation,
+} from '@/features/account/components/PrivateFundingConfirmationModal';
 import {
   listTradingCollateralOptions,
-  providerCollateral,
   type ProviderCollateral,
 } from '@/integrations/perps/providerCollateral';
 import { usePrivateFunding } from '@/integrations/umbra/PrivateFundingProvider';
+import {
+  PrivateFundingError,
+  privateFundingUserMessage,
+} from '@/integrations/umbra/privateFundingErrors';
+import type { PrivateFundingPreflight } from '@/integrations/umbra/privateFundingPreflight';
+import type { PrivateFundingRecord } from '@/integrations/umbra/umbraSecureStorage';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 export function PrivateFundingPanel({
@@ -32,6 +44,8 @@ export function PrivateFundingPanel({
   const [feeReserve, setFeeReserve] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
   const [selectorOpen, setSelectorOpen] = useState(false);
+  const [confirmation, setConfirmation] =
+    useState<PrivateFundingConfirmation | null>(null);
   const collateralOptions = useMemo(() => {
     const config = readAppConfig();
     return config.ok
@@ -43,21 +57,25 @@ export function PrivateFundingPanel({
   >(() => {
     const config = readAppConfig();
     return config.ok
-      ? providerCollateral(provider, config.value.perps.flashProgramId).symbol
+      ? listTradingCollateralOptions(config.value.perps.flashProgramId)[0]?.symbol ?? 'USDC'
       : 'USDC';
   });
   const collateral =
     collateralOptions.find((option) => option.symbol === selectedSymbol) ?? null;
-  const pending =
-    funding.record?.phase === 'complete' &&
-    funding.record.providerDepositSignature !== null
-      ? null
-      : funding.record;
+  const pending = funding.record?.phase === 'complete' ? null : funding.record;
   const shownSymbol = pending?.symbol ?? collateral?.symbol ?? 'collateral';
+  const balanceError = pending === null
+    ? null
+    : preflightError(funding.preflight, shownSymbol) ?? funding.preflightError;
+  const visibleError = inputError ?? balanceError ?? funding.error ??
+    storedError(funding.record?.errorCode);
+  const balanceMissing = funding.preflight !== null &&
+    (funding.preflight.missingCollateralBaseUnits > 0n ||
+      funding.preflight.missingSolLamports > 0n);
 
-  const confirmStart = () => {
+  const confirmStart = async () => {
     if (collateral === null) {
-      setInputError('Provider collateral configuration is unavailable.');
+      setInputError('Collateral configuration is unavailable.');
       return;
     }
 
@@ -70,59 +88,120 @@ export function PrivateFundingPanel({
       }
 
       setInputError(null);
-      const config = readAppConfig();
-      const providerToken = config.ok
-        ? providerCollateral(provider, config.value.perps.flashProgramId)
-        : null;
-      const conversionNotice =
-        providerToken !== null && providerToken.mint !== collateral.mint
-          ? ` It will convert inside your private wallet to ${providerToken.symbol} with at most 0.5% slippage before funding ${providerLabel(provider)}.`
-          : '';
-      Alert.alert(
-        'Add private trading funds',
-        `${amount.trim()} ${collateral.symbol} and ${feeReserve.trim()} SOL for network fees will move privately into your trading wallet.${conversionNotice} Umbra, swap, and network fees apply. Provider setup happens automatically.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Continue',
-            onPress: () =>
-              void funding.start(
-                parsed.baseUnits,
-                parsedFeeReserve.baseUnits,
-                provider,
-                collateral,
-              ),
-          },
-        ],
-      );
-    } catch {
-      setInputError(
-        `Enter valid ${shownSymbol} collateral and SOL reserve amounts.`,
-      );
+      const preflight = await funding.check({
+        amountBaseUnits: parsed.baseUnits,
+        collateralLegPending: true,
+        feeLegPending: true,
+        feeReserveLamports: parsedFeeReserve.baseUnits,
+        mint: collateral.mint,
+      });
+      const shortage = preflightError(preflight, collateral.symbol);
+
+      if (shortage !== null) {
+        setInputError(shortage);
+        return;
+      }
+      setConfirmation({
+        amountBaseUnits: parsed.baseUnits,
+        decimals: collateral.decimals,
+        estimatedNetworkFeeLamports: preflight.estimatedNetworkFeeLamports,
+        feeReserveLamports: parsedFeeReserve.baseUnits,
+        hasSubmittedTransaction: false,
+        mode: 'start',
+        provider,
+        requiredSolLamports: preflight.requiredSolLamports,
+        symbol: collateral.symbol,
+        temporaryRentLamports: preflight.temporaryRentLamports,
+      });
+    } catch (cause) {
+      setInputError(cause instanceof PrivateFundingError
+        ? cause.message
+        : `Enter valid ${shownSymbol} collateral and SOL reserve amounts.`);
     }
   };
 
-  const confirmResume = () => {
-    if (
-      funding.record !== null &&
-      funding.record.feeFundingLamports !== null
-    ) {
-      void funding.resume();
+  const confirmResume = async () => {
+    const record = funding.record;
+
+    if (record === null) {
       return;
     }
 
     try {
-      const parsed = parseAmount(feeReserve, 9);
+      const reserveLamports = record.feeFundingLamports === null
+        ? parseAmount(feeReserve, 9).baseUnits
+        : BigInt(record.feeFundingLamports);
 
-      if (parsed.baseUnits <= 0n) {
+      if (reserveLamports <= 0n) {
         throw new Error('invalid amount');
       }
 
       setInputError(null);
-      void funding.resume(parsed.baseUnits);
-    } catch {
-      setInputError('Enter a valid user-funded SOL reserve amount.');
+      const preflight = await funding.check({
+        amountBaseUnits: BigInt(record.amountBaseUnits),
+        collateralLegPending:
+          record.depositSignature === null && record.claimSignature === null,
+        feeLegPending:
+          record.feeFundingDepositSignature === null &&
+          record.feeFundingSignature === null,
+        feeReserveLamports: reserveLamports,
+        mint: record.mint,
+      });
+
+      if (preflightError(preflight, record.symbol) !== null) {
+        return;
+      }
+      setConfirmation({
+        amountBaseUnits: BigInt(record.amountBaseUnits),
+        decimals: 6,
+        estimatedNetworkFeeLamports: preflight.estimatedNetworkFeeLamports,
+        feeReserveLamports: reserveLamports,
+        hasSubmittedTransaction: hasSubmittedTransaction(record),
+        mode: 'resume',
+        provider: record.provider,
+        requiredSolLamports: preflight.requiredSolLamports,
+        symbol: record.symbol,
+        temporaryRentLamports: preflight.temporaryRentLamports,
+      });
+    } catch (cause) {
+      setInputError(cause instanceof PrivateFundingError
+        ? cause.message
+        : 'Enter a valid user-funded SOL reserve amount.');
     }
+  };
+
+  const submitConfirmation = () => {
+    const confirmed = confirmation;
+    setConfirmation(null);
+
+    if (confirmed === null) {
+      return;
+    }
+
+    if (confirmed.mode === 'resume') {
+      void funding.resume(
+        funding.record?.feeFundingLamports === null
+          ? confirmed.feeReserveLamports
+          : undefined,
+      );
+      return;
+    }
+
+    const confirmedCollateral = collateralOptions.find(
+      (option) => option.symbol === confirmed.symbol,
+    );
+
+    if (confirmedCollateral === undefined) {
+      setInputError('Collateral configuration is unavailable.');
+      return;
+    }
+
+    void funding.start(
+      confirmed.amountBaseUnits,
+      confirmed.feeReserveLamports,
+      confirmed.provider,
+      confirmedCollateral,
+    );
   };
 
   return (
@@ -131,8 +210,8 @@ export function PrivateFundingPanel({
         Add funds
       </Text>
       <Text style={styles.message}>
-        Funds move privately from your public wallet into trading. Provider
-        setup happens automatically.
+        Funds move privately from your public wallet into private wallet T.
+        Trading allocates provider collateral only when needed.
       </Text>
       {funding.record ? (
         <Text accessibilityLiveRegion="polite" style={styles.status}>
@@ -158,7 +237,7 @@ export function PrivateFundingPanel({
               <View>
                 <Text style={styles.selectValue}>{shownSymbol}</Text>
                 <Text style={styles.selectDetail}>
-                  {collateral ? `Use on ${providerLabel(provider)}` : 'Unavailable'}
+                  {collateral ? 'Store in private wallet T' : 'Unavailable'}
                 </Text>
               </View>
               <Text accessibilityElementsHidden style={styles.chevron}>
@@ -205,17 +284,17 @@ export function PrivateFundingPanel({
           {runningMessage(funding.record?.phase)}
         </Text>
       ) : null}
-      {inputError ?? funding.error ? (
+      {visibleError ? (
         <Text accessibilityRole="alert" style={styles.error}>
-          {inputError ?? funding.error}
+          {visibleError}
         </Text>
       ) : null}
 
       {pending !== null ? (
         <Button
-          disabled={!tradingReady}
-          label={funding.isRunning ? 'Funding in progress' : 'Continue funding'}
-          loading={funding.isRunning}
+          disabled={!tradingReady || funding.isChecking || balanceMissing}
+          label={pendingActionLabel(funding)}
+          loading={funding.isRunning || funding.isChecking}
           onPress={confirmResume}
           variant="secondary"
         />
@@ -241,82 +320,80 @@ export function PrivateFundingPanel({
         selectedSymbol={selectedSymbol}
         visible={selectorOpen}
       />
+      <PrivateFundingConfirmationModal
+        confirmation={confirmation}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={submitConfirmation}
+      />
     </View>
   );
 }
 
-function CollateralSelector({
-  onClose,
-  onSelect,
-  options,
-  selectedSymbol,
-  visible,
-}: {
-  readonly onClose: () => void;
-  readonly onSelect: (option: ProviderCollateral) => void;
-  readonly options: readonly ProviderCollateral[];
-  readonly selectedSymbol: ProviderCollateral['symbol'];
-  readonly visible: boolean;
-}) {
-  return (
-    <Modal
-      animationType="fade"
-      onRequestClose={onClose}
-      transparent
-      visible={visible}
-    >
-      <View style={styles.backdrop}>
-        <Pressable
-          accessibilityLabel="Close collateral selector"
-          accessibilityRole="button"
-          onPress={onClose}
-          style={StyleSheet.absoluteFill}
-        />
-        <View style={styles.selector}>
-          <Text accessibilityRole="header" style={styles.title}>
-            Select collateral
-          </Text>
-          {options.map((option) => {
-            const selected = option.symbol === selectedSymbol;
-            return (
-              <Pressable
-                accessibilityRole="radio"
-                accessibilityState={{ checked: selected }}
-                key={option.mint}
-                onPress={() => onSelect(option)}
-                style={({ pressed }) => [
-                  styles.option,
-                  selected && styles.optionSelected,
-                  pressed && styles.selectPressed,
-                ]}
-              >
-                <View>
-                  <Text style={styles.selectValue}>{option.symbol}</Text>
-                  <Text style={styles.selectDetail}>
-                    Available for either provider
-                  </Text>
-                </View>
-                <Text style={styles.optionState}>
-                  {selected ? 'Selected' : ''}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-    </Modal>
-  );
+function hasSubmittedTransaction(record: PrivateFundingRecord): boolean {
+  return [
+    record.populateSignature,
+    record.depositSignature,
+    record.relayRequestId,
+    record.claimSignature,
+    record.feeFundingWrapSignature,
+    record.feeFundingPopulateSignature,
+    record.feeFundingDepositSignature,
+    record.feeFundingRelayRequestId,
+    record.feeFundingSignature,
+    record.conversionSignature,
+    record.providerSetupSignature,
+    record.providerDepositSignature,
+  ].some((value) => value !== null);
 }
 
-function providerLabel(provider: PerpsProviderId): string {
-  return provider === 'flash' ? 'Flash Trade v2' : 'Velocity';
+function preflightError(
+  preflight: PrivateFundingPreflight | null,
+  symbol: string,
+): string | null {
+  if (preflight === null) {
+    return null;
+  }
+
+  if (preflight.missingCollateralBaseUnits > 0n) {
+    return `Insufficient ${symbol}: ${token(preflight.availableCollateralBaseUnits, 6)} available; ${token(preflight.requiredCollateralBaseUnits, 6)} required. Add at least ${token(preflight.missingCollateralBaseUnits, 6)} ${symbol}.`;
+  }
+
+  return preflight.missingSolLamports > 0n
+    ? `Insufficient SOL: ${token(preflight.availableSolLamports, 9)} available; about ${token(preflight.requiredSolLamports, 9)} required. Add at least ${token(preflight.missingSolLamports, 9)} SOL.`
+    : null;
+}
+
+function pendingActionLabel(funding: ReturnType<typeof usePrivateFunding>): string {
+  if (funding.isRunning) {
+    return 'Funding in progress';
+  }
+  if (funding.isChecking) {
+    return 'Checking balances';
+  }
+  if (funding.preflight?.missingCollateralBaseUnits) {
+    return `Add ${token(funding.preflight.missingCollateralBaseUnits, 6)} ${funding.record?.symbol ?? 'collateral'}`;
+  }
+  if (funding.preflight?.missingSolLamports) {
+    return `Add ${token(funding.preflight.missingSolLamports, 9)} SOL`;
+  }
+  return 'Resume funding';
+}
+
+function token(baseUnits: bigint, decimals: 6 | 9): string {
+  return formatAmount(amountFromBaseUnits(baseUnits, decimals));
+}
+
+function storedError(code: string | null | undefined): string | null {
+  return code === null || code === undefined
+    ? null
+    : `${privateFundingUserMessage(code)} Error reference: ${code}.`;
 }
 
 function phaseLabel(phase: string | undefined): string {
   switch (phase) {
-    case 'depositing': return 'Waiting for confirmation';
+    case 'depositing': return 'Preparing private transfer';
+    case 'proving': return 'Preparing privacy proof';
     case 'scanning':
-    case 'proving':
     case 'relaying':
     case 'fee-funding':
     case 'collateral-converting':
@@ -374,31 +451,4 @@ const styles = StyleSheet.create({
     ...typography.body,
   },
   error: { ...typography.bodyCompact, color: colors.textSecondary },
-  backdrop: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: spacing.lg,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-  },
-  selector: {
-    gap: spacing.sm,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-  },
-  option: {
-    minHeight: 64,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  optionSelected: { borderColor: colors.accent },
-  optionState: { ...typography.bodyCompact, color: colors.accentSoft },
 });

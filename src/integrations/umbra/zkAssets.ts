@@ -1,21 +1,26 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 export type UmbraCircuit =
+  | 'userRegistration'
   | 'createDepositWithPublicAmount'
   | 'claimDepositIntoPublicAmount:n1';
 
-const PINNED_MANIFEST_VERSION = 'v3';
-const ASSETS: Record<
+export const UMBRA_RN_ZK_ASSET_VERSION = 'v5';
+export const UMBRA_ZKEY_SPECS: Record<
   UmbraCircuit,
   { readonly bytes: number; readonly path: string }
 > = {
+  userRegistration: {
+    bytes: 30_957_712,
+    path: `${UMBRA_RN_ZK_ASSET_VERSION}/zkey-wasm/userregistration.zkey`,
+  },
   createDepositWithPublicAmount: {
     bytes: 4_042_884,
-    path: 'v3/zkey-wasm/createdepositwithpublicamount.zkey',
+    path: `${UMBRA_RN_ZK_ASSET_VERSION}/zkey-wasm/createdepositwithpublicamount.zkey`,
   },
   'claimDepositIntoPublicAmount:n1': {
-    bytes: 59_669_640,
-    path: 'v3/zkey-wasm/claimdepositintopublicamountn1.zkey',
+    bytes: 40_771_972,
+    path: `${UMBRA_RN_ZK_ASSET_VERSION}/zkey-wasm/claimdepositintopublicamountn1.zkey`,
   },
 };
 
@@ -34,15 +39,24 @@ export class UmbraAssetError extends Error {
 export async function getUmbraZkey(
   baseUrl: string,
   circuit: UmbraCircuit,
-): Promise<string> {
-  const asset = ASSETS[circuit];
+  options?: { readonly refresh?: boolean },
+): Promise<{ readonly source: 'cache' | 'network'; readonly uri: string }> {
+  const asset = UMBRA_ZKEY_SPECS[circuit];
   await verifyManifest(baseUrl, circuit, asset.path);
 
-  const directory = new Directory(Paths.document, 'perpal-umbra-zk-v3');
+  const directory = new Directory(
+    Paths.document,
+    `perpal-umbra-zk-${UMBRA_RN_ZK_ASSET_VERSION}`,
+  );
   const file = new File(directory, asset.path.split('/').at(-1) ?? 'asset.zkey');
 
+  if (options?.refresh === true && file.exists) {
+    await file.delete();
+  }
+
   if (file.exists && file.size === asset.bytes) {
-    return file.uri;
+    logAssetReady(circuit, asset.bytes, 'cache');
+    return { source: 'cache', uri: file.uri };
   }
 
   if (!directory.exists) {
@@ -62,7 +76,22 @@ export async function getUmbraZkey(
     throw new UmbraAssetError('Umbra proving asset failed its byte-count check.');
   }
 
-  return file.uri;
+  logAssetReady(circuit, asset.bytes, 'network');
+  return { source: 'network', uri: file.uri };
+}
+
+function logAssetReady(
+  circuit: UmbraCircuit,
+  bytes: number,
+  source: 'cache' | 'network',
+): void {
+  console.info('[Perpal Umbra proof]', JSON.stringify({
+    bytes,
+    circuit,
+    event: 'asset_ready',
+    manifestVersion: UMBRA_RN_ZK_ASSET_VERSION,
+    source,
+  }));
 }
 
 async function verifyManifest(
@@ -70,7 +99,9 @@ async function verifyManifest(
   circuit: UmbraCircuit,
   expectedPath: string,
 ): Promise<void> {
-  const response = await fetch(`${baseUrl}/manifest.json?t=${Date.now()}`);
+  const response = await fetch(
+    `${baseUrl}/${UMBRA_RN_ZK_ASSET_VERSION}/manifest.json?t=${Date.now()}`,
+  );
 
   if (!response.ok) {
     throw new UmbraAssetError('Umbra proving manifest is unavailable.');
@@ -78,7 +109,7 @@ async function verifyManifest(
 
   const manifest = (await response.json()) as RemoteManifest;
 
-  if (manifest.version !== PINNED_MANIFEST_VERSION) {
+  if (manifest.version !== UMBRA_RN_ZK_ASSET_VERSION) {
     throw new UmbraAssetError(
       'Umbra changed its proving-asset version; this build must be reviewed.',
     );
@@ -114,7 +145,7 @@ function manifestPath(assets: unknown, circuit: UmbraCircuit): string | null {
   const path = (selected as Record<string, unknown>).url;
   const version = (selected as Record<string, unknown>).version;
 
-  return typeof path === 'string' && version === PINNED_MANIFEST_VERSION
+  return typeof path === 'string' && version === UMBRA_RN_ZK_ASSET_VERSION
     ? path
     : null;
 }
