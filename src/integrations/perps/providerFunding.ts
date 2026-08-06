@@ -1,5 +1,6 @@
 import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
+import { providerCollateral } from '@/integrations/perps/providerCollateral';
 import {
   prepareFlashFunding,
   submitFlashFunding,
@@ -98,7 +99,7 @@ async function fundVelocity(input: Input): Promise<PrivateFundingRecord> {
     return complete(input, record);
   }
 
-  const amountBaseUnits = claimedAmount(record);
+  const amountBaseUnits = providerFundingAmount(record);
   const plan = await prepareVelocityCollateralDeposit({
     amountBaseUnits,
     owner: record.tradingWalletAddress,
@@ -138,17 +139,22 @@ async function fundFlash(input: Input): Promise<PrivateFundingRecord> {
     });
   }
 
+  const amountBaseUnits = providerFundingAmount(record);
+  const collateral = providerCollateral(
+    'flash',
+    input.config.perps.flashProgramId,
+  );
   const plan = await prepareFlashFunding({
-    amountBaseUnits: claimedAmount(record),
-    mint: record.mint,
+    amountBaseUnits,
+    mint: collateral.mint,
     owner: record.tradingWalletAddress,
     programId: input.config.perps.flashProgramId,
     rpcUrl: input.config.api.rpcUrl,
     signer: input.signer,
   });
   const result = await submitFlashFunding({
-    amountBaseUnits: claimedAmount(record),
-    mint: record.mint,
+    amountBaseUnits,
+    mint: collateral.mint,
     owner: record.tradingWalletAddress,
     plan,
     programId: input.config.perps.flashProgramId,
@@ -197,8 +203,12 @@ function providerPending(): PrivateFundingError {
   );
 }
 
-function claimedAmount(record: PrivateFundingRecord): bigint {
-  const amount = BigInt(record.noteAmountBaseUnits ?? record.amountBaseUnits);
+function providerFundingAmount(record: PrivateFundingRecord): bigint {
+  const amount = BigInt(
+    record.conversionOutputBaseUnits ??
+      record.noteAmountBaseUnits ??
+      record.amountBaseUnits,
+  );
   if (amount <= 0n) {
     throw new PrivateFundingError('The claimed collateral amount is invalid.', 'amount_invalid');
   }

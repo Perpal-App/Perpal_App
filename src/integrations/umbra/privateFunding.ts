@@ -3,8 +3,12 @@ import { getUmbraRelayer } from '@umbra-privacy/sdk/relayer';
 
 import type { AppConfig, PerpsProviderId } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
-import { providerCollateral } from '@/integrations/perps/providerCollateral';
+import {
+  listTradingCollateralOptions,
+  type ProviderCollateral,
+} from '@/integrations/perps/providerCollateral';
 import { fundSelectedProvider } from '@/integrations/perps/providerFunding';
+import { ensureProviderCollateral } from '@/integrations/perps/providerCollateralConversion';
 import {
   classifyPrivateFundingFailure,
   PrivateFundingError,
@@ -35,6 +39,7 @@ import {
 
 export type PrivateFundingInput = {
   readonly amountBaseUnits: bigint;
+  readonly collateral: ProviderCollateral;
   readonly config: AppConfig;
   readonly feeReserveLamports: bigint;
   readonly gatewaySigner: GatewayRequestSigner;
@@ -67,10 +72,21 @@ export async function beginPrivateFunding(
     );
   }
 
-  const collateral = providerCollateral(
-    input.provider,
+  const collateral = listTradingCollateralOptions(
     input.config.perps.flashProgramId,
+  ).find(
+    (option) =>
+      option.symbol === input.collateral.symbol &&
+      option.mint === input.collateral.mint &&
+      option.decimals === input.collateral.decimals,
   );
+
+  if (collateral === undefined) {
+    throw new PrivateFundingError(
+      'The selected collateral is unavailable.',
+      'amount_invalid',
+    );
+  }
   const record: PrivateFundingRecord = {
     version: 1,
     id: Crypto.randomUUID(),
@@ -99,6 +115,12 @@ export async function beginPrivateFunding(
     feeFundingSignature: null,
     feeFundingNoteAmountLamports: null,
     feeFundingRelayerFixedFeeLamports: null,
+    conversionExpectedOutBaseUnits: null,
+    conversionMinimumOutBaseUnits: null,
+    conversionOutputBalanceBeforeBaseUnits: null,
+    conversionOutputBaseUnits: null,
+    conversionSignature: null,
+    conversionSignedTransactionBase64: null,
     providerSetupComplete: false,
     providerSetupSignature: null,
     providerDepositSignature: null,
@@ -112,7 +134,10 @@ export async function beginPrivateFunding(
 
 export async function resumePrivateFunding(
   initialRecord: PrivateFundingRecord,
-  input: Omit<PrivateFundingInput, 'amountBaseUnits' | 'feeReserveLamports' | 'provider'>,
+  input: Omit<
+    PrivateFundingInput,
+    'amountBaseUnits' | 'collateral' | 'feeReserveLamports' | 'provider'
+  >,
   onRecord: (record: PrivateFundingRecord) => void,
   legacyFeeReserveLamports?: bigint,
 ): Promise<PrivateFundingRecord> {
@@ -156,6 +181,11 @@ export async function resumePrivateFunding(
     {
       ...input,
       amountBaseUnits: BigInt(record.amountBaseUnits),
+      collateral: {
+        decimals: 6,
+        mint: record.mint,
+        symbol: record.symbol,
+      },
       feeReserveLamports: BigInt(record.feeFundingLamports),
       provider: record.provider,
     },
@@ -236,6 +266,12 @@ async function runPrivateFunding(
       onState: async (state) => {
         await save(withFeeReserveLeg(record, state));
       },
+    });
+    record = await ensureProviderCollateral({
+      config: input.config,
+      onRecord: save,
+      record,
+      signer: input.gatewaySigner,
     });
     record = await fundSelectedProvider({
       config: input.config,

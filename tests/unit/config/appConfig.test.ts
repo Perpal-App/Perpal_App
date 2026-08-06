@@ -7,6 +7,7 @@ const VALID: RawAppEnv = {
   publicRpcPath: '/v1/rpc/public',
   marketDataPath: '/v1/markets',
   marketStreamPath: '/v1/markets/stream',
+  swapBuildPath: '/v1/swap/build',
   velocityProgramId: '11111111111111111111111111111111',
   flashProgramId: '11111111111111111111111111111111',
   flashErRpc: 'https://flash.magicblock.xyz',

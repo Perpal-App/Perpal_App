@@ -18,7 +18,13 @@ export function classifyPrivateFundingFailure(cause: unknown): string {
     cause !== null &&
     typeof (cause as { code?: unknown }).code === 'string' &&
     (
-      (cause as { code: string }).code.includes('fee_')
+      (cause as { code: string }).code.includes('fee_') ||
+      (cause as { code: string }).code.startsWith('swap_') ||
+      [
+        'balance_invalid',
+        'plan_invalid',
+        'simulation_failed',
+      ].includes((cause as { code: string }).code)
     )
   ) {
     return (cause as { code: string }).code;
@@ -60,6 +66,13 @@ export function privateFundingUserMessage(code: string): string {
 
   if (code.includes('fee_')) {
     return 'Private collateral may be ready, but the user-funded SOL reserve is pending.';
+  }
+
+  if (
+    code.startsWith('swap_') ||
+    ['balance_invalid', 'plan_invalid', 'simulation_failed'].includes(code)
+  ) {
+    return 'The stablecoin conversion could not be verified. Resume funding to prepare a fresh route.';
   }
 
   return 'Private funding did not complete. Resume it safely.';

@@ -13,6 +13,7 @@ export type PrivateFundingPhase =
   | 'proving'
   | 'relaying'
   | 'fee-funding'
+  | 'collateral-converting'
   | 'provider-setup'
   | 'provider-depositing'
   | 'complete';
@@ -45,6 +46,12 @@ export type PrivateFundingRecord = {
   readonly feeFundingSignature: string | null;
   readonly feeFundingNoteAmountLamports: string | null;
   readonly feeFundingRelayerFixedFeeLamports: string | null;
+  readonly conversionExpectedOutBaseUnits: string | null;
+  readonly conversionMinimumOutBaseUnits: string | null;
+  readonly conversionOutputBalanceBeforeBaseUnits: string | null;
+  readonly conversionOutputBaseUnits: string | null;
+  readonly conversionSignature: string | null;
+  readonly conversionSignedTransactionBase64: string | null;
   readonly providerSetupComplete: boolean;
   readonly providerSetupSignature: string | null;
   readonly providerDepositSignature: string | null;
@@ -137,6 +144,16 @@ function parseRecord(value: string): PrivateFundingRecord | null {
     const feeFundingNoteAmountLamports = record.feeFundingNoteAmountLamports ?? null;
     const feeFundingRelayerFixedFeeLamports =
       record.feeFundingRelayerFixedFeeLamports ?? null;
+    const conversionExpectedOutBaseUnits =
+      record.conversionExpectedOutBaseUnits ?? null;
+    const conversionMinimumOutBaseUnits =
+      record.conversionMinimumOutBaseUnits ?? null;
+    const conversionOutputBalanceBeforeBaseUnits =
+      record.conversionOutputBalanceBeforeBaseUnits ?? null;
+    const conversionOutputBaseUnits = record.conversionOutputBaseUnits ?? null;
+    const conversionSignature = record.conversionSignature ?? null;
+    const conversionSignedTransactionBase64 =
+      record.conversionSignedTransactionBase64 ?? null;
     const providerSetupComplete = record.providerSetupComplete ?? false;
     const providerSetupSignature = record.providerSetupSignature ?? null;
     const providerDepositSignature = record.providerDepositSignature ?? null;
@@ -172,6 +189,12 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       !nullableString(feeFundingSignature) ||
       !nullableUnsignedInteger(feeFundingNoteAmountLamports) ||
       !nullableUnsignedInteger(feeFundingRelayerFixedFeeLamports) ||
+      !nullableUnsignedInteger(conversionExpectedOutBaseUnits) ||
+      !nullableUnsignedInteger(conversionMinimumOutBaseUnits) ||
+      !nullableUnsignedInteger(conversionOutputBalanceBeforeBaseUnits) ||
+      !nullableUnsignedInteger(conversionOutputBaseUnits) ||
+      !nullableString(conversionSignature) ||
+      !nullableString(conversionSignedTransactionBase64) ||
       typeof providerSetupComplete !== 'boolean' ||
       !nullableString(providerSetupSignature) ||
       !nullableString(providerDepositSignature) ||
@@ -196,6 +219,12 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       feeFundingSignature,
       feeFundingNoteAmountLamports,
       feeFundingRelayerFixedFeeLamports,
+      conversionExpectedOutBaseUnits,
+      conversionMinimumOutBaseUnits,
+      conversionOutputBalanceBeforeBaseUnits,
+      conversionOutputBaseUnits,
+      conversionSignature,
+      conversionSignedTransactionBase64,
       providerSetupComplete,
       providerSetupSignature,
       providerDepositSignature,
@@ -236,6 +265,7 @@ function isPhase(value: unknown): value is PrivateFundingPhase {
     value === 'proving' ||
     value === 'relaying' ||
     value === 'fee-funding' ||
+    value === 'collateral-converting' ||
     value === 'provider-setup' ||
     value === 'provider-depositing' ||
     value === 'complete'

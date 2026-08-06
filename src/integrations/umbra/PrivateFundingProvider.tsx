@@ -24,6 +24,7 @@ import {
   type PrivateFundingRecord,
 } from '@/integrations/umbra/umbraSecureStorage';
 import type { PerpsProviderId } from '@/config/appConfig';
+import type { ProviderCollateral } from '@/integrations/perps/providerCollateral';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type PrivateFundingState = {
@@ -34,6 +35,7 @@ type PrivateFundingState = {
     amountBaseUnits: bigint,
     feeReserveLamports: bigint,
     provider: PerpsProviderId,
+    collateral: ProviderCollateral,
   ) => Promise<void>;
   readonly resume: (feeReserveLamports?: bigint) => Promise<void>;
 };
@@ -143,6 +145,7 @@ export function PrivateFundingProvider({
       amountBaseUnits: bigint,
       feeReserveLamports: bigint,
       provider: PerpsProviderId,
+      collateral: ProviderCollateral,
     ) => {
       await run(async () =>
         beginPrivateFunding(
@@ -151,6 +154,7 @@ export function PrivateFundingProvider({
             amountBaseUnits,
             feeReserveLamports,
             provider,
+            collateral,
           },
           setRecord,
         ),

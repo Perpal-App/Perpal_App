@@ -24,10 +24,12 @@ export type AppConfig = {
     readonly publicRpcPath: string;
     readonly marketDataPath: string;
     readonly marketStreamPath: string;
+    readonly swapBuildPath: string;
     readonly rpcUrl: string;
     readonly publicRpcUrl: string;
     readonly marketDataUrl: string;
     readonly marketStreamUrl: string;
+    readonly swapBuildUrl: string;
   };
   readonly telemetry: {
     readonly enabled: boolean;
@@ -51,6 +53,7 @@ export type RawAppEnv = {
   readonly publicRpcPath: string;
   readonly marketDataPath: string;
   readonly marketStreamPath: string;
+  readonly swapBuildPath: string;
   readonly velocityProgramId: string;
   readonly flashProgramId: string;
   readonly flashErRpc: string;
@@ -73,6 +76,8 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_MARKET_DATA_PATH?.trim() ?? '',
     marketStreamPath:
       process.env.EXPO_PUBLIC_MARKET_STREAM_PATH?.trim() ?? '',
+    swapBuildPath:
+      process.env.EXPO_PUBLIC_SWAP_BUILD_PATH?.trim() ?? '',
     velocityProgramId:
       process.env.EXPO_PUBLIC_VELOCITY_PROGRAM_ID?.trim() ?? '',
     flashProgramId:
@@ -127,7 +132,8 @@ function validatePath(
     | 'EXPO_PUBLIC_RPC_PATH'
     | 'EXPO_PUBLIC_PUBLIC_RPC_PATH'
     | 'EXPO_PUBLIC_MARKET_DATA_PATH'
-    | 'EXPO_PUBLIC_MARKET_STREAM_PATH',
+    | 'EXPO_PUBLIC_MARKET_STREAM_PATH'
+    | 'EXPO_PUBLIC_SWAP_BUILD_PATH',
   issues: ConfigIssue[],
 ): string {
   if (raw.length === 0 || !raw.startsWith('/') || raw.endsWith('/')) {
@@ -261,6 +267,11 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_MARKET_STREAM_PATH',
     issues,
   );
+  const swapBuildPath = validatePath(
+    raw.swapBuildPath,
+    'EXPO_PUBLIC_SWAP_BUILD_PATH',
+    issues,
+  );
   const velocityProgramId = validateAddress(
     raw.velocityProgramId,
     'EXPO_PUBLIC_VELOCITY_PROGRAM_ID',
@@ -321,10 +332,12 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
         publicRpcPath,
         marketDataPath,
         marketStreamPath,
+        swapBuildPath,
         rpcUrl: `${origin}${rpcPath}`,
         publicRpcUrl: `${origin}${publicRpcPath}`,
         marketDataUrl: `${origin}${marketDataPath}`,
         marketStreamUrl: `${origin}${marketStreamPath}`,
+        swapBuildUrl: `${origin}${swapBuildPath}`,
       },
       telemetry: {
         enabled: raw.telemetryEnabled === 'true',

@@ -1,3 +1,5 @@
+import { base58 } from '@scure/base';
+
 import type { ProviderEndpoint } from './providerRouter';
 import type { MarketAsset, MarketDataConfig } from './marketData';
 
@@ -18,6 +20,7 @@ export type WorkerEnv = {
   readonly UPSTASH_REDIS_REST_URL?: string;
   readonly UPSTASH_REDIS_REST_TOKEN?: string;
   readonly PYTH_API_KEY?: string;
+  readonly JUPITER_API_KEY?: string;
 
   // Vars
   readonly PERPS_PROVIDERS?: string;
@@ -25,6 +28,8 @@ export type WorkerEnv = {
   readonly CORS_ALLOWED_ORIGINS?: string;
   readonly PYTH_HERMES_ORIGIN?: string;
   readonly PYTH_MARKET_FEEDS?: string;
+  readonly JUPITER_API_ORIGIN?: string;
+  readonly STABLECOIN_MINTS?: string;
 
   // Bindings
   readonly RATE_LIMITER?: {
@@ -51,6 +56,11 @@ export type GatewayConfig = {
   readonly perpsProviders: readonly ['flash-v2', 'velocity'];
   readonly providers: readonly ProviderEndpoint[];
   readonly marketData: MarketDataConfig;
+  readonly jupiter: {
+    readonly origin: string;
+    readonly apiKey: string;
+    readonly stablecoinMints: readonly [string, string];
+  } | null;
   readonly redis: { readonly url: string; readonly token: string } | null;
   readonly corsAllowedOrigins: readonly string[];
 };
@@ -111,6 +121,30 @@ function parseMarketFeeds(
   }
 
   return result;
+}
+
+function parseStablecoinMints(
+  raw: string | undefined,
+  invalid: string[],
+): readonly [string, string] {
+  const entries = new Map(
+    (raw ?? '').split(',').map((entry) => {
+      const [symbol = '', mint = ''] = entry.split(':');
+      return [symbol.trim(), mint.trim()];
+    }),
+  );
+  const usdc = entries.get('USDC') ?? '';
+  const usdt = entries.get('USDT') ?? '';
+
+  try {
+    if (base58.decode(usdc).length !== 32 || base58.decode(usdt).length !== 32) {
+      throw new Error('invalid mint');
+    }
+  } catch {
+    invalid.push('STABLECOIN_MINTS (USDC and USDT addresses required)');
+  }
+
+  return [usdc, usdt];
 }
 
 export function resolveMarketDataConfig(env: WorkerEnv): MarketDataConfig {
@@ -200,6 +234,16 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
     env.CORS_ALLOWED_ORIGINS,
     missing,
   );
+  const jupiterOrigin = parseHttpsOrigin(
+    env.JUPITER_API_ORIGIN,
+    'JUPITER_API_ORIGIN',
+    missing,
+  );
+  const stablecoinMints = parseStablecoinMints(
+    env.STABLECOIN_MINTS,
+    missing,
+  );
+  const jupiterApiKey = env.JUPITER_API_KEY?.trim() ?? '';
   let marketData: MarketDataConfig | null = null;
 
   try {
@@ -250,6 +294,14 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
     perpsProviders: ['flash-v2', 'velocity'],
     providers,
     marketData,
+    jupiter:
+      jupiterApiKey.length === 0
+        ? null
+        : {
+            origin: jupiterOrigin,
+            apiKey: jupiterApiKey,
+            stablecoinMints,
+          },
     redis:
       redisUrl.length > 0 && redisToken.length > 0
         ? { url: redisUrl, token: redisToken }

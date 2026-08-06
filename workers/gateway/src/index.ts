@@ -40,9 +40,14 @@ import {
   JSON_HEADERS,
   logGatewayRequest,
 } from './gatewayResponses';
+import {
+  handleSwapBuildRequest,
+  SWAP_BUILD_PATH,
+} from './swapBuildHandler';
 
 const MAX_RPC_BODY_BYTES = 256 * 1024;
 const MAX_TELEMETRY_BODY_BYTES = 16 * 1024;
+const MAX_SWAP_BODY_BYTES = 4 * 1024;
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -159,7 +164,7 @@ export default {
       );
     }
 
-    if (!['/v1/rpc', '/v1/telemetry'].includes(url.pathname)) {
+    if (!['/v1/rpc', '/v1/telemetry', SWAP_BUILD_PATH].includes(url.pathname)) {
       return complete(
         errorResponse(404, 'not_found', 'Unknown route.', traceId),
         'rejected',
@@ -197,7 +202,9 @@ export default {
       request,
       url.pathname === '/v1/rpc'
         ? MAX_RPC_BODY_BYTES
-        : MAX_TELEMETRY_BODY_BYTES,
+        : url.pathname === SWAP_BUILD_PATH
+          ? MAX_SWAP_BODY_BYTES
+          : MAX_TELEMETRY_BODY_BYTES,
     );
 
     if (!bodyResult.ok) {
@@ -240,6 +247,8 @@ export default {
       if (validation.batchRequests !== null) {
         batchRequests = validation.batchRequests;
       }
+    } else if (url.pathname === SWAP_BUILD_PATH) {
+      operation = 'swap.build';
     } else {
       operation = 'telemetry.write';
     }
@@ -291,6 +300,34 @@ export default {
       });
       return complete(result.response, result.outcome, operation, {
         auth: authDuration,
+      });
+    }
+
+    if (url.pathname === SWAP_BUILD_PATH) {
+      if (config.jupiter === null) {
+        return complete(
+          errorResponse(
+            503,
+            'swap_unavailable',
+            'Stablecoin conversion is unavailable.',
+            traceId,
+          ),
+          'error',
+          operation,
+          { auth: authDuration },
+        );
+      }
+      const result = await handleSwapBuildRequest({
+        actorPublicKey: auth.actorPublicKey,
+        config: config.jupiter,
+        payload: bodyResult.payload,
+        traceId,
+      });
+      return complete(result.response, result.outcome, operation, {
+        auth: authDuration,
+        ...(result.upstreamMs === undefined
+          ? {}
+          : { upstream: result.upstreamMs }),
       });
     }
 
