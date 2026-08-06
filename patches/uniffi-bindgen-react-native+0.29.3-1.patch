@@ -1,0 +1,171 @@
+diff --git a/node_modules/uniffi-bindgen-react-native/typescript/src/async-callbacks.ts b/node_modules/uniffi-bindgen-react-native/typescript/src/async-callbacks.ts
+index 57041c5..86afe16 100644
+--- a/node_modules/uniffi-bindgen-react-native/typescript/src/async-callbacks.ts
++++ b/node_modules/uniffi-bindgen-react-native/typescript/src/async-callbacks.ts
+@@ -23,8 +23,8 @@ type PromiseHelper = {
+ const UNIFFI_FOREIGN_FUTURE_HANDLE_MAP = new UniffiHandleMap<PromiseHelper>();
+ 
+ // Some degenerate functions used for default arguments.
+-const notExpectedError = (err: any) => false;
+-function emptyLowerError<E>(e: E): UniffiByteArray {
++const notExpectedError = (_err: any) => false;
++function emptyLowerError<E>(_error: E): UniffiByteArray {
+   throw new Error("Unreachable");
+ }
+ 
+diff --git a/node_modules/uniffi-bindgen-react-native/typescript/src/async-rust-call.ts b/node_modules/uniffi-bindgen-react-native/typescript/src/async-rust-call.ts
+index 0ddc9b9..3d79676 100644
+--- a/node_modules/uniffi-bindgen-react-native/typescript/src/async-rust-call.ts
++++ b/node_modules/uniffi-bindgen-react-native/typescript/src/async-rust-call.ts
+@@ -13,7 +13,6 @@ import {
+ } from "./rust-call";
+ 
+ const UNIFFI_RUST_FUTURE_POLL_READY = 0;
+-const UNIFFI_RUST_FUTURE_POLL_MAYBE_READY = 1;
+ 
+ // The UniffiRustFutureContinuationCallback is generated in the {{ namespace }}-ffi.ts file,
+ // when iterating over `ci.ffi_definitions()`.
+diff --git a/node_modules/uniffi-bindgen-react-native/typescript/src/callbacks.ts b/node_modules/uniffi-bindgen-react-native/typescript/src/callbacks.ts
+index 703b798..ccc646c 100644
+--- a/node_modules/uniffi-bindgen-react-native/typescript/src/callbacks.ts
++++ b/node_modules/uniffi-bindgen-react-native/typescript/src/callbacks.ts
+@@ -13,7 +13,6 @@ import {
+ import {
+   CALL_ERROR,
+   CALL_UNEXPECTED_ERROR,
+-  type UniffiRustCallStatus,
+ } from "./rust-call";
+ 
+ const handleConverter = FfiConverterUInt64;
+@@ -33,7 +32,7 @@ export class FfiConverterCallback<T> implements FfiConverter<UniffiHandle, T> {
+   write(value: T, into: RustBuffer): void {
+     handleConverter.write(this.lower(value), into);
+   }
+-  allocationSize(value: T): number {
++  allocationSize(_value: T): number {
+     return handleConverter.allocationSize(defaultUniffiHandle);
+   }
+   drop(handle: UniffiHandle): T | undefined {
+diff --git a/node_modules/uniffi-bindgen-react-native/typescript/src/enums.ts b/node_modules/uniffi-bindgen-react-native/typescript/src/enums.ts
+index 821cf8f..d6e4831 100644
+--- a/node_modules/uniffi-bindgen-react-native/typescript/src/enums.ts
++++ b/node_modules/uniffi-bindgen-react-native/typescript/src/enums.ts
+@@ -4,5 +4,5 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/
+  */
+ export class UniffiEnum {
+-  protected constructor(...args: any) {}
++  protected constructor(..._args: any) {}
+ }
+diff --git a/node_modules/uniffi-bindgen-react-native/typescript/src/errors.ts b/node_modules/uniffi-bindgen-react-native/typescript/src/errors.ts
+index cb8a686..34c44b4 100644
+--- a/node_modules/uniffi-bindgen-react-native/typescript/src/errors.ts
++++ b/node_modules/uniffi-bindgen-react-native/typescript/src/errors.ts
+@@ -38,7 +38,7 @@ function createErrorMessage(
+ 
+ export class UniffiThrownObject<T> extends Error {
+   private static __baseTypeName = "UniffiThrownObject";
+-  private readonly __baseTypeName: string = UniffiThrownObject.__baseTypeName;
++  readonly __baseTypeName: string = UniffiThrownObject.__baseTypeName;
+   constructor(
+     typeName: string,
+     public readonly inner: T,
+diff --git a/node_modules/uniffi-bindgen-react-native/typescript/src/ffi-converters.ts b/node_modules/uniffi-bindgen-react-native/typescript/src/ffi-converters.ts
+index fa4bddf..d99823f 100644
+--- a/node_modules/uniffi-bindgen-react-native/typescript/src/ffi-converters.ts
++++ b/node_modules/uniffi-bindgen-react-native/typescript/src/ffi-converters.ts
+@@ -65,7 +65,7 @@ class FfiConverterNumber<
+       this.writer(view, value),
+     );
+   }
+-  allocationSize(value: T): number {
++  allocationSize(_value: T): number {
+     return this.byteSize;
+   }
+ }
+@@ -144,7 +144,7 @@ export const FfiConverterBool = (() => {
+     write(value: boolean, into: RustBuffer): void {
+       byteConverter.write(this.lower(value), into);
+     }
+-    allocationSize(value: boolean): number {
++    allocationSize(_value: boolean): number {
+       return byteConverter.allocationSize(0);
+     }
+   }
+@@ -201,7 +201,7 @@ export const FfiConverterTimestamp = (() => {
+   const msPerSec = 1e3;
+   const maxMsFromEpoch = 8.64e15;
+   function safeDate(ms: number) {
+-    if (Math.abs(ms) > 8.64e15) {
++    if (Math.abs(ms) > maxMsFromEpoch) {
+       throw new UniffiInternalError.DateTimeOverflow();
+     }
+     return new Date(ms);
+diff --git a/node_modules/uniffi-bindgen-react-native/typescript/src/objects.ts b/node_modules/uniffi-bindgen-react-native/typescript/src/objects.ts
+index 7f5e9af..d33f70c 100644
+--- a/node_modules/uniffi-bindgen-react-native/typescript/src/objects.ts
++++ b/node_modules/uniffi-bindgen-react-native/typescript/src/objects.ts
+@@ -13,7 +13,7 @@ import { RustBuffer } from "./ffi-types";
+ import type { UniffiRustArcPtr } from "./rust-call";
+ import { type UniffiHandle, UniffiHandleMap } from "./handle-map";
+ import { type StructuralEquality } from "./type-utils";
+-import { UniffiInternalError, UniffiThrownObject } from "./errors";
++import { UniffiThrownObject } from "./errors";
+ 
+ /**
+  * Marker interface for all `interface` objects that cross the FFI.
+@@ -92,7 +92,7 @@ export class FfiConverterObject<T>
+   write(value: T, into: RustBuffer): void {
+     pointerConverter.write(this.lower(value), into);
+   }
+-  allocationSize(value: T): number {
++  allocationSize(_value: T): number {
+     return pointerConverter.allocationSize(dummyPointer);
+   }
+ }
+@@ -100,6 +100,7 @@ export class FfiConverterObject<T>
+ /// An FfiConverter for objects with callbacks.
+ const handleSafe: StructuralEquality<UniffiHandle, UnsafeMutableRawPointer> =
+   true;
++void handleSafe;
+ 
+ export class FfiConverterObjectWithCallbacks<T> extends FfiConverterObject<T> {
+   constructor(
+@@ -109,11 +110,11 @@ export class FfiConverterObjectWithCallbacks<T> extends FfiConverterObject<T> {
+     super(factory);
+   }
+ 
+-  lower(value: T): UnsafeMutableRawPointer {
++  override lower(value: T): UnsafeMutableRawPointer {
+     return this.handleMap.insert(value);
+   }
+ 
+-  lift(value: UnsafeMutableRawPointer): T {
++  override lift(value: UnsafeMutableRawPointer): T {
+     if (this.handleMap.has(value)) {
+       return this.handleMap.get(value);
+     } else {
+diff --git a/node_modules/uniffi-bindgen-react-native/typescript/src/rust-call.ts b/node_modules/uniffi-bindgen-react-native/typescript/src/rust-call.ts
+index 4e13799..3bb53ba 100644
+--- a/node_modules/uniffi-bindgen-react-native/typescript/src/rust-call.ts
++++ b/node_modules/uniffi-bindgen-react-native/typescript/src/rust-call.ts
+@@ -12,7 +12,7 @@ export const CALL_UNEXPECTED_ERROR = 2;
+ export const CALL_CANCELLED = 3;
+ 
+ type StringLifter = (bytes: UniffiByteArray) => string;
+-const emptyStringLifter = (bytes: UniffiByteArray) =>
++const emptyStringLifter = (_bytes: UniffiByteArray) =>
+   "An error occurred decoding a string";
+ 
+ export type UniffiRustCallStatus = {
+@@ -60,10 +60,6 @@ export class UniffiRustCaller<Status extends UniffiRustCallStatus> {
+   }
+ }
+ 
+-function uniffiCreateCallStatus(): UniffiRustCallStatus {
+-  return { code: CALL_SUCCESS };
+-}
+-
+ export type UniffiErrorHandler = (buffer: UniffiByteArray) => Error;
+ type RustCallFn<S, T> = (status: S) => T;
+ 
