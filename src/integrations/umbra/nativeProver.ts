@@ -2,12 +2,9 @@ import Zk, {
   ProofLib,
   uniffiInitAsync,
 } from '@umbra-privacy/rn-zk-prover';
-import {
-  convertSnarkjsProofToBytes,
-  type Groth16ProofBytes,
-  type SnarkjsGroth16Proof,
-} from '@umbra-privacy/sdk/zk-prover';
+import type { Groth16ProofBytes } from '@umbra-privacy/sdk/zk-prover';
 
+import { convertNativeProofToBytes } from '@/integrations/umbra/nativeProofBytes';
 import {
   getUmbraZkey,
   type UmbraCircuit,
@@ -61,18 +58,7 @@ function proveAndVerify(
     throw new Error('Native Umbra proof failed local verification.');
   }
 
-  const { a, b, c } = proofResult.proof;
-  const proof: SnarkjsGroth16Proof = {
-    pi_a: [a.x, a.y, a.z],
-    pi_b: [
-      [b.x[0] ?? '', b.x[1] ?? ''],
-      [b.y[0] ?? '', b.y[1] ?? ''],
-      [b.z[0] ?? '', b.z[1] ?? ''],
-    ],
-    pi_c: [c.x, c.y, c.z],
-  };
-
-  return convertSnarkjsProofToBytes(proof);
+  return convertNativeProofToBytes(proofResult.proof);
 }
 
 function toCircomJson(value: unknown): unknown {

@@ -1,0 +1,49 @@
+diff --git a/node_modules/@flash_trade/flash-sdk-v2/dist/utils.js b/node_modules/@flash_trade/flash-sdk-v2/dist/utils.js
+index 4c83b00..d25e653 100644
+--- a/node_modules/@flash_trade/flash-sdk-v2/dist/utils.js
++++ b/node_modules/@flash_trade/flash-sdk-v2/dist/utils.js
+@@ -58,7 +58,7 @@ exports.sideToAnchor = sideToAnchor;
+ const web3_js_1 = require("@solana/web3.js");
+-const crypto_1 = require("crypto");
++const sha2_js_1 = require("@noble/hashes/sha2.js");
+ const bn_js_1 = __importDefault(require("bn.js"));
+ const constants_1 = require("./constants");
+ const types_1 = require("./types");
+@@ -251,7 +251,7 @@ function findDelegationSiblings(pda, programId = constants_1.PERPETUALS_PROGRAM
+ // Anchor helpers
+ // ---------------------------------------------------------------------------
+ function anchorDiscriminator(methodName) {
+-    return (0, crypto_1.createHash)("sha256").update(`global:${methodName}`).digest().subarray(0, 8);
++    return Buffer.from((0, sha2_js_1.sha256)(Buffer.from(`global:${methodName}`))).subarray(0, 8);
+ }
+ // ---------------------------------------------------------------------------
+ // Price helpers
+diff --git a/node_modules/@flash_trade/flash-sdk-v2/dist/utils/erWire.js b/node_modules/@flash_trade/flash-sdk-v2/dist/utils/erWire.js
+index ac6f73b..37f7f91 100644
+--- a/node_modules/@flash_trade/flash-sdk-v2/dist/utils/erWire.js
++++ b/node_modules/@flash_trade/flash-sdk-v2/dist/utils/erWire.js
+@@ -8,6 +8,7 @@ exports.rebaseProgramIndices = rebaseProgramIndices;
+ exports.buildUnboundedLegacyTx = buildUnboundedLegacyTx;
+ exports.buildUnboundedSimulateBytes = buildUnboundedSimulateBytes;
+ const web3_js_1 = require("@solana/web3.js");
++const ed25519_js_1 = require("@noble/curves/ed25519.js");
+ // eslint-disable-next-line @typescript-eslint/no-require-imports
+ const bs58 = require("bs58");
+@@ -49,14 +50,8 @@ const NODE_ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420",
+  * `crypto` so this module stays importable in the browser; browsers should
+  * pass a tweetnacl-backed signer via `Ed25519Signer` instead.
+  */
+ const nodeEd25519Signer = (message, secretKey) => {
+-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+-    const { createPrivateKey, sign } = require("crypto");
+     const seed = secretKey.slice(0, 32);
+-    const pkcs8 = Buffer.concat([
+-        NODE_ED25519_PKCS8_PREFIX,
+-        Buffer.from(seed),
+-    ]);
+-    const key = createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" });
+-    return sign(null, Buffer.from(message), key);
++    return (0, ed25519_js_1.ed25519).sign(message, seed);
+ };
+ exports.nodeEd25519Signer = nodeEd25519Signer;
+ // =========================================================================

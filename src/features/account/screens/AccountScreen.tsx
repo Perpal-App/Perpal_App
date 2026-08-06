@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
@@ -75,7 +75,6 @@ export function AccountScreen() {
               label="Status"
               value={walletProvisioningLabel(walletProvisioning.status)}
             />
-            <StatusRow label="Role" value="Public wallet M" />
             {walletProvisioning.embeddedWalletAddress ? (
               <StatusRow
                 label="Address"
@@ -84,8 +83,17 @@ export function AccountScreen() {
               />
             ) : null}
             {walletProvisioning.status === 'error' ? (
+              <Text accessibilityRole="alert" style={styles.error}>
+                Privy could not create or restore this wallet. Confirm you used
+                the same login and Privy app, then retry.
+              </Text>
+            ) : null}
+            {walletProvisioning.status === 'error' ||
+            walletProvisioning.status === 'needs-recovery' ? (
               <Button
-                label="Retry wallet creation"
+                label={walletProvisioning.status === 'needs-recovery'
+                  ? 'Retry wallet restore'
+                  : 'Retry Privy wallet'}
                 loading={walletProvisioning.isProvisioning}
                 onPress={() => void walletProvisioning.retry()}
                 variant="secondary"
@@ -109,10 +117,12 @@ export function AccountScreen() {
               label="Status"
               value={tradingSessionLabel(tradingSession.status)}
             />
-            <StatusRow label="Role" value="Private trading wallet T" />
             <StatusRow label="Storage" value="Android secure storage" />
             {tradingSession.address ? (
               <StatusRow label="Address" selectable value={tradingSession.address} />
+            ) : null}
+            {tradingSession.status === 'ready' ? (
+              <StatusRow label="Generation" value={tradingSession.generation.toString()} />
             ) : null}
             {tradingSession.recovery ? (
               <View style={styles.notice}>
@@ -154,6 +164,21 @@ export function AccountScreen() {
                 onPress={tradingSession.retryRestore}
                 variant="secondary"
               />
+            ) : tradingSession.status === 'ready' ? (
+              <Button
+                label="Rotate private wallet"
+                onPress={() => Alert.alert(
+                  'Rotate private wallet?',
+                  'Perpal will verify all wallet balances, positions, orders, and pending private transfers are empty before creating a new private wallet.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Verify and rotate', onPress: () => void tradingSession.rotate() },
+                  ],
+                )}
+                variant="secondary"
+              />
+            ) : tradingSession.status === 'rotating' ? (
+              <Button label="Verifying zero balances" loading onPress={() => undefined} />
             ) : null}
           </View>
 
@@ -162,9 +187,8 @@ export function AccountScreen() {
               Trading route
             </Text>
             <Text style={styles.walletStatus}>
-              Markets stay public. Funding enters T through Umbra before the
-              selected provider receives collateral. Provider accounts are
-              internal and are not separate wallets.
+              Markets stay public. Umbra privately funds trading, and Perpal
+              prepares the selected provider automatically.
             </Text>
             <StatusRow
               label="Provider"
@@ -206,7 +230,7 @@ function walletProvisioningLabel(
     case 'unauthenticated': return 'Signed out';
     case 'provisioning': return 'Creating or restoring';
     case 'ready': return 'Ready';
-    case 'needs-recovery': return 'Recovery required';
+    case 'needs-recovery': return 'Restoring on this device';
     case 'error': return 'Unavailable';
   }
 }
@@ -217,6 +241,7 @@ function tradingSessionLabel(status: TradingSessionStatus): string {
     case 'restoring': return 'Restoring securely';
     case 'inactive': return 'Not activated';
     case 'activating': return 'Activating';
+    case 'rotating': return 'Verifying zero balances';
     case 'ready': return 'Ready';
     case 'recovery-required': return 'Recovery review required';
     case 'error': return 'Secure restore failed';
@@ -226,15 +251,17 @@ function tradingSessionLabel(status: TradingSessionStatus): string {
 function tradingSessionMessage(status: TradingSessionStatus): string {
   switch (status) {
     case 'waiting-for-wallet':
-      return 'Privy wallet M must exist before private trading can be activated.';
+      return 'Your Privy wallet must exist before private trading can be activated.';
     case 'restoring':
       return 'Restoring the previously activated private wallet on this device.';
     case 'inactive':
-      return 'Activate once to create or recover T. Normal sessions restore it automatically.';
+      return 'Activate once to create or recover your private trading wallet. Normal sessions restore it automatically.';
     case 'activating':
       return 'Approve the one-time recovery signature. It moves no funds.';
+    case 'rotating':
+      return 'Checking balances, positions, orders, and pending private transfers.';
     case 'ready':
-      return 'T is active and restores automatically on this device.';
+      return 'Your private trading wallet is active and restores automatically on this device.';
     case 'recovery-required':
       return 'The recovered identity differs from the recorded wallet, so trading is blocked.';
     case 'error':

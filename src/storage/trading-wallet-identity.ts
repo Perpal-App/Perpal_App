@@ -5,10 +5,15 @@ import { base58, base64 } from '@scure/base';
 
 import {
   parseTradingWalletIdentity,
+  deriveRotatedTradingWallet,
   serializeTradingWalletIdentity,
   type DerivedTradingWallet,
   type TradingWalletIdentity,
 } from '@/wallet/trading/derivation';
+
+export type ActivatedTradingWallet = DerivedTradingWallet & {
+  readonly rootSecretKey: Uint8Array;
+};
 
 const KEY_PREFIX = 'perpal.trading-wallet.identity.v1.';
 const ACTIVATION_KEY_PREFIX = 'perpal.trading-wallet.activation.v1.';
@@ -68,7 +73,7 @@ export async function writeTradingWalletIdentity(
 
 export async function readActivatedTradingWallet(
   mainWalletAddress: string,
-): Promise<DerivedTradingWallet | null> {
+): Promise<ActivatedTradingWallet | null> {
   const value = await SecureStore.getItemAsync(
     await activationKey(mainWalletAddress),
   );
@@ -78,6 +83,7 @@ export async function readActivatedTradingWallet(
   }
 
   let secretKey: Uint8Array | null = null;
+  let rootSecretKey: Uint8Array | null = null;
 
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;
@@ -88,17 +94,39 @@ export async function readActivatedTradingWallet(
     }
 
     secretKey = base64.decode(parsed.seed);
+    rootSecretKey = typeof parsed.rootSeed === 'string'
+      ? base64.decode(parsed.rootSeed)
+      : identity.generation === 0
+        ? base64.decode(parsed.seed)
+        : null;
 
     if (
       secretKey.length !== 32 ||
+      rootSecretKey === null ||
+      rootSecretKey.length !== 32 ||
       base58.encode(ed25519.getPublicKey(secretKey)) !== identity.address
     ) {
       throw new Error('activation identity mismatch');
     }
+    if (identity.generation > 0) {
+      const expected = deriveRotatedTradingWallet(
+        rootSecretKey,
+        mainWalletAddress,
+        identity.generation,
+      );
+      try {
+        if (expected.address !== identity.address) {
+          throw new Error('activation root mismatch');
+        }
+      } finally {
+        expected.secretKey.fill(0);
+      }
+    }
 
-    return { ...identity, secretKey };
+    return { ...identity, rootSecretKey, secretKey };
   } catch {
     secretKey?.fill(0);
+    rootSecretKey?.fill(0);
     throw new TradingWalletIdentityStorageError();
   }
 }
@@ -106,7 +134,9 @@ export async function readActivatedTradingWallet(
 export async function writeActivatedTradingWallet(
   mainWalletAddress: string,
   wallet: DerivedTradingWallet,
+  rootSecretKey: Uint8Array = wallet.secretKey,
 ): Promise<void> {
+  if (rootSecretKey.length !== 32) throw new TradingWalletIdentityStorageError();
   await SecureStore.setItemAsync(
     await activationKey(mainWalletAddress),
     JSON.stringify({
@@ -114,6 +144,7 @@ export async function writeActivatedTradingWallet(
       generation: wallet.generation,
       version: wallet.version,
       seed: base64.encode(wallet.secretKey),
+      rootSeed: base64.encode(rootSecretKey),
     }),
   );
   await writeTradingWalletIdentity(mainWalletAddress, wallet);

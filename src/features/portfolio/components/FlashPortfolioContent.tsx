@@ -2,7 +2,8 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
 import { StatusRow } from '@/components/ui/StatusRow';
-import { formatDetailedUsd } from '@/domain/money/amount';
+import { formatAmount, formatDetailedUsd } from '@/domain/money/amount';
+import { PrivateWithdrawPanel } from '@/features/portfolio/components/PrivateWithdrawPanel';
 import type {
   FlashPortfolioPosition,
   FlashPortfolioSnapshot,
@@ -30,10 +31,15 @@ export function FlashPortfolioContent({
           <StatusRow label="Private trading wallet" value={shortAddress(walletAddress)} />
           <StatusRow
             label="Provider"
-            value={snapshot.initialized ? 'Flash Trade v2 ready' : 'Setup on first deposit'}
+            value={snapshot.initialized ? 'Ready' : 'Setup automatic'}
           />
           <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
-          <StatusRow label="ER slot" value={snapshot.slot.toLocaleString()} />
+          <StatusRow
+            label="Available collateral"
+            value={snapshot.deposits.USDC === undefined
+              ? '0 USDC'
+              : `${formatAmount(snapshot.deposits.USDC)} USDC`}
+          />
         </View>
 
         {!snapshot.initialized ? (
@@ -44,7 +50,7 @@ export function FlashPortfolioContent({
         ) : snapshot.positions.length === 0 ? (
           <InlineState
             title="No open positions"
-            message="This Flash basket is live and currently has no open perpetual position."
+            message="Your Flash portfolio is ready and has no open perpetual position."
           />
         ) : (
           <View style={styles.positions}>
@@ -56,6 +62,7 @@ export function FlashPortfolioContent({
             ))}
           </View>
         )}
+        <PrivateWithdrawPanel provider="flash" />
       </View>
     </AppScreen>
   );

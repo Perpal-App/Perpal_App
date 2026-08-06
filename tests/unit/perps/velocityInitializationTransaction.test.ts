@@ -128,6 +128,7 @@ describe('Velocity market-order verification', () => {
       stateAccount: key(11),
       userAccount: key(12),
       userStatsAccount: key(13),
+      spotMarketVault: key(17),
       remainingAccounts: [
         { address: key(14), writable: false },
         { address: key(15), writable: true },
@@ -135,6 +136,7 @@ describe('Velocity market-order verification', () => {
       marketIndex: 0,
       side: 'long' as const,
       reduceOnly: false,
+      isolatedCollateralBaseUnits: 0n,
       baseAssetAmount: 1_000_000n,
       limitPrice: 200_000_000n,
       auctionStartPrice: 199_000_000n,

@@ -13,6 +13,8 @@ export type PrivateFundingPhase =
   | 'proving'
   | 'relaying'
   | 'fee-funding'
+  | 'provider-setup'
+  | 'provider-depositing'
   | 'complete';
 
 export type PrivateFundingRecord = {
@@ -43,6 +45,9 @@ export type PrivateFundingRecord = {
   readonly feeFundingSignature: string | null;
   readonly feeFundingNoteAmountLamports: string | null;
   readonly feeFundingRelayerFixedFeeLamports: string | null;
+  readonly providerSetupComplete: boolean;
+  readonly providerSetupSignature: string | null;
+  readonly providerDepositSignature: string | null;
   readonly errorCode: string | null;
   readonly updatedAtMs: number;
 };
@@ -132,6 +137,9 @@ function parseRecord(value: string): PrivateFundingRecord | null {
     const feeFundingNoteAmountLamports = record.feeFundingNoteAmountLamports ?? null;
     const feeFundingRelayerFixedFeeLamports =
       record.feeFundingRelayerFixedFeeLamports ?? null;
+    const providerSetupComplete = record.providerSetupComplete ?? false;
+    const providerSetupSignature = record.providerSetupSignature ?? null;
+    const providerDepositSignature = record.providerDepositSignature ?? null;
 
     if (
       record.version !== 1 ||
@@ -164,6 +172,9 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       !nullableString(feeFundingSignature) ||
       !nullableUnsignedInteger(feeFundingNoteAmountLamports) ||
       !nullableUnsignedInteger(feeFundingRelayerFixedFeeLamports) ||
+      typeof providerSetupComplete !== 'boolean' ||
+      !nullableString(providerSetupSignature) ||
+      !nullableString(providerDepositSignature) ||
       !nullableString(record.errorCode) ||
       typeof record.updatedAtMs !== 'number' ||
       !Number.isSafeInteger(record.updatedAtMs)
@@ -185,6 +196,9 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       feeFundingSignature,
       feeFundingNoteAmountLamports,
       feeFundingRelayerFixedFeeLamports,
+      providerSetupComplete,
+      providerSetupSignature,
+      providerDepositSignature,
     } as unknown as PrivateFundingRecord;
   } catch {
     return null;
@@ -222,6 +236,8 @@ function isPhase(value: unknown): value is PrivateFundingPhase {
     value === 'proving' ||
     value === 'relaying' ||
     value === 'fee-funding' ||
+    value === 'provider-setup' ||
+    value === 'provider-depositing' ||
     value === 'complete'
   );
 }

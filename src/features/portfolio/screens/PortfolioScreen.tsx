@@ -13,6 +13,7 @@ import {
   type Amount,
 } from '@/domain/money/amount';
 import { FlashPortfolioContent } from '@/features/portfolio/components/FlashPortfolioContent';
+import { PrivateWithdrawPanel } from '@/features/portfolio/components/PrivateWithdrawPanel';
 import { useFlashPortfolio } from '@/features/portfolio/hooks/useFlashPortfolio';
 import { useVelocityPortfolio } from '@/features/portfolio/hooks/useVelocityPortfolio';
 import { usePublicMarkets } from '@/features/trade/hooks/usePublicMarkets';
@@ -67,7 +68,7 @@ export function PortfolioScreen() {
     return (
       <PortfolioState
         title="Privy wallet required"
-        message="Privy could not create the embedded Solana wallet. Open Account to retry after enabling it in the Privy app configuration."
+        message="Privy could not create or restore the embedded Solana wallet. Open Account to retry the secure wallet setup."
         action={{
           label: 'Open account setup',
           onPress: () => router.push('/(tabs)/account'),
@@ -91,7 +92,7 @@ export function PortfolioScreen() {
         message={
           session.status === 'recovery-required'
             ? 'The derived trading wallet does not match the recorded identity. No new identity was adopted.'
-            : 'Activate T once from Account. It is restored automatically on normal sessions.'
+            : 'Activate private trading once from Account. It restores automatically on normal sessions.'
         }
         action={
           session.status === 'recovery-required'
@@ -119,7 +120,7 @@ export function PortfolioScreen() {
       return (
         <PortfolioState
           title="Flash portfolio unavailable"
-          message="The Flash basket could not be read from the public ER. The app will retry while this tab remains open."
+          message="The Flash portfolio could not be read. The app will retry while this tab remains open."
         />
       );
     }
@@ -140,7 +141,7 @@ export function PortfolioScreen() {
     return (
       <PortfolioState
         title="Portfolio unavailable"
-        message="The Velocity account could not be read. The app will retry while this tab remains open."
+        message="The Velocity portfolio could not be read. The app will retry while this tab remains open."
       />
     );
   }
@@ -178,10 +179,9 @@ function PortfolioContent({
           <StatusRow label="Private trading wallet" value={shortAddress(walletAddress)} />
           <StatusRow
             label="Provider"
-            value={snapshot.initialized ? 'Velocity ready' : 'Setup on first deposit'}
+            value={snapshot.initialized ? 'Ready' : 'Setup automatic'}
           />
           <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
-          <StatusRow label="Account slot" value={snapshot.slot.toLocaleString()} />
         </View>
 
         {snapshot.margin === null ? null : (
@@ -223,7 +223,7 @@ function PortfolioContent({
         ) : snapshot.positions.length === 0 ? (
           <InlineState
             title="No open positions"
-            message="This Velocity account is live and currently has no core perpetual position."
+            message="Your Velocity portfolio is ready and has no open perpetual position."
           />
         ) : (
           <View style={styles.positions}>
@@ -256,6 +256,8 @@ function PortfolioContent({
             included in aggregate risk.
           </Text>
         ) : null}
+
+        <PrivateWithdrawPanel provider="velocity" />
       </View>
     </AppScreen>
   );

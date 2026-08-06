@@ -22,6 +22,16 @@ export type PublicMarketPrice = {
   readonly stale: boolean;
 };
 
+export function hasCurrentMarketPrices(
+  symbols: readonly PublicMarketSymbol[],
+  prices: readonly PublicMarketPrice[],
+): boolean {
+  const currentSymbols = new Set(
+    prices.filter((price) => !price.stale).map((price) => price.symbol),
+  );
+  return symbols.every((symbol) => currentSymbols.has(symbol));
+}
+
 export async function fetchPublicMarketPrices(
   url: string,
   signal: AbortSignal,

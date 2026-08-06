@@ -1,4 +1,5 @@
 import {
+  hasCurrentMarketPrices,
   parsePublicMarketPrices,
   parsePublicMarketStreamFrame,
 } from '@/integrations/perps/markets/publicMarketData';
@@ -38,6 +39,10 @@ describe('public mainnet market prices', () => {
     );
 
     expect(streamed?.[2]?.symbol).toBe('SOL-PERP');
+    expect(
+      hasCurrentMarketPrices(['BTC-PERP', 'ETH-PERP', 'SOL-PERP'], markets),
+    ).toBe(true);
+    expect(hasCurrentMarketPrices(['SOL-PERP'], [])).toBe(false);
   });
 });
 

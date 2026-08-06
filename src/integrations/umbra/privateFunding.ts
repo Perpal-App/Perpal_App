@@ -4,6 +4,7 @@ import { getUmbraRelayer } from '@umbra-privacy/sdk/relayer';
 import type { AppConfig, PerpsProviderId } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { providerCollateral } from '@/integrations/perps/providerCollateral';
+import { fundSelectedProvider } from '@/integrations/perps/providerFunding';
 import {
   classifyPrivateFundingFailure,
   PrivateFundingError,
@@ -56,7 +57,10 @@ export async function beginPrivateFunding(
 
   const existing = await readPrivateFundingRecord(input.mainWalletAddress);
 
-  if (existing !== null && existing.phase !== 'complete') {
+  if (
+    existing !== null &&
+    (existing.phase !== 'complete' || existing.providerDepositSignature === null)
+  ) {
     throw new PrivateFundingError(
       'Resume the pending private funding operation first.',
       'operation_pending',
@@ -95,6 +99,9 @@ export async function beginPrivateFunding(
     feeFundingSignature: null,
     feeFundingNoteAmountLamports: null,
     feeFundingRelayerFixedFeeLamports: null,
+    providerSetupComplete: false,
+    providerSetupSignature: null,
+    providerDepositSignature: null,
     errorCode: null,
     updatedAtMs: Date.now(),
   };
@@ -230,11 +237,11 @@ async function runPrivateFunding(
         await save(withFeeReserveLeg(record, state));
       },
     });
-    await save({
-      ...record,
-      phase: 'complete',
-      errorCode: null,
-      updatedAtMs: Date.now(),
+    record = await fundSelectedProvider({
+      config: input.config,
+      record,
+      signer: input.gatewaySigner,
+      onRecord: save,
     });
     return record;
   } catch (cause) {
@@ -322,5 +329,10 @@ async function persist(
   onRecord: (record: PrivateFundingRecord) => void,
 ): Promise<void> {
   await writePrivateFundingRecord(record);
+  console.info('[Perpal recovery]', JSON.stringify({
+    event: 'checkpoint',
+    operation: 'private_funding',
+    phase: record.phase,
+  }));
   onRecord(record);
 }

@@ -33,6 +33,10 @@ import {
 } from '@/integrations/perps/velocity/velocityMarketOrderState';
 import { createReadOnlyVelocityUser } from '@/integrations/perps/velocity/velocityPortfolio';
 import {
+  queueVelocitySettlement,
+  resumeVelocitySettlements,
+} from '@/integrations/perps/velocity/velocitySettlement';
+import {
   signAndSubmitLegacyTransaction,
   type SubmittedTransactionResult,
 } from '@/integrations/solana/signedLegacyTransaction';
@@ -60,6 +64,7 @@ export type VelocityMarketOrderPlan = VelocityMarketOrderTransactionPlan & {
   readonly quotePublishedAtMs: number;
   readonly expiresAtMs: number;
   readonly idempotencyKey: string;
+  readonly closesPosition: boolean;
 };
 
 type OrderInput = {
@@ -111,7 +116,11 @@ export async function prepareVelocityMarketOrder(input: OrderInput): Promise<Vel
   }
 
   validateSize(input.baseAssetAmount, state.perpMarket);
-  validatePositionChange(state.user, state.addresses.marketIndex, input);
+  const closesPosition = validatePositionChange(
+    state.user,
+    state.addresses.marketIndex,
+    input,
+  );
   const oracle = oracleData(state.perpMarket, price.price.baseUnits, price.price.decimals, orderState.slot);
   const direction = input.side === 'long' ? PositionDirection.LONG : PositionDirection.SHORT;
   const size = velocityBn(state.perpMarket, input.baseAssetAmount);
@@ -146,13 +155,38 @@ export async function prepareVelocityMarketOrder(input: OrderInput): Promise<Vel
         10_000n,
       );
   const takerFee = calculateTakerFee(notional, state.state, state.stats, state.perpMarket);
+  const marketAccounts = new Map(
+    state.perpMarkets.map((market) => [market.marketIndex, market]),
+  );
+  const oracleAccounts = new Map<number, MMOraclePriceData>();
+
+  for (const market of state.perpMarkets) {
+    const marketPrice = prices.find(
+      (candidate) => candidate.symbol === symbolForMarketIndex(market.marketIndex),
+    );
+    if (marketPrice === undefined || marketPrice.stale) {
+      throw new VelocityMarketOrderError(
+        'A price required for account-wide risk is unavailable.',
+        'risk_price_unavailable',
+      );
+    }
+    oracleAccounts.set(
+      market.marketIndex,
+      oracleData(
+        market,
+        marketPrice.price.baseUnits,
+        marketPrice.price.decimals,
+        orderState.slot,
+      ),
+    );
+  }
   const riskUser = createReadOnlyVelocityUser(
     new PublicKey(addresses.userAccount),
     state.user,
     orderState.slot,
-    new Map([[addresses.marketIndex, state.perpMarket]]),
+    marketAccounts,
     state.spotMarket,
-    new Map([[addresses.marketIndex, oracle]]),
+    oracleAccounts,
     state.state,
   );
   const initialRisk = riskUser.getMarginCalculation('Initial');
@@ -179,16 +213,21 @@ export async function prepareVelocityMarketOrder(input: OrderInput): Promise<Vel
   );
 
   const remainingAccounts = buildVelocityOrderRemainingAccounts(orderState);
+  const isolatedCollateralBaseUnits = input.reduceOnly
+    ? 0n
+    : requiredMargin + takerFee;
   const orderExpiryUnixSeconds = BigInt(Math.floor(Date.now() / 1_000) + 45);
   const transaction = buildVelocityMarketOrderTransaction({
     owner: input.owner,
     stateAccount: addresses.stateAccount,
     userAccount: addresses.userAccount,
     userStatsAccount: addresses.userStatsAccount,
+    spotMarketVault: state.spotMarket.vault.toBase58(),
     remainingAccounts,
     marketIndex: addresses.marketIndex,
     side: input.side,
     reduceOnly: input.reduceOnly,
+    isolatedCollateralBaseUnits,
     baseAssetAmount: input.baseAssetAmount,
     limitPrice,
     auctionStartPrice: BigInt(standardizedStart.toString()),
@@ -219,10 +258,12 @@ export async function prepareVelocityMarketOrder(input: OrderInput): Promise<Vel
     stateAccount: addresses.stateAccount,
     userAccount: addresses.userAccount,
     userStatsAccount: addresses.userStatsAccount,
+    spotMarketVault: state.spotMarket.vault.toBase58(),
     remainingAccounts,
     marketIndex: addresses.marketIndex,
     side: input.side,
     reduceOnly: input.reduceOnly,
+    isolatedCollateralBaseUnits,
     baseAssetAmount: input.baseAssetAmount,
     limitPrice,
     auctionStartPrice: BigInt(standardizedStart.toString()),
@@ -249,6 +290,7 @@ export async function prepareVelocityMarketOrder(input: OrderInput): Promise<Vel
     quotePublishedAtMs: price.publishedAtMs,
     expiresAtMs: Date.now() + PLAN_LIFETIME_MS,
     idempotencyKey: Crypto.randomUUID(),
+    closesPosition,
   };
 
   verifyVelocityMarketOrderPlan(plan, input.programId);
@@ -256,7 +298,10 @@ export async function prepareVelocityMarketOrder(input: OrderInput): Promise<Vel
 }
 
 export async function submitVelocityMarketOrder(
-  input: OrderInput & { readonly plan: VelocityMarketOrderPlan },
+  input: OrderInput & {
+    readonly intentStartedAtMs: number;
+    readonly plan: VelocityMarketOrderPlan;
+  },
 ): Promise<SubmittedTransactionResult> {
   verifyVelocityMarketOrderPlan(input.plan, input.programId);
 
@@ -281,19 +326,52 @@ export async function submitVelocityMarketOrder(
     movedPastLimit ||
     current.requiredMarginBaseUnits > input.plan.requiredMarginBaseUnits ||
     current.takerFeeBaseUnits > input.plan.takerFeeBaseUnits ||
+    current.isolatedCollateralBaseUnits > input.plan.isolatedCollateralBaseUnits ||
     current.totalCollateralBaseUnits < input.plan.totalCollateralBaseUnits
   ) {
     throw new VelocityMarketOrderError('Price or account risk changed. Review a new order quote.', 'quote_changed');
   }
 
-  return signAndSubmitLegacyTransaction({
+  const result = await signAndSubmitLegacyTransaction({
     idempotencyKey: input.plan.idempotencyKey,
     owner: input.owner,
     rpcUrl: input.rpcUrl,
     signer: input.signer,
+    tradeTiming: {
+      action: input.plan.closesPosition
+        ? 'close'
+        : input.plan.reduceOnly
+          ? 'reduce'
+          : 'open',
+      intentStartedAtMs: input.intentStartedAtMs,
+      provider: 'velocity',
+    },
     unsignedTransaction: input.plan.unsignedTransaction,
+    ...(input.plan.closesPosition
+      ? {
+          onSigned: async (signature: string) => {
+            await queueVelocitySettlement({
+              closeSignature: signature,
+              marketIndex: input.plan.marketIndex,
+              owner: input.owner,
+              symbol: input.symbol,
+            });
+          },
+        }
+      : {}),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
+
+  if (input.plan.closesPosition && result.status === 'confirmed') {
+    await resumeVelocitySettlements({
+      marketDataUrl: input.marketDataUrl,
+      owner: input.owner,
+      programId: input.programId,
+      rpcUrl: input.rpcUrl,
+      signer: input.signer,
+    });
+  }
+  return result;
 }
 
 function oracleData(market: PerpMarketAccount, baseUnits: bigint, decimals: number, slot: number): MMOraclePriceData {
@@ -349,7 +427,7 @@ function validatePositionChange(
   user: UserAccount,
   marketIndex: number,
   input: Pick<OrderInput, 'baseAssetAmount' | 'reduceOnly' | 'side'>,
-): void {
+): boolean {
   const position = user.perpPositions.find(
     (candidate) => candidate.marketIndex === marketIndex,
   );
@@ -367,7 +445,7 @@ function validatePositionChange(
         'existing_position',
       );
     }
-    return;
+    return false;
   }
 
   const closesPosition =
@@ -380,6 +458,28 @@ function validatePositionChange(
       'reduce_only_invalid',
     );
   }
+
+  if (
+    position === undefined ||
+    BigInt(position.isolatedPositionScaledBalance.toString()) <= 0n
+  ) {
+    throw new VelocityMarketOrderError(
+      'This position is not isolated and cannot use the automatic settlement path.',
+      'position_not_isolated',
+    );
+  }
+  return input.baseAssetAmount === abs(currentBase);
+}
+
+function symbolForMarketIndex(marketIndex: number): PublicMarketSymbol {
+  const symbol = ['BTC-PERP', 'ETH-PERP', 'SOL-PERP'][marketIndex];
+  if (symbol === undefined) {
+    throw new VelocityMarketOrderError(
+      'A non-core Velocity position cannot be priced.',
+      'account_shape_unsupported',
+    );
+  }
+  return symbol as PublicMarketSymbol;
 }
 
 function validateAuctionDuration(value: number): number {

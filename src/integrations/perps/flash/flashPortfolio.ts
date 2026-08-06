@@ -1,10 +1,18 @@
 import { Buffer } from 'buffer';
 
 import { PublicKey } from '@solana/web3.js';
+import { findUserDepositLedgerAddress } from '@flash_trade/flash-sdk-v2/dist/utils';
 
-import { amountFromBaseUnits, type Amount } from '@/domain/money/amount';
+import {
+  amountFromBaseUnits,
+  type Amount,
+  type TokenDecimals,
+} from '@/domain/money/amount';
 import { fetchPublicProgramAccount } from '@/integrations/api/publicSolanaRpc';
-import { decodeFlashBasket } from '@/integrations/perps/flash/flashAccountCoder';
+import {
+  decodeFlashBasket,
+  decodeFlashUserDepositLedger,
+} from '@/integrations/perps/flash/flashAccountCoder';
 import { flashPool } from '@/integrations/perps/flash/flashMarketData';
 
 export type FlashPortfolioPosition = {
@@ -14,6 +22,7 @@ export type FlashPortfolioPosition = {
   readonly size: string;
   readonly entryPrice: string;
   readonly notional: Amount;
+  readonly sizeUsdBaseUnits: bigint;
   readonly collateral: Amount;
   readonly collateralSymbol: string;
   readonly leverage: string | null;
@@ -24,6 +33,8 @@ export type FlashPortfolioSnapshot = {
   readonly accountAddress: string;
   readonly positions: readonly FlashPortfolioPosition[];
   readonly openOrders: number;
+  readonly deposits: Readonly<Record<string, Amount>>;
+  readonly reservedWithdrawals: Readonly<Record<string, Amount>>;
   readonly slot: number;
 };
 
@@ -39,21 +50,29 @@ export async function fetchFlashPortfolio(
     [Buffer.from('basket'), owner.toBuffer()],
     new PublicKey(programId),
   );
-  const response = await fetchPublicProgramAccount(
-    erRpcUrl,
-    basketAddress.toBase58(),
-    programId,
-    signal,
-  );
+  const [ledgerAddress] = findUserDepositLedgerAddress(owner, new PublicKey(programId));
+  const [response, ledgerResponse] = await Promise.all([
+    fetchPublicProgramAccount(erRpcUrl, basketAddress.toBase58(), programId, signal),
+    fetchPublicProgramAccount(erRpcUrl, ledgerAddress.toBase58(), programId, signal),
+  ]);
 
   if (response.account === null) {
-    return emptySnapshot(basketAddress.toBase58(), response.slot);
+    if (ledgerResponse.account !== null) {
+      throw new Error('Flash returned a deposit ledger without a basket.');
+    }
+    return emptySnapshot(basketAddress.toBase58(), Math.max(response.slot, ledgerResponse.slot));
   }
 
   const basket = decodeFlashBasket(response.account);
 
   if (basket.owner.toBase58() !== owner.toBase58()) {
     throw new Error('Flash ER returned a basket for another authority.');
+  }
+  const ledger = ledgerResponse.account === null
+    ? null
+    : decodeFlashUserDepositLedger(ledgerResponse.account);
+  if (ledger !== null && ledger.owner.toBase58() !== owner.toBase58()) {
+    throw new Error('Flash ER returned a deposit ledger for another authority.');
   }
 
   const positions = basket.positions
@@ -86,6 +105,7 @@ export async function fetchFlashPortfolio(
           position.entryPrice.exponent,
         ),
         notional: usd(sizeUsd),
+        sizeUsdBaseUnits: sizeUsd,
         collateral: usd(collateralUsd),
         collateralSymbol: collateral?.symbol ?? 'Unknown',
         leverage: ratio(sizeUsd, collateralUsd),
@@ -100,7 +120,10 @@ export async function fetchFlashPortfolio(
       (total, entry) => total + entry.order.activeOrders,
       0,
     ),
-    slot: response.slot,
+    deposits: ledger === null ? {} : depositMap(ledger.deposits, pool),
+    reservedWithdrawals:
+      ledger === null ? {} : depositMap(ledger.reservedWithdrawals, pool),
+    slot: Math.max(response.slot, ledgerResponse.slot),
   };
 }
 
@@ -113,8 +136,33 @@ function emptySnapshot(
     accountAddress,
     positions: [],
     openOrders: 0,
+    deposits: {},
+    reservedWithdrawals: {},
     slot,
   };
+}
+
+function depositMap(
+  entries: readonly { readonly mint: PublicKey; readonly amount: { toString(): string } }[],
+  pool: ReturnType<typeof flashPool>,
+): Readonly<Record<string, Amount>> {
+  return Object.fromEntries(entries
+    .filter((entry) => BigInt(entry.amount.toString()) !== 0n)
+    .map((entry) => {
+      const token = pool.tokens.find((candidate) => candidate.mintKey.equals(entry.mint));
+      if (token === undefined) throw new Error('Flash returned an unknown deposit mint.');
+      return [
+        token.symbol,
+        amountFromBaseUnits(BigInt(entry.amount.toString()), tokenDecimals(token.decimals)),
+      ];
+    }));
+}
+
+function tokenDecimals(value: number): TokenDecimals {
+  if (value !== 0 && value !== 6 && value !== 8 && value !== 9) {
+    throw new Error('Flash returned an unsupported token precision.');
+  }
+  return value;
 }
 
 function oracleDecimal(value: bigint, exponent: number): string {

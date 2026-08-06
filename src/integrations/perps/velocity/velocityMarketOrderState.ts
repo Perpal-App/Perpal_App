@@ -5,11 +5,11 @@ import {
   getUserStatsAccountPublicKey,
 } from '@velocity-exchange/sdk/lib/browser/addresses/pda';
 import { CustomBorshAccountsCoder } from '@velocity-exchange/sdk/lib/browser/decode/customCoder';
+import { getRemainingAccounts } from '@velocity-exchange/sdk/lib/browser/core/remainingAccounts';
 import { decodeUser } from '@velocity-exchange/sdk/lib/browser/decode/user';
 import velocityIdl from '@velocity-exchange/sdk/lib/browser/idl/velocity.json';
 import {
   ReferrerStatus,
-  isVariant,
   type PerpMarketAccount,
   type SpotMarketAccount,
   type StateAccount,
@@ -45,6 +45,7 @@ export type VelocityOrderState = {
   readonly state: StateAccount;
   readonly spotMarket: SpotMarketAccount;
   readonly perpMarket: PerpMarketAccount;
+  readonly perpMarkets: readonly PerpMarketAccount[];
 };
 
 type AccountValue = {
@@ -73,7 +74,7 @@ export async function loadVelocityOrderState(input: {
         addresses.userAccount,
         addresses.userStatsAccount,
         addresses.spotMarketAccount,
-        addresses.perpMarketAccount,
+        ...addresses.perpMarketAccounts,
       ],
       { commitment: 'confirmed', encoding: 'base64' },
     ],
@@ -81,11 +82,11 @@ export async function loadVelocityOrderState(input: {
     signer: input.signer,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  const [stateRaw, userRaw, statsRaw, spotRaw, perpRaw] = result.value;
+  const [stateRaw, userRaw, statsRaw, spotRaw, ...perpRaws] = result.value;
 
   if (
-    result.value.length !== 5 ||
-    [stateRaw, userRaw, statsRaw, spotRaw, perpRaw].some(
+    result.value.length !== 7 ||
+    [stateRaw, userRaw, statsRaw, spotRaw, ...perpRaws].some(
       (account) =>
         account === undefined || account === null || account.owner !== input.programId,
     )
@@ -103,12 +104,22 @@ export async function loadVelocityOrderState(input: {
     ...decodeAccount<SpotMarketAccount>('SpotMarket', spotRaw!),
     pubkey: new PublicKey(addresses.spotMarketAccount),
   };
-  const perpMarket = {
-    ...decodeAccount<PerpMarketAccount>('PerpMarket', perpRaw!),
-    pubkey: new PublicKey(addresses.perpMarketAccount),
-  };
+  const perpMarkets = perpRaws.map((raw, index) => ({
+    ...decodeAccount<PerpMarketAccount>('PerpMarket', raw!),
+    pubkey: new PublicKey(addresses.perpMarketAccounts[index]!),
+  }));
+  const perpMarket = perpMarkets.find(
+    (market) => market.marketIndex === addresses.marketIndex,
+  );
 
-  validateAccountShape(user, stats, spotMarket, perpMarket, addresses, input.owner);
+  if (perpMarket === undefined) {
+    throw new VelocityMarketOrderError(
+      'Velocity omitted the selected market account.',
+      'market_mismatch',
+    );
+  }
+
+  validateAccountShape(user, stats, spotMarket, perpMarkets, addresses, input.owner);
 
   return {
     addresses,
@@ -118,32 +129,52 @@ export async function loadVelocityOrderState(input: {
     state,
     spotMarket,
     perpMarket,
+    perpMarkets,
   };
 }
 
 export function buildVelocityOrderRemainingAccounts(orderState: VelocityOrderState) {
-  const accounts = [] as { address: string; writable: boolean }[];
-
-  if (!orderState.spotMarket.oracle.equals(PublicKey.default)) {
-    accounts.push({
-      address: orderState.spotMarket.oracle.toBase58(),
-      writable: false,
-    });
-  }
-
-  accounts.push({
-    address: orderState.perpMarket.oracle.toBase58(),
-    writable: isVariant(orderState.perpMarket.oracleSource, 'prelaunch'),
-  });
-  accounts.push({
-    address: orderState.addresses.spotMarketAccount,
-    writable: false,
-  });
-  accounts.push({
-    address: orderState.addresses.perpMarketAccount,
-    writable: true,
-  });
-  return accounts;
+  const markets = new Map(
+    orderState.perpMarkets.map((market) => [market.marketIndex, market]),
+  );
+  return getRemainingAccounts(
+    {
+      getPerpMarketAccount: (marketIndex) => {
+        const market = markets.get(marketIndex);
+        if (market === undefined) {
+          throw new VelocityMarketOrderError(
+            'A non-core Velocity position cannot be verified.',
+            'account_shape_unsupported',
+          );
+        }
+        return market;
+      },
+      getSpotMarketAccount: (marketIndex) => {
+        if (marketIndex !== QUOTE_MARKET_INDEX) {
+          throw new VelocityMarketOrderError(
+            'A non-USDT Velocity position cannot be verified.',
+            'account_shape_unsupported',
+          );
+        }
+        return orderState.spotMarket;
+      },
+      getUserAccountAndSlot: () => ({ slot: orderState.slot }),
+      activeSubAccountId: orderState.user.subAccountId,
+      authority: orderState.user.authority,
+      perpMarketLastSlotCache: new Map(),
+      spotMarketLastSlotCache: new Map(),
+      mustIncludePerpMarketIndexes: new Set(),
+      mustIncludeSpotMarketIndexes: new Set(),
+    },
+    {
+      userAccounts: [orderState.user],
+      writablePerpMarketIndexes: [orderState.addresses.marketIndex],
+      writableSpotMarketIndexes: [QUOTE_MARKET_INDEX],
+    },
+  ).map((account) => ({
+    address: account.pubkey.toBase58(),
+    writable: account.isWritable,
+  }));
 }
 
 function orderAddresses(
@@ -154,6 +185,9 @@ function orderAddresses(
   const program = new PublicKey(programId);
   const authority = new PublicKey(owner);
   const marketIndex = { 'BTC-PERP': 0, 'ETH-PERP': 1, 'SOL-PERP': 2 }[symbol];
+  const perpMarketAccounts = [0, 1, 2].map((index) =>
+    getPerpMarketPublicKeySync(program, index).toBase58(),
+  );
 
   return {
     marketIndex,
@@ -167,7 +201,8 @@ function orderAddresses(
       program,
       QUOTE_MARKET_INDEX,
     ).toBase58(),
-    perpMarketAccount: getPerpMarketPublicKeySync(program, marketIndex).toBase58(),
+    perpMarketAccount: perpMarketAccounts[marketIndex]!,
+    perpMarketAccounts,
   };
 }
 
@@ -175,14 +210,15 @@ function validateAccountShape(
   user: UserAccount,
   stats: UserStatsAccount,
   spotMarket: SpotMarketAccount,
-  perpMarket: PerpMarketAccount,
+  perpMarkets: readonly PerpMarketAccount[],
   addresses: VelocityOrderAddresses,
   owner: string,
 ): void {
   const authority = new PublicKey(owner);
+  const coreMarketIndexes = new Set(perpMarkets.map((market) => market.marketIndex));
   const unsupportedPerpExposure = user.perpPositions.some(
     (position) =>
-      position.marketIndex !== addresses.marketIndex &&
+      !coreMarketIndexes.has(position.marketIndex) &&
       (BigInt(position.baseAssetAmount.toString()) !== 0n ||
         BigInt(position.quoteAssetAmount.toString()) !== 0n ||
         position.openOrders > 0 ||
@@ -197,12 +233,11 @@ function validateAccountShape(
   if (
     !user.authority.equals(authority) ||
     !stats.authority.equals(authority) ||
-    user.openOrders > 0 ||
     unsupportedPerpExposure ||
     hasUnsupportedSpot
   ) {
     throw new VelocityMarketOrderError(
-      'This order path supports one selected core position and no open orders.',
+      'This order path cannot verify a non-core perp or non-USDT spot position.',
       'account_shape_unsupported',
     );
   }
@@ -216,7 +251,7 @@ function validateAccountShape(
 
   if (
     spotMarket.marketIndex !== QUOTE_MARKET_INDEX ||
-    perpMarket.marketIndex !== addresses.marketIndex
+    !perpMarkets.some((market) => market.marketIndex === addresses.marketIndex)
   ) {
     throw new VelocityMarketOrderError(
       'Velocity returned mismatched market accounts.',

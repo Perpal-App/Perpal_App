@@ -30,6 +30,7 @@ import type {
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
+import { createUmbraLocalSigner } from '@/integrations/umbra/umbraLocalSigner';
 
 const ZERO_SIGNATURE = new Uint8Array(64);
 const CONFIRMATION_ATTEMPTS = 45;
@@ -78,6 +79,20 @@ export function createUmbraGatewayDependencies(input: {
       input.rpcUrl,
       input.gatewaySigner,
     ),
+  };
+}
+
+export function createUmbraLocalGatewayDependencies(input: {
+  readonly gatewaySigner: GatewayRequestSigner;
+  readonly rpcUrl: string;
+  readonly walletAddress: string;
+}): UmbraGatewayDependencies {
+  return {
+    signer: createUmbraLocalSigner(input.walletAddress, input.gatewaySigner),
+    accountInfoProvider: createAccountInfoProvider(input.rpcUrl, input.gatewaySigner),
+    blockhashProvider: createBlockhashProvider(input.rpcUrl, input.gatewaySigner),
+    epochInfoProvider: createEpochInfoProvider(input.rpcUrl, input.gatewaySigner),
+    transactionForwarder: createTransactionForwarder(input.rpcUrl, input.gatewaySigner),
   };
 }
 

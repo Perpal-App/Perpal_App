@@ -4,11 +4,7 @@ import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
-import {
-  amountFromBaseUnits,
-  formatAmount,
-  parseAmount,
-} from '@/domain/money/amount';
+import { parseAmount } from '@/domain/money/amount';
 import { providerCollateral } from '@/integrations/perps/providerCollateral';
 import { usePrivateFunding } from '@/integrations/umbra/PrivateFundingProvider';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
@@ -32,7 +28,7 @@ export function PrivateFundingPanel({
   }, [provider]);
   const pending =
     funding.record?.phase === 'complete' &&
-    funding.record.feeFundingSignature !== null
+    funding.record.providerDepositSignature !== null
       ? null
       : funding.record;
   const shownSymbol = pending?.symbol ?? collateral?.symbol ?? 'collateral';
@@ -54,7 +50,7 @@ export function PrivateFundingPanel({
       setInputError(null);
       Alert.alert(
         'Add private trading funds',
-        `${amount.trim()} ${collateral.symbol} collateral and ${feeReserve.trim()} SOL for provider fees will each move from Privy wallet M through Umbra to private wallet T. Umbra protocol and relayer fees are deducted. M pays the public deposit network fees; PerPal does not sponsor T.`,
+        `${amount.trim()} ${collateral.symbol} and ${feeReserve.trim()} SOL for network fees will move privately into your trading wallet. Umbra and network fees apply. Provider setup happens automatically.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -104,60 +100,11 @@ export function PrivateFundingPanel({
         Add private trading funds
       </Text>
       <Text style={styles.message}>
-        Privy wallet M → Umbra pool → private wallet T. Umbra relays both
-        claims, including native SOL for T's provider and trade fees.
+        Enter collateral and a SOL network-fee reserve once. Perpal privately
+        funds trading and prepares the selected provider automatically.
       </Text>
       <StatusRow label="Collateral" value={shownSymbol} />
-      <StatusRow label="Privacy step" value={phaseLabel(funding.record?.phase)} />
-      {funding.record?.noteAmountBaseUnits ? (
-        <StatusRow
-          label="Private note"
-          value={`${formatAmount(amountFromBaseUnits(BigInt(funding.record.noteAmountBaseUnits), 6))} ${shownSymbol}`}
-        />
-      ) : null}
-      {funding.record?.relayerFixedFeeLamports ? (
-        <StatusRow
-          label="Claim network fee"
-          value={`${formatAmount(amountFromBaseUnits(BigInt(funding.record.relayerFixedFeeLamports), 9))} SOL · paid by Umbra relayer`}
-        />
-      ) : null}
-      {funding.record?.relayRequestId ? (
-        <StatusRow label="Relayer request" value={funding.record.relayRequestId} />
-      ) : null}
-      {funding.record?.claimSignature ? (
-        <StatusRow label="Claim" selectable value={funding.record.claimSignature} />
-      ) : null}
-      {funding.record?.feeFundingLamports ? (
-        <StatusRow
-          label="SOL fee reserve"
-          value={`${formatAmount(amountFromBaseUnits(BigInt(funding.record.feeFundingLamports), 9))} SOL · funded by you`}
-        />
-      ) : null}
-      {funding.record?.feeFundingNoteAmountLamports ? (
-        <StatusRow
-          label="Private SOL note"
-          value={`${formatAmount(amountFromBaseUnits(BigInt(funding.record.feeFundingNoteAmountLamports), 9))} SOL`}
-        />
-      ) : null}
-      {funding.record?.feeFundingRelayerFixedFeeLamports ? (
-        <StatusRow
-          label="SOL claim network fee"
-          value={`${formatAmount(amountFromBaseUnits(BigInt(funding.record.feeFundingRelayerFixedFeeLamports), 9))} SOL · paid by Umbra relayer`}
-        />
-      ) : null}
-      {funding.record?.feeFundingRelayRequestId ? (
-        <StatusRow
-          label="SOL relayer request"
-          value={funding.record.feeFundingRelayRequestId}
-        />
-      ) : null}
-      {funding.record?.feeFundingSignature ? (
-        <StatusRow
-          label="SOL claim"
-          selectable
-          value={funding.record.feeFundingSignature}
-        />
-      ) : null}
+      <StatusRow label="Status" value={phaseLabel(funding.record?.phase)} />
 
       {pending === null ? (
         <TextInput
@@ -175,12 +122,12 @@ export function PrivateFundingPanel({
 
       {pending === null || funding.record?.feeFundingLamports === null ? (
         <TextInput
-          accessibilityLabel="Private SOL fee reserve"
+          accessibilityLabel="SOL network fee reserve"
           autoCapitalize="none"
           editable={!funding.isRunning && tradingReady}
           inputMode="decimal"
           onChangeText={setFeeReserve}
-          placeholder="SOL fee reserve"
+          placeholder="SOL for network fees"
           placeholderTextColor={colors.textMuted}
           style={styles.input}
           value={feeReserve}
@@ -201,7 +148,7 @@ export function PrivateFundingPanel({
       {pending !== null ? (
         <Button
           disabled={!tradingReady}
-          label={funding.isRunning ? 'Private funding in progress' : 'Resume private funding'}
+          label={funding.isRunning ? 'Funding in progress' : 'Continue funding'}
           loading={funding.isRunning}
           onPress={confirmResume}
           variant="secondary"
@@ -220,30 +167,22 @@ export function PrivateFundingPanel({
 
 function phaseLabel(phase: string | undefined): string {
   switch (phase) {
-    case 'depositing': return 'Deposit approval required';
-    case 'scanning': return 'Finding private note';
-    case 'proving': return 'Preparing native proof';
-    case 'relaying': return 'Gasless claim in progress';
-    case 'fee-funding': return 'Privately funding SOL reserve';
-    case 'complete': return 'Claimed privately to T';
+    case 'depositing': return 'Waiting for confirmation';
+    case 'scanning':
+    case 'proving':
+    case 'relaying':
+    case 'fee-funding':
+    case 'provider-setup':
+    case 'provider-depositing': return 'Getting trading funds ready';
+    case 'complete': return 'Ready to trade';
     default: return 'Ready';
   }
 }
 
 function runningMessage(phase: string | undefined): string {
-  if (phase === 'proving') {
-    return 'Preparing the privacy proof. The first claim downloads and verifies an approximately 60 MB proving asset; later claims use the verified cache.';
-  }
-
-  if (phase === 'relaying') {
-    return 'Umbra is claiming into T. You can leave this screen; recovery state is saved.';
-  }
-
-  if (phase === 'fee-funding') {
-    return 'Collateral reached T. The app is privately claiming your SOL reserve into T; no PerPal sponsor or direct M-to-T transfer is used.';
-  }
-
-  return 'Private funding is progressing. Each confirmed stage is saved automatically.';
+  return phase === 'proving'
+    ? 'Setting up private trading. First use can take a few minutes; later transfers reuse the verified local setup.'
+    : 'Getting your trading funds ready. You can leave this screen; progress is saved.';
 }
 
 const styles = StyleSheet.create({

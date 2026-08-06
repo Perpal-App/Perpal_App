@@ -118,17 +118,20 @@ export function VelocityOrderTicket({
 
     Alert.alert(
       `Confirm ${plan.side} ${plan.symbol}?`,
-      `${plan.reduceOnly ? 'Reduce-only ' : ''}${capitalize(plan.side)} ${base(plan.baseAssetAmount)} at an estimated ${usd(plan.estimatedEntryPrice)}. Maximum execution price ${usd(plan.limitPrice)}, initial margin ${usdt(plan.requiredMarginBaseUnits)}, fee up to ${usdt(plan.takerFeeBaseUnits)}, liquidation ${liquidation(plan)}.`,
+      `${plan.reduceOnly ? 'Reduce-only ' : ''}${capitalize(plan.side)} ${base(plan.baseAssetAmount)} at an estimated ${usd(plan.estimatedEntryPrice)}. Maximum execution price ${usd(plan.limitPrice)}, initial margin ${usdt(plan.requiredMarginBaseUnits)}, fee up to ${usdt(plan.takerFeeBaseUnits)}, liquidation ${liquidation(plan)}.${plan.closesPosition ? ' Closed-position proceeds will be collected automatically.' : ''}`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Confirm and sign', onPress: () => void submit(plan) },
+        { text: 'Confirm and sign', onPress: () => void submit(plan, performance.now()) },
       ],
     );
   };
 
-  const submit = async (currentPlan: VelocityMarketOrderPlan) => {
+  const submit = async (
+    currentPlan: VelocityMarketOrderPlan,
+    intentStartedAtMs: number,
+  ) => {
     if (session.address === null || session.signer === null) {
-      setError('Private trading wallet T became unavailable before signing.');
+      setError('Your private trading wallet became unavailable before signing.');
       setPlan(null);
       setPhase('idle');
       return;
@@ -143,6 +146,7 @@ export function VelocityOrderTicket({
       const next = await submitVelocityMarketOrder({
         baseAssetAmount: currentPlan.baseAssetAmount,
         marketDataUrl,
+        intentStartedAtMs,
         owner: session.address,
         programId,
         reduceOnly: currentPlan.reduceOnly,
@@ -259,7 +263,7 @@ export function VelocityOrderTicket({
       {plan?.simulation === 'insufficient-sol' ? (
         <View style={styles.notice}>
           <Text accessibilityRole="alert" style={styles.message}>
-            Trading wallet T needs {sol(plan.feeLamports - plan.solBalanceLamports)} for this transaction. Do not fund T directly from the Privy wallet because that would expose the M-to-T link. Private fee funding is required before trading.
+            Your private trading wallet needs {sol(plan.feeLamports - plan.solBalanceLamports)} for this transaction. Add a private SOL fee reserve from Account; transferring directly from the Privy wallet would weaken privacy.
           </Text>
         </View>
       ) : null}

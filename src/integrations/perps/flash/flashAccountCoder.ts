@@ -3,6 +3,7 @@ import { Buffer } from 'buffer';
 import type {
   Basket,
   Market,
+  UserDepositLedger,
 } from '@flash_trade/flash-sdk-v2/dist/types';
 import flashIdl from '@flash_trade/flash-sdk-v2/dist/idl/perpetuals.json';
 import { BorshAccountsCoder } from '@flash_trade/flash-sdk-v2/node_modules/@coral-xyz/anchor/dist/cjs/coder/borsh/accounts.js';
@@ -22,4 +23,8 @@ export function decodeFlashMarket(data: Buffer): Market {
 
 export function decodeFlashBasket(data: Buffer): Basket {
   return coder.decode<Basket>('basket', data);
+}
+
+export function decodeFlashUserDepositLedger(data: Buffer): UserDepositLedger {
+  return coder.decode<UserDepositLedger>('userDepositLedger', data);
 }

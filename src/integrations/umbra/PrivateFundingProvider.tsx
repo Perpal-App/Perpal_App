@@ -162,7 +162,7 @@ export function PrivateFundingProvider({
   const resume = useCallback(async (feeReserveLamports?: bigint) => {
     if (
       record === null ||
-      (record.phase === 'complete' && record.feeFundingSignature !== null)
+      (record.phase === 'complete' && record.providerDepositSignature !== null)
     ) {
       return;
     }
@@ -180,7 +180,7 @@ export function PrivateFundingProvider({
   useEffect(() => {
     if (
       record === null ||
-      (record.phase === 'complete' && record.feeFundingSignature !== null) ||
+      (record.phase === 'complete' && record.providerDepositSignature !== null) ||
       record.phase === 'depositing' ||
       record.feeFundingLamports === null ||
       autoResumedRef.current === record.id ||
@@ -190,6 +190,11 @@ export function PrivateFundingProvider({
     }
 
     autoResumedRef.current = record.id;
+    console.info('[Perpal recovery]', JSON.stringify({
+      event: 'auto_resume',
+      operation: 'private_funding',
+      phase: record.phase,
+    }));
     void resume();
   }, [isRunning, record, resume]);
 

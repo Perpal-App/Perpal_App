@@ -20,16 +20,16 @@ export function resolveWalletProvisioningStatus({
     return 'unauthenticated';
   }
 
-  if (walletStatus === 'needs-recovery') {
-    return 'needs-recovery';
-  }
-
   if (walletStatus === 'connected') {
     return 'ready';
   }
 
   if (failed || walletStatus === 'error') {
     return 'error';
+  }
+
+  if (walletStatus === 'needs-recovery') {
+    return 'needs-recovery';
   }
 
   return 'provisioning';

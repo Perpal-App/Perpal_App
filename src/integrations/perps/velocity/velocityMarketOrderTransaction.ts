@@ -12,6 +12,8 @@ import {
 const COMPUTE_UNIT_LIMIT = 600_000;
 const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 5_000;
 const FULL_FILL_OPTION = (100 << 8) | 2;
+const ISOLATED_POSITION_FLAG = 32;
+const QUOTE_MARKET_INDEX = 0;
 const coder = new CustomBorshCoder(
   velocityIdl as unknown as ConstructorParameters<typeof CustomBorshCoder>[0],
 );
@@ -23,6 +25,7 @@ export type VelocityMarketOrderTransactionPlan = {
   readonly stateAccount: string;
   readonly userAccount: string;
   readonly userStatsAccount: string;
+  readonly spotMarketVault: string;
   readonly remainingAccounts: readonly {
     readonly address: string;
     readonly writable: boolean;
@@ -30,6 +33,7 @@ export type VelocityMarketOrderTransactionPlan = {
   readonly marketIndex: number;
   readonly side: VelocityOrderSide;
   readonly reduceOnly: boolean;
+  readonly isolatedCollateralBaseUnits: bigint;
   readonly baseAssetAmount: bigint;
   readonly limitPrice: bigint;
   readonly auctionStartPrice: bigint;
@@ -72,7 +76,7 @@ export function buildVelocityMarketOrderTransaction(input: Omit<
     market_index: input.marketIndex,
     reduce_only: input.reduceOnly,
     post_only: { none: {} },
-    bit_flags: 1,
+    bit_flags: ISOLATED_POSITION_FLAG,
     max_ts: bn(input.orderExpiryUnixSeconds),
     trigger_price: null,
     trigger_condition: { above: {} },
@@ -84,7 +88,7 @@ export function buildVelocityMarketOrderTransaction(input: Omit<
     builder_fee_tenth_bps: null,
   };
 
-  return new Transaction({
+  const transaction = new Transaction({
     feePayer: owner,
     recentBlockhash: input.recentBlockhash,
   }).add(
@@ -92,6 +96,34 @@ export function buildVelocityMarketOrderTransaction(input: Omit<
     ComputeBudgetProgram.setComputeUnitPrice({
       microLamports: COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
     }),
+  );
+
+  if (input.isolatedCollateralBaseUnits > 0n) {
+    transaction.add(
+      new TransactionInstruction({
+        programId: new PublicKey(input.programId),
+        keys: [
+          writable(new PublicKey(input.userAccount)),
+          writable(new PublicKey(input.userStatsAccount)),
+          signer(owner),
+          readonly(new PublicKey(input.stateAccount)),
+          readonly(new PublicKey(input.spotMarketVault)),
+          ...input.remainingAccounts.map((account) => ({
+            pubkey: new PublicKey(account.address),
+            isSigner: false,
+            isWritable: account.writable,
+          })),
+        ],
+        data: coder.instruction.encode('transfer_isolated_perp_position_deposit', {
+          spot_market_index: QUOTE_MARKET_INDEX,
+          perp_market_index: input.marketIndex,
+          amount: bn(input.isolatedCollateralBaseUnits),
+        }),
+      }),
+    );
+  }
+
+  return transaction.add(
     new TransactionInstruction({
       programId: new PublicKey(input.programId),
       keys,
@@ -131,7 +163,9 @@ export function verifyVelocityMarketOrderPlan(
     throw new VelocityOrderVerificationError();
   }
 
-  const tradeInstruction = actual.instructions[2];
+  const tradeInstruction = actual.instructions[
+    plan.isolatedCollateralBaseUnits > 0n ? 3 : 2
+  ];
   const decoded = tradeInstruction === undefined
     ? null
     : coder.instruction.decode(tradeInstruction.data);
@@ -143,12 +177,29 @@ export function verifyVelocityMarketOrderPlan(
     data?.success_condition !== FULL_FILL_OPTION ||
     params?.market_index !== plan.marketIndex ||
     params?.reduce_only !== plan.reduceOnly ||
-    params?.bit_flags !== 1 ||
+    params?.bit_flags !== ISOLATED_POSITION_FLAG ||
     bnString(params?.base_asset_amount) !== plan.baseAssetAmount.toString() ||
     bnString(params?.price) !== plan.limitPrice.toString() ||
     bnString(params?.max_ts) !== plan.orderExpiryUnixSeconds.toString()
   ) {
     throw new VelocityOrderVerificationError();
+  }
+
+  if (plan.isolatedCollateralBaseUnits > 0n) {
+    const transfer = actual.instructions[2];
+    const decodedTransfer = transfer === undefined
+      ? null
+      : coder.instruction.decode(transfer.data);
+    const transferData = decodedTransfer?.data as Record<string, unknown> | undefined;
+
+    if (
+      decodedTransfer?.name !== 'transfer_isolated_perp_position_deposit' ||
+      transferData?.spot_market_index !== QUOTE_MARKET_INDEX ||
+      transferData?.perp_market_index !== plan.marketIndex ||
+      bnString(transferData?.amount) !== plan.isolatedCollateralBaseUnits.toString()
+    ) {
+      throw new VelocityOrderVerificationError();
+    }
   }
 }
 

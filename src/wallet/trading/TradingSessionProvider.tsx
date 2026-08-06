@@ -13,6 +13,7 @@ import {
 } from 'react';
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
+import { readAppConfig } from '@/config/appConfig';
 import {
   readActivatedTradingWallet,
   readTradingWalletIdentity,
@@ -22,18 +23,22 @@ import {
 import {
   DERIVATION_MESSAGE,
   checkTradingWalletIdentity,
+  deriveFlashFeeWallet,
+  deriveRotatedTradingWallet,
   deriveTradingWallet,
   verifyDerivationSignature,
   zeroize,
   type DerivedTradingWallet,
   type TradingWalletIdentity,
 } from '@/wallet/trading/derivation';
+import { assertTradingWalletRotationSafe } from '@/wallet/trading/rotationSafety';
 
 export type TradingSessionStatus =
   | 'waiting-for-wallet'
   | 'restoring'
   | 'inactive'
   | 'activating'
+  | 'rotating'
   | 'ready'
   | 'recovery-required'
   | 'error';
@@ -42,10 +47,13 @@ type TradingSession = {
   readonly status: TradingSessionStatus;
   readonly address: string | null;
   readonly signer: GatewayRequestSigner | null;
+  readonly flashFeeSigner: GatewayRequestSigner | null;
+  readonly generation: number;
   readonly recovery: TradingSessionRecovery | null;
   readonly error: string | null;
   readonly activate: () => Promise<void>;
   readonly retryRestore: () => void;
+  readonly rotate: () => Promise<void>;
 };
 
 export type TradingSessionRecovery = {
@@ -71,8 +79,10 @@ export function TradingSessionProvider({
   const [address, setAddress] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<TradingSessionRecovery | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [generation, setGeneration] = useState(0);
   const [restoreAttempt, setRestoreAttempt] = useState(0);
   const seedRef = useRef<Uint8Array | null>(null);
+  const rootSeedRef = useRef<Uint8Array | null>(null);
   const walletAddressRef = useRef(mainWalletAddress);
   const activatingRef = useRef(false);
 
@@ -80,6 +90,10 @@ export function TradingSessionProvider({
     if (seedRef.current !== null) {
       zeroize(seedRef.current);
       seedRef.current = null;
+    }
+    if (rootSeedRef.current !== null) {
+      zeroize(rootSeedRef.current);
+      rootSeedRef.current = null;
     }
   }, []);
 
@@ -90,6 +104,7 @@ export function TradingSessionProvider({
     setAddress(null);
     setRecovery(null);
     setError(null);
+    setGeneration(0);
 
     if (mainWalletAddress === null) {
       setStatus('waiting-for-wallet');
@@ -103,6 +118,7 @@ export function TradingSessionProvider({
       .then(async (activated) => {
         if (cancelled) {
           activated?.secretKey.fill(0);
+          activated?.rootSecretKey.fill(0);
           return;
         }
 
@@ -144,12 +160,15 @@ export function TradingSessionProvider({
           }
 
           seedRef.current = activated.secretKey;
+          rootSeedRef.current = activated.rootSecretKey;
           retained = true;
           setAddress(activated.address);
+          setGeneration(activated.generation);
           setStatus('ready');
         } finally {
           if (!retained) {
             activated.secretKey.fill(0);
+            activated.rootSecretKey.fill(0);
           }
         }
       })
@@ -235,7 +254,9 @@ export function TradingSessionProvider({
 
       clearSecret();
       seedRef.current = derived.secretKey;
+      rootSeedRef.current = derived.secretKey.slice();
       setAddress(derived.address);
+      setGeneration(derived.generation);
       setRecovery(null);
       setStatus('ready');
     } catch (cause) {
@@ -271,17 +292,78 @@ export function TradingSessionProvider({
     };
   }, [address, status]);
 
+  const flashFeeSigner = useMemo<GatewayRequestSigner | null>(() => {
+    const seed = seedRef.current;
+    if (status !== 'ready' || address === null || seed === null) return null;
+    const derived = deriveFlashFeeWallet(seed, address);
+    const publicKey = base58.decode(derived.address);
+    zeroize(derived.secretKey);
+    return {
+      publicKey,
+      sign: async (message) => {
+        const activeSeed = seedRef.current;
+        if (activeSeed === null) throw new Error('Private trading wallet is unavailable.');
+        const feeWallet = deriveFlashFeeWallet(activeSeed, address);
+        try {
+          return ed25519.sign(message, feeWallet.secretKey);
+        } finally {
+          zeroize(feeWallet.secretKey);
+        }
+      },
+    };
+  }, [address, status]);
+
+  const rotate = useCallback(async () => {
+    const config = readAppConfig();
+    const rootSeed = rootSeedRef.current;
+    if (
+      !config.ok ||
+      status !== 'ready' ||
+      mainWalletAddress === null ||
+      address === null ||
+      signer === null ||
+      flashFeeSigner === null ||
+      rootSeed === null
+    ) return;
+    setStatus('rotating');
+    setError(null);
+    let next: DerivedTradingWallet | null = null;
+    try {
+      await assertTradingWalletRotationSafe({
+        config: config.value,
+        feeSigner: flashFeeSigner,
+        mainWalletAddress,
+        signer,
+        tradingWalletAddress: address,
+      });
+      next = deriveRotatedTradingWallet(rootSeed, mainWalletAddress, generation + 1);
+      await writeActivatedTradingWallet(mainWalletAddress, next, rootSeed);
+      seedRef.current?.fill(0);
+      seedRef.current = next.secretKey;
+      setAddress(next.address);
+      setGeneration(next.generation);
+      setStatus('ready');
+    } catch (cause) {
+      if (next !== null && seedRef.current !== next.secretKey) zeroize(next.secretKey);
+      setError(cause instanceof Error ? cause.message : 'Rotation safety could not be verified.');
+      setStatus('ready');
+    }
+  }, [address, flashFeeSigner, generation, mainWalletAddress, signer, status]);
+
   const value = useMemo(
     () => ({
       activate,
       address,
       error,
+      flashFeeSigner,
+      generation,
       recovery,
+      rotate,
       retryRestore: () => setRestoreAttempt((attempt) => attempt + 1),
       signer,
       status,
     }),
-    [activate, address, error, recovery, signer, status],
+    [activate, address, error, flashFeeSigner, generation, recovery, rotate, signer, status],
   );
 
   return (

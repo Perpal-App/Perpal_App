@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
 import { MarketCard } from '@/features/trade/components/MarketCard';
+import { FlashOrderTicket } from '@/features/trade/components/FlashOrderTicket';
 import { useFlashVenueMarkets } from '@/features/trade/hooks/useFlashVenueMarkets';
 import { VelocityOrderTicket } from '@/features/trade/components/VelocityOrderTicket';
 import { useVelocityVenueMarkets } from '@/features/trade/hooks/useVelocityVenueMarkets';
@@ -22,7 +23,7 @@ export function TradeScreen() {
   const config = readAppConfig();
   const preferences = useAppPreferences();
   const provider = preferences.selectedPerpsProvider;
-  const [selectedVelocityMarket, setSelectedVelocityMarket] = useState<MainnetMarket['symbol'] | null>(null);
+  const [selectedMarket, setSelectedMarket] = useState<MainnetMarket['symbol'] | null>(null);
   const markets = useMemo(() => listMainnetMarkets(provider), [provider]);
   const marketDataUrl = config.ok ? config.value.api.marketDataUrl : '';
   const signedRpcUrl = config.ok ? config.value.api.rpcUrl : '';
@@ -145,22 +146,33 @@ export function TradeScreen() {
                   price={prices.get(market.symbol) ?? null}
                   flashVenue={flashSnapshots.get(market.symbol) ?? null}
                   velocityVenue={velocityVenue}
-                  {...(provider === 'velocity' && velocityVenue !== null
+                  {...((provider === 'velocity'
+                    ? velocityVenue
+                    : flashSnapshots.get(market.symbol) ?? null) !== null
                     ? {
                         onTrade: () =>
-                          setSelectedVelocityMarket((current) =>
+                          setSelectedMarket((current) =>
                             current === market.symbol ? null : market.symbol,
                           ),
                       }
                     : {})}
                 />
-                {selectedVelocityMarket === market.symbol && velocityVenue !== null ? (
+                {provider === 'velocity' && selectedMarket === market.symbol && velocityVenue !== null ? (
                   <VelocityOrderTicket
                     market={market}
                     marketDataUrl={marketDataUrl}
                     programId={velocityProgramId}
                     rpcUrl={signedRpcUrl}
                     venue={velocityVenue}
+                  />
+                ) : null}
+                {provider === 'flash' && selectedMarket === market.symbol && flashSnapshots.has(market.symbol) ? (
+                  <FlashOrderTicket
+                    baseRpcUrl={publicRpcUrl}
+                    erRpcUrl={flashErRpc}
+                    market={market}
+                    programId={flashProgramId}
+                    rpcUrl={signedRpcUrl}
                   />
                 ) : null}
               </View>

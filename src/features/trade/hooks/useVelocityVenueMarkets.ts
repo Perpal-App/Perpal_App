@@ -7,7 +7,10 @@ import {
   type VelocityMarketSnapshot,
 } from '@/integrations/perps/velocity/velocityMarketData';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
-import type { PublicMarketPrice } from '@/integrations/perps/markets/publicMarketData';
+import {
+  hasCurrentMarketPrices,
+  type PublicMarketPrice,
+} from '@/integrations/perps/markets/publicMarketData';
 
 type VenueState = 'idle' | 'loading' | 'ready' | 'error';
 const REFRESH_INTERVAL_MS = 3_000;
@@ -44,6 +47,23 @@ export function useVelocityVenueMarkets(
       lastLoggedErrorRef.current = null;
 
       const load = async (): Promise<void> => {
+        const currentPrices = pricesRef.current;
+
+        if (
+          !hasCurrentMarketPrices(
+            markets.map((market) => market.symbol),
+            currentPrices,
+          )
+        ) {
+          if (hasSnapshotsRef.current) {
+            hasSnapshotsRef.current = false;
+            setSnapshots([]);
+          }
+          setStatus('loading');
+          refreshTimer = setTimeout(() => void load(), REFRESH_INTERVAL_MS);
+          return;
+        }
+
         controller?.abort();
         controller = new AbortController();
 
@@ -56,7 +76,7 @@ export function useVelocityVenueMarkets(
             rpcUrl,
             programId,
             markets,
-            pricesRef.current,
+            currentPrices,
             controller.signal,
           );
 
