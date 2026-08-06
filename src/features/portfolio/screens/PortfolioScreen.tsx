@@ -68,9 +68,9 @@ export function PortfolioScreen() {
     return (
       <PortfolioState
         title="Privy wallet required"
-        message="Privy could not create or restore the embedded Solana wallet. Open Account to retry the secure wallet setup."
+        message="Your public wallet could not be restored. Open Wallet to retry."
         action={{
-          label: 'Open account setup',
+          label: 'Open Wallet',
           onPress: () => router.push('/(tabs)/account'),
         }}
       />
@@ -92,13 +92,13 @@ export function PortfolioScreen() {
         message={
           session.status === 'recovery-required'
             ? 'The derived trading wallet does not match the recorded identity. No new identity was adopted.'
-            : 'Activate private trading once from Account. It restores automatically on normal sessions.'
+            : 'Activate private trading once from Wallet. It restores automatically afterward.'
         }
         action={
           session.status === 'recovery-required'
             ? undefined
             : {
-                label: 'Open private trading setup',
+                label: 'Open Wallet',
                 onPress: () => router.push('/(tabs)/account'),
               }
         }
@@ -110,7 +110,7 @@ export function PortfolioScreen() {
     return (
       <PortfolioState
         title="Trading signer unavailable"
-        message="Open Account and retry the secure private-wallet restore."
+        message="Open Wallet and retry the secure restore."
       />
     );
   }
@@ -132,7 +132,6 @@ export function PortfolioScreen() {
     return (
       <FlashPortfolioContent
         snapshot={flashPortfolio.snapshot}
-        walletAddress={session.address}
       />
     );
   }
@@ -151,19 +150,14 @@ export function PortfolioScreen() {
   }
 
   return (
-    <PortfolioContent
-      snapshot={portfolio.snapshot}
-      walletAddress={session.address}
-    />
+    <PortfolioContent snapshot={portfolio.snapshot} />
   );
 }
 
 function PortfolioContent({
   snapshot,
-  walletAddress,
 }: {
   readonly snapshot: VelocityPortfolioSnapshot;
-  readonly walletAddress: string;
 }) {
   return (
     <AppScreen>
@@ -172,52 +166,35 @@ function PortfolioContent({
           <Text accessibilityRole="header" style={styles.title}>
             Portfolio
           </Text>
-          <Text style={styles.subtitle}>Velocity · Solana mainnet</Text>
-        </View>
-
-        <View style={styles.summary}>
-          <StatusRow label="Private trading wallet" value={shortAddress(walletAddress)} />
-          <StatusRow
-            label="Provider"
-            value={snapshot.initialized ? 'Ready' : 'Setup automatic'}
-          />
-          <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
+          <Text style={styles.subtitle}>Velocity</Text>
         </View>
 
         {snapshot.margin === null ? null : (
           <View style={styles.summary}>
             <Text accessibilityRole="header" style={styles.positionTitle}>
-              Margin and risk
+              Balance and risk
             </Text>
             <StatusRow
               label="Total collateral"
               value={usdt(snapshot.margin.totalCollateral)}
             />
             <StatusRow
-              label="Free collateral"
+              label="Available"
               value={usdt(snapshot.margin.freeCollateral)}
-            />
-            <StatusRow
-              label="Initial margin"
-              value={usdt(snapshot.margin.initialMargin)}
-            />
-            <StatusRow
-              label="Maintenance margin"
-              value={usdt(snapshot.margin.maintenanceMargin)}
             />
             <StatusRow
               label="Account health"
               value={`${snapshot.margin.healthPercent}%`}
             />
-            <StatusRow label="Risk source" value="Velocity SDK · current Pyth" />
+            <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
           </View>
         )}
 
         {!snapshot.initialized ? (
           <View style={styles.positions}>
             <InlineState
-              title="Ready for private funding"
-              message="Velocity setup is an internal protocol step. Perpal will initialize it automatically when the first private collateral deposit is confirmed."
+              title="Add funds to begin"
+              message="Open Wallet and add private trading funds. Setup completes automatically."
             />
           </View>
         ) : snapshot.positions.length === 0 ? (
@@ -257,7 +234,9 @@ function PortfolioContent({
           </Text>
         ) : null}
 
-        <PrivateWithdrawPanel provider="velocity" />
+        {snapshot.initialized ? (
+          <PrivateWithdrawPanel provider="velocity" />
+        ) : null}
       </View>
     </AppScreen>
   );
@@ -293,11 +272,9 @@ function PositionPanel({
             : money(position.liquidationPrice)
         }
       />
-      <StatusRow label="Open orders" value={position.openOrders.toString()} />
-      <StatusRow
-        label="Risk coverage"
-        value={position.coreMarket ? 'Core market · included' : 'Non-core · partial'}
-      />
+      {position.openOrders > 0 ? (
+        <StatusRow label="Open orders" value={position.openOrders.toString()} />
+      ) : null}
     </View>
   );
 }
@@ -344,10 +321,6 @@ function InlineState({ title, message }: { readonly title: string; readonly mess
       <Text style={styles.subtitle}>{message}</Text>
     </View>
   );
-}
-
-function shortAddress(address: string | null): string {
-  return address === null ? '—' : `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
 function money(amount: Amount): string {

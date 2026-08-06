@@ -23,7 +23,7 @@ type RootRouteName = '(auth)' | '(tabs)' | 'index';
  *
  * The Stack is keyed by the resolved session, so a restored `/access` history
  * cannot survive authentication: the authenticated tree remounts at `(tabs)`,
- * whose initial route is always `home`.
+ * whose initial route is always `trade`.
  */
 export function AuthNavigationGate() {
   const { initializationError, isAuthenticated, isReady } = usePrivyAuth();
@@ -36,7 +36,7 @@ export function AuthNavigationGate() {
   const [lastResolvedSession, setLastResolvedSession] =
     useState<ResolvedSession | null>(currentSession);
   // Set only for a sign-in that happens while the app is running, never for a
-  // restored session, so a restart still goes straight to Home.
+  // restored session, so a restart still goes straight to Markets.
   const [pendingEntry, setPendingEntry] = useState(false);
 
   useEffect(() => {

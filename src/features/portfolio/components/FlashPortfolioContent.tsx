@@ -12,10 +12,8 @@ import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 export function FlashPortfolioContent({
   snapshot,
-  walletAddress,
 }: {
   readonly snapshot: FlashPortfolioSnapshot;
-  readonly walletAddress: string | null;
 }) {
   return (
     <AppScreen>
@@ -24,28 +22,23 @@ export function FlashPortfolioContent({
           <Text accessibilityRole="header" style={styles.title}>
             Portfolio
           </Text>
-          <Text style={styles.subtitle}>Flash Trade v2 · Solana mainnet</Text>
+          <Text style={styles.subtitle}>Flash Trade v2</Text>
         </View>
 
         <View style={styles.summary}>
-          <StatusRow label="Private trading wallet" value={shortAddress(walletAddress)} />
           <StatusRow
-            label="Provider"
-            value={snapshot.initialized ? 'Ready' : 'Setup automatic'}
-          />
-          <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
-          <StatusRow
-            label="Available collateral"
+            label="Available"
             value={snapshot.deposits.USDC === undefined
               ? '0 USDC'
               : `${formatAmount(snapshot.deposits.USDC)} USDC`}
           />
+          <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
         </View>
 
         {!snapshot.initialized ? (
           <InlineState
-            title="Ready for private funding"
-            message="Flash setup is an internal protocol step. Perpal will initialize it automatically when the first private collateral deposit is confirmed."
+            title="Add funds to begin"
+            message="Open Wallet and add private trading funds. Setup completes automatically."
           />
         ) : snapshot.positions.length === 0 ? (
           <InlineState
@@ -62,7 +55,9 @@ export function FlashPortfolioContent({
             ))}
           </View>
         )}
-        <PrivateWithdrawPanel provider="flash" />
+        {snapshot.initialized ? (
+          <PrivateWithdrawPanel provider="flash" />
+        ) : null}
       </View>
     </AppScreen>
   );
@@ -92,7 +87,6 @@ function PositionPanel({
         label="Leverage"
         value={position.leverage === null ? 'Unavailable' : `${position.leverage}×`}
       />
-      <StatusRow label="Risk source" value="Flash ER account" />
     </View>
   );
 }
@@ -116,10 +110,6 @@ function groupDecimal(value: string): string {
   const [whole = '0', fraction] = value.split('.');
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
   return fraction === undefined ? grouped : `${grouped}.${fraction}`;
-}
-
-function shortAddress(address: string | null): string {
-  return address === null ? '—' : `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
 const styles = StyleSheet.create({

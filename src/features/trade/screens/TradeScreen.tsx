@@ -4,7 +4,6 @@ import { StyleSheet, Text, View } from 'react-native';
 import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
-import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
 import { MarketCard } from '@/features/trade/components/MarketCard';
 import { FlashOrderTicket } from '@/features/trade/components/FlashOrderTicket';
@@ -66,12 +65,12 @@ export function TradeScreen() {
           <Text accessibilityRole="header" style={styles.title}>
             Markets
           </Text>
-          <Text style={styles.subtitle}>Solana mainnet perpetuals</Text>
+          <Text style={styles.subtitle}>Live perpetual markets</Text>
         </View>
 
         <View style={styles.providerPanel}>
           <Text accessibilityRole="header" style={styles.sectionTitle}>
-            Trading provider
+            Provider
           </Text>
           <View style={styles.providerButtons}>
             <View style={styles.providerButton}>
@@ -91,29 +90,12 @@ export function TradeScreen() {
               />
             </View>
           </View>
-          <StatusRow label="Network" value="Solana mainnet" />
-          <StatusRow
-            label="Market access"
-            value="Public · no wallet signature"
-          />
-          <StatusRow
-            label="Price feed"
-            value={
-              publicMarkets.streamState === 'live'
-                ? 'Live · Pyth stream'
-                : publicMarkets.streamState === 'connecting'
-                  ? 'Connecting · REST snapshot active'
-                  : 'Reconnecting · latest price retained'
-            }
-          />
-          <StatusRow
-            label="Venue data"
-            value={
-              provider === 'flash'
-                ? venueStatus(flashMarkets.status, flashMarkets.snapshots, 'ER')
-                : venueStatus(venueMarkets.status, venueMarkets.snapshots, 'account')
-            }
-          />
+          <Text accessibilityLiveRegion="polite" style={styles.feedStatus}>
+            {marketStatus(
+              publicMarkets.streamState,
+              provider === 'flash' ? flashMarkets.status : venueMarkets.status,
+            )}
+          </Text>
         </View>
 
         {publicMarkets.status === 'loading' ? (
@@ -180,11 +162,6 @@ export function TradeScreen() {
           })}
         </View>
 
-        <Text style={styles.footerNote}>
-          {provider === 'flash'
-            ? 'Flash open interest and position counts come from live ER market accounts. Pyth remains the public oracle price source.'
-            : 'Velocity mark, bid, ask, funding, risk, and volume come from live mainnet market accounts. Pyth provides the current oracle input.'}
-        </Text>
       </View>
     </AppScreen>
   );
@@ -210,16 +187,21 @@ function ProviderButton({
   );
 }
 
-function venueStatus(
-  status: 'idle' | 'loading' | 'ready' | 'error',
-  snapshots: readonly { readonly slot: number }[],
-  source: 'ER' | 'account',
+function marketStatus(
+  stream: 'connecting' | 'live' | 'reconnecting',
+  venue: 'idle' | 'loading' | 'ready' | 'error',
 ): string {
-  if (status === 'ready') {
-    return `Live · ${source} slot ${snapshots[0]?.slot.toLocaleString() ?? '—'}`;
+  if (venue === 'error') {
+    return 'Prices live · provider reconnecting';
   }
 
-  return status === 'error' ? 'Retrying venue accounts' : 'Loading venue accounts';
+  if (stream === 'live' && venue === 'ready') {
+    return 'Live · Pyth prices and provider data';
+  }
+
+  return stream === 'reconnecting'
+    ? 'Reconnecting · latest prices retained'
+    : 'Connecting to live markets';
 }
 
 const styles = StyleSheet.create({
@@ -252,8 +234,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   sectionTitle: {
-    ...typography.heading,
-    color: colors.textPrimary,
+    ...typography.label,
+    color: colors.textSecondary,
   },
   providerButtons: {
     flexDirection: 'row',
@@ -261,6 +243,10 @@ const styles = StyleSheet.create({
   },
   providerButton: {
     flex: 1,
+  },
+  feedStatus: {
+    ...typography.bodyCompact,
+    color: colors.textMuted,
   },
   loading: {
     minHeight: 120,
@@ -288,9 +274,5 @@ const styles = StyleSheet.create({
   },
   marketStack: {
     gap: spacing.md,
-  },
-  footerNote: {
-    ...typography.bodyCompact,
-    color: colors.textSecondary,
   },
 });

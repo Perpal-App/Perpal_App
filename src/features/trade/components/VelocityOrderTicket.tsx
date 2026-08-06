@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
@@ -41,6 +42,7 @@ export function VelocityOrderTicket({
   readonly programId: string;
   readonly rpcUrl: string;
 }) {
+  const router = useRouter();
   const session = useTradingSession();
   const [side, setSide] = useState<VelocityOrderSide>('long');
   const [reduceOnly, setReduceOnly] = useState(false);
@@ -117,8 +119,8 @@ export function VelocityOrderTicket({
     }
 
     Alert.alert(
-      `Confirm ${plan.side} ${plan.symbol}?`,
-      `${plan.reduceOnly ? 'Reduce-only ' : ''}${capitalize(plan.side)} ${base(plan.baseAssetAmount)} at an estimated ${usd(plan.estimatedEntryPrice)}. Maximum execution price ${usd(plan.limitPrice)}, initial margin ${usdt(plan.requiredMarginBaseUnits)}, fee up to ${usdt(plan.takerFeeBaseUnits)}, liquidation ${liquidation(plan)}.${plan.closesPosition ? ' Closed-position proceeds will be collected automatically.' : ''}`,
+      `Confirm ${orderLabel(plan)} ${plan.symbol}?`,
+      `${orderLabel(plan)} ${base(plan.baseAssetAmount)} at an estimated ${usd(plan.estimatedEntryPrice)}. Maximum execution price ${usd(plan.limitPrice)}, initial margin ${usdt(plan.requiredMarginBaseUnits)}, fee up to ${usdt(plan.takerFeeBaseUnits)}, liquidation ${liquidation(plan)}.${plan.closesPosition ? ' Proceeds will be collected automatically.' : ''}`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Confirm and sign', onPress: () => void submit(plan, performance.now()) },
@@ -176,11 +178,9 @@ export function VelocityOrderTicket({
       <View style={styles.panel}>
         <Text accessibilityRole="header" style={styles.title}>Trade {market.symbol}</Text>
         <Text style={styles.message}>
-          Market data stays public. Activate private trading once before preparing an order.
+          Set up and fund private trading from Wallet first.
         </Text>
-        {session.status === 'inactive' ? (
-          <Button label="Activate private trading" onPress={() => void session.activate()} />
-        ) : null}
+        <Button label="Open Wallet" onPress={() => router.push('/(tabs)/account')} />
       </View>
     );
   }
@@ -191,7 +191,29 @@ export function VelocityOrderTicket({
       <View style={styles.sideButtons}>
         <View style={styles.sideButton}>
           <Button
-            label="Long"
+            label="Open"
+            onPress={() => {
+              setReduceOnly(false);
+              resetQuote();
+            }}
+            variant={!reduceOnly ? 'primary' : 'secondary'}
+          />
+        </View>
+        <View style={styles.sideButton}>
+          <Button
+            label="Close"
+            onPress={() => {
+              setReduceOnly(true);
+              resetQuote();
+            }}
+            variant={reduceOnly ? 'primary' : 'secondary'}
+          />
+        </View>
+      </View>
+      <View style={styles.sideButtons}>
+        <View style={styles.sideButton}>
+          <Button
+            label={reduceOnly ? 'Close short' : 'Long'}
             onPress={() => {
               setSide('long');
               resetQuote();
@@ -201,7 +223,7 @@ export function VelocityOrderTicket({
         </View>
         <View style={styles.sideButton}>
           <Button
-            label="Short"
+            label={reduceOnly ? 'Close long' : 'Short'}
             onPress={() => {
               setSide('short');
               resetQuote();
@@ -210,15 +232,6 @@ export function VelocityOrderTicket({
           />
         </View>
       </View>
-
-      <Button
-        label={reduceOnly ? 'Reduce only · On' : 'Reduce only · Off'}
-        onPress={() => {
-          setReduceOnly((current) => !current);
-          resetQuote();
-        }}
-        variant={reduceOnly ? 'primary' : 'secondary'}
-      />
 
       <TextInput
         accessibilityLabel={`${market.baseAsset} position size`}
@@ -240,19 +253,16 @@ export function VelocityOrderTicket({
         <View style={styles.summary}>
           <StatusRow
             label="Order"
-            value={`${capitalize(plan.side)} · market IOC${plan.reduceOnly ? ' · reduce only' : ''}`}
+            value={`${orderLabel(plan)} · ${base(plan.baseAssetAmount)}`}
           />
-          <StatusRow label="Size" value={base(plan.baseAssetAmount)} />
           <StatusRow label="Estimated entry" value={usd(plan.estimatedEntryPrice)} />
           <StatusRow label="Maximum price" value={usd(plan.limitPrice)} />
-          <StatusRow label="Maximum notional" value={usdt(plan.notionalBaseUnits)} />
           <StatusRow label="Effective leverage" value={leverage(plan)} />
           <StatusRow label="Initial margin" value={usdt(plan.requiredMarginBaseUnits)} />
-          <StatusRow label="Taker fee" value={`Up to ${usdt(plan.takerFeeBaseUnits)}`} />
           <StatusRow label="Liquidation estimate" value={liquidation(plan)} />
           <StatusRow label="Funding" value={plan.fundingLabel} />
-          <StatusRow label="Slippage limit" value={`${plan.slippageBps / 100}%`} />
-          <StatusRow label="Network fee" value={sol(plan.feeLamports)} />
+          <StatusRow label="Fees" value={`Up to ${usdt(plan.takerFeeBaseUnits)} + ${sol(plan.feeLamports)}`} />
+          <StatusRow label="Quote limits" value={`${plan.slippageBps / 100}% slippage · expires ${new Date(plan.expiresAtMs).toLocaleTimeString()}`} />
           <StatusRow
             label="Verification"
             value={plan.simulation === 'passed' ? 'Decoded and simulated' : 'Waiting for SOL'}
@@ -263,7 +273,7 @@ export function VelocityOrderTicket({
       {plan?.simulation === 'insufficient-sol' ? (
         <View style={styles.notice}>
           <Text accessibilityRole="alert" style={styles.message}>
-            Your private trading wallet needs {sol(plan.feeLamports - plan.solBalanceLamports)} for this transaction. Add a private SOL fee reserve from Account; transferring directly from the Privy wallet would weaken privacy.
+            Your private trading wallet needs {sol(plan.feeLamports - plan.solBalanceLamports)} for this transaction. Add a private SOL fee reserve from Wallet; transferring directly from the Privy wallet would weaken privacy.
           </Text>
         </View>
       ) : null}
@@ -334,6 +344,11 @@ function liquidation(plan: VelocityMarketOrderPlan): string {
 
 function capitalize(value: string): string {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
+}
+
+function orderLabel(plan: Pick<VelocityMarketOrderPlan, 'reduceOnly' | 'side'>): string {
+  if (!plan.reduceOnly) return `Open ${capitalize(plan.side)}`;
+  return plan.side === 'long' ? 'Close short' : 'Close long';
 }
 
 function short(value: string): string {

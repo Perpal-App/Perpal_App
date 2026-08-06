@@ -8,7 +8,7 @@ import { PrivateFundingPanel } from '@/features/account/components/PrivateFundin
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, layout, spacing, typography } from '@/theme/tokens';
 import {
   useTradingSession,
   type TradingSessionStatus,
@@ -58,34 +58,31 @@ export function AccountScreen() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Text accessibilityRole="header" style={styles.title}>
-            Account
+            Wallet
           </Text>
-          <Text style={styles.subtitle}>Public identity and private trading</Text>
+          <Text style={styles.subtitle}>Fund and manage private trading</Text>
         </View>
 
         <View style={styles.body}>
-          <View style={styles.walletPanel}>
+          <View style={styles.section}>
             <Text accessibilityRole="header" style={styles.walletTitle}>
-              Privy wallet
+              Public wallet
             </Text>
-            <Text style={styles.walletStatus}>
-              Fund this public wallet before adding private trading collateral.
-            </Text>
-            <StatusRow
-              label="Status"
-              value={walletProvisioningLabel(walletProvisioning.status)}
-            />
             {walletProvisioning.embeddedWalletAddress ? (
               <StatusRow
                 label="Address"
                 selectable
                 value={walletProvisioning.embeddedWalletAddress}
               />
-            ) : null}
+            ) : (
+              <Text accessibilityLiveRegion="polite" style={styles.walletStatus}>
+                {walletProvisioningLabel(walletProvisioning.status)}
+              </Text>
+            )}
             {walletProvisioning.status === 'error' ? (
               <Text accessibilityRole="alert" style={styles.error}>
-                Privy could not create or restore this wallet. Confirm you used
-                the same login and Privy app, then retry.
+                Your Privy wallet could not be restored. Confirm you used the
+                same login, then retry.
               </Text>
             ) : null}
             {walletProvisioning.status === 'error' ||
@@ -101,28 +98,15 @@ export function AccountScreen() {
             ) : null}
           </View>
 
-          <PrivateFundingPanel
-            provider={preferences.selectedPerpsProvider}
-            tradingReady={tradingSession.status === 'ready'}
-          />
-
-          <View style={styles.walletPanel}>
+          <View style={styles.section}>
             <Text accessibilityRole="header" style={styles.walletTitle}>
               Private trading
             </Text>
             <Text style={styles.walletStatus}>
               {tradingSessionMessage(tradingSession.status)}
             </Text>
-            <StatusRow
-              label="Status"
-              value={tradingSessionLabel(tradingSession.status)}
-            />
-            <StatusRow label="Storage" value="Android secure storage" />
             {tradingSession.address ? (
               <StatusRow label="Address" selectable value={tradingSession.address} />
-            ) : null}
-            {tradingSession.status === 'ready' ? (
-              <StatusRow label="Generation" value={tradingSession.generation.toString()} />
             ) : null}
             {tradingSession.recovery ? (
               <View style={styles.notice}>
@@ -137,8 +121,8 @@ export function AccountScreen() {
                   value={tradingSession.recovery.derived.address}
                 />
                 <Text accessibilityRole="alert" style={styles.walletStatus}>
-                  Perpal will not replace either identity until the old wallet,
-                  both providers, and pending Umbra operations are verified empty.
+                  Trading remains blocked until this identity mismatch is
+                  resolved safely.
                 </Text>
               </View>
             ) : null}
@@ -164,44 +148,17 @@ export function AccountScreen() {
                 onPress={tradingSession.retryRestore}
                 variant="secondary"
               />
-            ) : tradingSession.status === 'ready' ? (
-              <Button
-                label="Rotate private wallet"
-                onPress={() => Alert.alert(
-                  'Rotate private wallet?',
-                  'Perpal will verify all wallet balances, positions, orders, and pending private transfers are empty before creating a new private wallet.',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Verify and rotate', onPress: () => void tradingSession.rotate() },
-                  ],
-                )}
-                variant="secondary"
-              />
             ) : tradingSession.status === 'rotating' ? (
               <Button label="Verifying zero balances" loading onPress={() => undefined} />
             ) : null}
           </View>
 
-          <View style={styles.walletPanel}>
-            <Text accessibilityRole="header" style={styles.walletTitle}>
-              Trading route
-            </Text>
-            <Text style={styles.walletStatus}>
-              Markets stay public. Umbra privately funds trading, and Perpal
-              prepares the selected provider automatically.
-            </Text>
-            <StatusRow
-              label="Provider"
-              value={
-                preferences.selectedPerpsProvider === 'flash'
-                  ? 'Flash Trade v2'
-                  : 'Velocity'
-              }
+          {tradingSession.status === 'ready' ? (
+            <PrivateFundingPanel
+              provider={preferences.selectedPerpsProvider}
+              tradingReady
             />
-            <StatusRow label="Network" value="Solana mainnet" />
-            <StatusRow label="Market access" value="Public" />
-            <StatusRow label="Trade signing" value="Confirm each transaction" />
-          </View>
+          ) : null}
         </View>
 
         <View style={styles.footer}>
@@ -209,6 +166,20 @@ export function AccountScreen() {
             <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.error}>
               {error}
             </Text>
+          ) : null}
+          {tradingSession.status === 'ready' ? (
+            <Button
+              label="Rotate private wallet"
+              onPress={() => Alert.alert(
+                'Rotate private wallet?',
+                'Rotation is allowed only after every balance, position, order, and pending private transfer is empty.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Verify and rotate', onPress: () => void tradingSession.rotate() },
+                ],
+              )}
+              variant="secondary"
+            />
           ) : null}
           <Button
             disabled={signingOut}
@@ -235,33 +206,20 @@ function walletProvisioningLabel(
   }
 }
 
-function tradingSessionLabel(status: TradingSessionStatus): string {
-  switch (status) {
-    case 'waiting-for-wallet': return 'Waiting for Privy wallet';
-    case 'restoring': return 'Restoring securely';
-    case 'inactive': return 'Not activated';
-    case 'activating': return 'Activating';
-    case 'rotating': return 'Verifying zero balances';
-    case 'ready': return 'Ready';
-    case 'recovery-required': return 'Recovery review required';
-    case 'error': return 'Secure restore failed';
-  }
-}
-
 function tradingSessionMessage(status: TradingSessionStatus): string {
   switch (status) {
     case 'waiting-for-wallet':
-      return 'Your Privy wallet must exist before private trading can be activated.';
+      return 'Waiting for your public wallet.';
     case 'restoring':
-      return 'Restoring the previously activated private wallet on this device.';
+      return 'Restoring your private wallet securely.';
     case 'inactive':
-      return 'Activate once to create or recover your private trading wallet. Normal sessions restore it automatically.';
+      return 'Activate once. It restores automatically on this device afterward.';
     case 'activating':
-      return 'Approve the one-time recovery signature. It moves no funds.';
+      return 'Approve the one-time setup signature. It moves no funds.';
     case 'rotating':
       return 'Checking balances, positions, orders, and pending private transfers.';
     case 'ready':
-      return 'Your private trading wallet is active and restores automatically on this device.';
+      return 'Ready. Add funds below, then trade from Markets.';
     case 'recovery-required':
       return 'The recovered identity differs from the recorded wallet, so trading is blocked.';
     case 'error':
@@ -287,13 +245,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   body: { flexGrow: 1, justifyContent: 'center', gap: spacing.lg },
-  walletPanel: {
+  section: {
     gap: spacing.md,
-    padding: spacing.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
+    paddingVertical: spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   walletTitle: { ...typography.heading, color: colors.textPrimary },
   walletStatus: { ...typography.bodyCompact, color: colors.textSecondary },

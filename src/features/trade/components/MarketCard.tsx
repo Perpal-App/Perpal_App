@@ -30,32 +30,23 @@ export function MarketCard({
   return (
     <View style={styles.marketCard}>
       <View style={styles.marketHeader}>
-        <View>
-          <Text accessibilityRole="header" style={styles.marketSymbol}>
-            {market.symbol}
-          </Text>
-          <Text style={styles.providerLabel}>
-            {velocityVenue !== null
-              ? `${market.providerLabel} · mark price`
-              : flashVenue !== null
-                ? `${market.providerLabel} · live ER`
-                : `${market.providerLabel} · Pyth reference`}
-          </Text>
-        </View>
+        <Text accessibilityRole="header" style={styles.marketSymbol}>
+          {market.symbol}
+        </Text>
         <Text style={styles.marketPrice}>
           {headlinePrice === null ? '—' : formatCompactTokenPrice(headlinePrice)}
         </Text>
       </View>
       {velocityVenue !== null ? (
-        <VelocityVenueRows price={price} venue={velocityVenue} />
+        <VelocityVenueRows market={market} venue={velocityVenue} />
       ) : flashVenue !== null ? (
-        <FlashVenueRows market={market} price={price} venue={flashVenue} />
+        <FlashVenueRows market={market} venue={flashVenue} />
       ) : (
-        <ReferenceRows market={market} price={price} />
+        <ReferenceRows market={market} />
       )}
       {onTrade === undefined ? null : (
         <Button
-          label={`Trade ${market.symbol}`}
+          label="Trade"
           onPress={onTrade}
           variant="secondary"
         />
@@ -66,18 +57,11 @@ export function MarketCard({
 
 function ReferenceRows({
   market,
-  price,
 }: {
   readonly market: MainnetMarket;
-  readonly price: PublicMarketPrice | null;
 }) {
   return (
     <>
-      <StatusRow
-        label="Confidence"
-        value={price === null ? '—' : `±${formatCompactUsd(price.confidence)}`}
-      />
-      <StatusRow label="Updated" value={priceFreshness(price)} />
       <StatusRow
         label="Max leverage"
         value={
@@ -86,96 +70,52 @@ function ReferenceRows({
             : `Up to ${market.maxLeverage}×`
         }
       />
-      <StatusRow label="Price source" value={price?.source ?? 'Pyth Hermes'} />
+      <StatusRow label="Provider data" value="Connecting" />
     </>
   );
 }
 
 function VelocityVenueRows({
-  price,
+  market,
   venue,
 }: {
-  readonly price: PublicMarketPrice | null;
+  readonly market: MainnetMarket;
   readonly venue: VelocityMarketSnapshot;
 }) {
   return (
     <>
-      <StatusRow
-        label="Oracle"
-        value={
-          price === null
-            ? '—'
-            : `${formatCompactTokenPrice(price.price)} · Pyth`
-        }
-      />
-      <StatusRow
-        label="Bid / ask"
-        value={`${formatCompactTokenPrice(venue.bidPrice)} / ${formatCompactTokenPrice(venue.askPrice)}`}
-      />
       <StatusRow
         label="Funding / hour"
         value={venue.fundingLabel ?? 'Unavailable'}
       />
       <StatusRow label="24h volume" value={formatCompactUsd(venue.volume24h)} />
       <StatusRow
-        label="Initial margin"
-        value={`${formatBasisPoints(venue.initialMarginBps)}%`}
+        label="Max leverage"
+        value={market.maxLeverage === null ? '—' : `${market.maxLeverage}×`}
       />
-      <StatusRow label="Venue slot" value={venue.slot.toLocaleString()} />
     </>
   );
 }
 
 function FlashVenueRows({
   market,
-  price,
   venue,
 }: {
   readonly market: MainnetMarket;
-  readonly price: PublicMarketPrice | null;
   readonly venue: FlashMarketSnapshot;
 }) {
   return (
     <>
       <StatusRow
-        label="Oracle"
-        value={
-          price === null
-            ? '—'
-            : `${formatCompactTokenPrice(price.price)} · Pyth`
-        }
-      />
-      <StatusRow
         label="Long / short OI"
         value={`${formatCompactUsd(venue.longOpenInterest)} / ${formatCompactUsd(venue.shortOpenInterest)}`}
-      />
-      <StatusRow
-        label="Open positions"
-        value={`${venue.longOpenPositions.toLocaleString()} / ${venue.shortOpenPositions.toLocaleString()}`}
       />
       <StatusRow
         label="Max leverage"
         value={market.maxLeverage === null ? '—' : `${market.maxLeverage}×`}
       />
-      <StatusRow label="ER slot" value={venue.slot.toLocaleString()} />
     </>
   );
-}
-
-function priceFreshness(price: PublicMarketPrice | null): string {
-  if (price === null) return 'Loading';
-  return price.stale
-    ? 'Delayed feed'
-    : new Date(price.publishedAtMs).toLocaleTimeString();
-}
-
-function formatBasisPoints(basisPoints: number): string {
-  const whole = Math.floor(basisPoints / 100);
-  const fraction = (basisPoints % 100)
-    .toString()
-    .padStart(2, '0')
-    .replace(/0+$/u, '');
-  return fraction.length === 0 ? whole.toString() : `${whole}.${fraction}`;
 }
 
 const styles = StyleSheet.create({
@@ -194,11 +134,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   marketSymbol: { ...typography.heading, color: colors.textPrimary },
-  providerLabel: {
-    ...typography.bodyCompact,
-    marginTop: spacing.xxs,
-    color: colors.textMuted,
-  },
   marketPrice: {
     ...typography.heading,
     color: colors.textPrimary,

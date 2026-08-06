@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
@@ -33,6 +34,7 @@ export function FlashOrderTicket({
   readonly programId: string;
   readonly rpcUrl: string;
 }) {
+  const router = useRouter();
   const session = useTradingSession();
   const [action, setAction] = useState<FlashOrderAction>('open');
   const [side, setSide] = useState<FlashOrderSide>('long');
@@ -149,10 +151,8 @@ export function FlashOrderTicket({
     return (
       <View style={styles.panel}>
         <Text accessibilityRole="header" style={styles.title}>Trade {market.symbol}</Text>
-        <Text style={styles.message}>Activate private trading once. Market data remains public.</Text>
-        {session.status === 'inactive' ? (
-          <Button label="Activate private trading" onPress={() => void session.activate()} />
-        ) : null}
+        <Text style={styles.message}>Set up and fund private trading from Wallet first.</Text>
+        <Button label="Open Wallet" onPress={() => router.push('/(tabs)/account')} />
       </View>
     );
   }
@@ -174,8 +174,8 @@ export function FlashOrderTicket({
         <View style={styles.flex}><Button label="Close" onPress={() => { setAction('close'); reset(); }} variant={action === 'close' ? 'primary' : 'secondary'} /></View>
       </View>
       <View style={styles.row}>
-        <View style={styles.flex}><Button label="Long" onPress={() => { setSide('long'); reset(); }} variant={side === 'long' ? 'primary' : 'secondary'} /></View>
-        <View style={styles.flex}><Button label="Short" onPress={() => { setSide('short'); reset(); }} variant={side === 'short' ? 'primary' : 'secondary'} /></View>
+        <View style={styles.flex}><Button label={action === 'close' ? 'Close long' : 'Long'} onPress={() => { setSide('long'); reset(); }} variant={side === 'long' ? 'primary' : 'secondary'} /></View>
+        <View style={styles.flex}><Button label={action === 'close' ? 'Close short' : 'Short'} onPress={() => { setSide('short'); reset(); }} variant={side === 'short' ? 'primary' : 'secondary'} /></View>
       </View>
       {action === 'open' ? (
         <View style={styles.row}>
@@ -186,11 +186,15 @@ export function FlashOrderTicket({
       {plan ? (
         <View style={styles.summary}>
           <StatusRow label="Action" value={`${plan.action} ${plan.side}`} />
+          <StatusRow
+            label="Collateral / leverage"
+            value={plan.action === 'open' ? `${usdc(plan.collateralInputBaseUnits)} · ${leverageLabel(plan)}` : 'Full position close'}
+          />
           <StatusRow label="Notional" value={usd(plan.sizeUsdBaseUnits)} />
           <StatusRow label="Estimated price" value={usd(plan.entryPriceUsdBaseUnits)} />
           <StatusRow label="Liquidation" value={plan.liquidationPriceUsdBaseUnits === null ? 'Position closes' : usd(plan.liquidationPriceUsdBaseUnits)} />
-          <StatusRow label="Protocol fee" value={usd(plan.feeUsdBaseUnits)} />
-          <StatusRow label="ER fee" value={sol(plan.erFeeLamports)} />
+          <StatusRow label="Fees" value={`${usd(plan.feeUsdBaseUnits)} + ${sol(plan.erFeeLamports)}`} />
+          <StatusRow label="Quote limits" value={`0.5% slippage · expires ${new Date(plan.expiresAtMs).toLocaleTimeString()}`} />
           <StatusRow label="Verification" value="Decoded and simulated" />
         </View>
       ) : null}

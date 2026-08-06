@@ -13,7 +13,7 @@ import { colors } from '@/theme/tokens';
 export default function TabsLayout() {
   return (
     <Tabs
-      initialRouteName="home"
+      initialRouteName="trade"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
@@ -23,16 +23,9 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen
-        name="home"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <TabBarIcon color={color} name="home" />,
-        }}
-      />
-      <Tabs.Screen
         name="trade"
         options={{
-          title: 'Trade',
+          title: 'Markets',
           tabBarIcon: ({ color }) => <TabBarIcon color={color} name="trade" />,
         }}
       />
@@ -48,7 +41,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="account"
         options={{
-          title: 'Account',
+          title: 'Wallet',
           tabBarIcon: ({ color }) => (
             <TabBarIcon color={color} name="account" />
           ),

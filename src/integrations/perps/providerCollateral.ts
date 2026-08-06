@@ -9,6 +9,33 @@ export type ProviderCollateral = {
   readonly decimals: 6;
 };
 
+export type ProviderCollateralOption = ProviderCollateral & {
+  readonly provider: PerpsProviderId;
+};
+
+export function listProviderCollateralOptions(
+  flashProgramId: string,
+): readonly ProviderCollateralOption[] {
+  return (['flash', 'velocity'] as const).map((provider) => ({
+    provider,
+    ...providerCollateral(provider, flashProgramId),
+  }));
+}
+
+export function listTradingCollateralOptions(
+  flashProgramId: string,
+): readonly ProviderCollateral[] {
+  const options = new Map<ProviderCollateral['symbol'], ProviderCollateral>();
+
+  for (const { provider: _, ...collateral } of listProviderCollateralOptions(
+    flashProgramId,
+  )) {
+    options.set(collateral.symbol, collateral);
+  }
+
+  return [...options.values()];
+}
+
 export function providerCollateral(
   provider: PerpsProviderId,
   flashProgramId: string,
