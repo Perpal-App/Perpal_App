@@ -14,7 +14,9 @@ import {
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
+  readActivatedTradingWallet,
   readTradingWalletIdentity,
+  writeActivatedTradingWallet,
   writeTradingWalletIdentity,
 } from '@/storage/trading-wallet-identity';
 import {
@@ -23,13 +25,15 @@ import {
   deriveTradingWallet,
   verifyDerivationSignature,
   zeroize,
+  type DerivedTradingWallet,
   type TradingWalletIdentity,
 } from '@/wallet/trading/derivation';
 
 export type TradingSessionStatus =
   | 'waiting-for-wallet'
-  | 'locked'
-  | 'unlocking'
+  | 'restoring'
+  | 'inactive'
+  | 'activating'
   | 'ready'
   | 'recovery-required'
   | 'error';
@@ -39,9 +43,9 @@ type TradingSession = {
   readonly address: string | null;
   readonly signer: GatewayRequestSigner | null;
   readonly recovery: TradingSessionRecovery | null;
-  readonly unlock: () => Promise<void>;
-  readonly lock: () => void;
-  readonly replaceRecordedIdentity: () => Promise<void>;
+  readonly error: string | null;
+  readonly activate: () => Promise<void>;
+  readonly retryRestore: () => void;
 };
 
 export type TradingSessionRecovery = {
@@ -62,13 +66,15 @@ export function TradingSessionProvider({
     ? (wallet.wallets[0]?.address ?? null)
     : null;
   const [status, setStatus] = useState<TradingSessionStatus>(
-    mainWalletAddress === null ? 'waiting-for-wallet' : 'locked',
+    mainWalletAddress === null ? 'waiting-for-wallet' : 'restoring',
   );
   const [address, setAddress] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<TradingSessionRecovery | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   const seedRef = useRef<Uint8Array | null>(null);
   const walletAddressRef = useRef(mainWalletAddress);
-  const unlockingRef = useRef(false);
+  const activatingRef = useRef(false);
 
   const clearSecret = useCallback(() => {
     if (seedRef.current !== null) {
@@ -79,25 +85,93 @@ export function TradingSessionProvider({
 
   useEffect(() => {
     walletAddressRef.current = mainWalletAddress;
-    unlockingRef.current = false;
+    activatingRef.current = false;
     clearSecret();
     setAddress(null);
     setRecovery(null);
-    setStatus(mainWalletAddress === null ? 'waiting-for-wallet' : 'locked');
-  }, [clearSecret, mainWalletAddress]);
+    setError(null);
+
+    if (mainWalletAddress === null) {
+      setStatus('waiting-for-wallet');
+      return;
+    }
+
+    let cancelled = false;
+    setStatus('restoring');
+
+    void readActivatedTradingWallet(mainWalletAddress)
+      .then(async (activated) => {
+        if (cancelled) {
+          activated?.secretKey.fill(0);
+          return;
+        }
+
+        if (activated === null) {
+          setStatus('inactive');
+          return;
+        }
+
+        let retained = false;
+
+        try {
+          const recorded = await readTradingWalletIdentity(mainWalletAddress);
+
+          if (cancelled) {
+            return;
+          }
+
+          const identity = checkTradingWalletIdentity(recorded, activated);
+
+          if (
+            identity.status === 'mismatch' ||
+            identity.status === 'version-upgrade'
+          ) {
+            setRecovery({
+              reason: identity.status,
+              recorded: identity.recorded,
+              derived: identity.derived,
+            });
+            setStatus('recovery-required');
+            return;
+          }
+
+          if (identity.status === 'first-derivation') {
+            await writeTradingWalletIdentity(mainWalletAddress, activated);
+          }
+
+          if (cancelled) {
+            return;
+          }
+
+          seedRef.current = activated.secretKey;
+          retained = true;
+          setAddress(activated.address);
+          setStatus('ready');
+        } finally {
+          if (!retained) {
+            activated.secretKey.fill(0);
+          }
+        }
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setError('The saved private trading wallet could not be verified.');
+          setStatus('error');
+          logActivationError('restore', cause);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearSecret, mainWalletAddress, restoreAttempt]);
 
   useEffect(() => clearSecret, [clearSecret]);
 
-  const lock = useCallback(() => {
-    clearSecret();
-    setAddress(null);
-    setRecovery(null);
-    setStatus(mainWalletAddress === null ? 'waiting-for-wallet' : 'locked');
-  }, [clearSecret, mainWalletAddress]);
-
-  const unlock = useCallback(async () => {
+  const activate = useCallback(async () => {
     if (
-      unlockingRef.current ||
+      activatingRef.current ||
+      status !== 'inactive' ||
       !isConnected(wallet) ||
       mainWalletAddress === null
     ) {
@@ -107,12 +181,15 @@ export function TradingSessionProvider({
     const embeddedWallet = wallet.wallets[0];
 
     if (embeddedWallet === undefined) {
+      setError('Privy wallet M is unavailable.');
       setStatus('error');
       return;
     }
 
-    unlockingRef.current = true;
-    setStatus('unlocking');
+    activatingRef.current = true;
+    setError(null);
+    setStatus('activating');
+    let derived: DerivedTradingWallet | null = null;
 
     try {
       const provider = await embeddedWallet.getProvider();
@@ -126,7 +203,11 @@ export function TradingSessionProvider({
         encodedSignature,
         mainWalletAddress,
       );
-      const derived = deriveTradingWallet(signature, mainWalletAddress);
+      try {
+        derived = deriveTradingWallet(signature, mainWalletAddress);
+      } finally {
+        signature.fill(0);
+      }
       const recorded = await readTradingWalletIdentity(mainWalletAddress);
       const identity = checkTradingWalletIdentity(recorded, derived);
 
@@ -135,10 +216,7 @@ export function TradingSessionProvider({
         return;
       }
 
-      if (
-        identity.status === 'mismatch' ||
-        identity.status === 'version-upgrade'
-      ) {
+      if (identity.status === 'mismatch' || identity.status === 'version-upgrade') {
         zeroize(derived.secretKey);
         setRecovery({
           reason: identity.status,
@@ -149,37 +227,30 @@ export function TradingSessionProvider({
         return;
       }
 
-      if (identity.status === 'first-derivation') {
-        await writeTradingWalletIdentity(mainWalletAddress, derived);
+      await writeActivatedTradingWallet(mainWalletAddress, derived);
+
+      if (walletAddressRef.current !== mainWalletAddress) {
+        return;
       }
 
       clearSecret();
-      setRecovery(null);
       seedRef.current = derived.secretKey;
       setAddress(derived.address);
+      setRecovery(null);
       setStatus('ready');
     } catch (cause) {
       clearSecret();
       setAddress(null);
-      setStatus('error');
-      logUnlockError(cause);
+      setError('Private trading activation was not completed. Try again.');
+      setStatus('inactive');
+      logActivationError('activate', cause);
     } finally {
-      unlockingRef.current = false;
+      if (derived !== null && seedRef.current !== derived.secretKey) {
+        zeroize(derived.secretKey);
+      }
+      activatingRef.current = false;
     }
-  }, [clearSecret, mainWalletAddress, wallet]);
-
-  const replaceRecordedIdentity = useCallback(async () => {
-    if (mainWalletAddress === null || recovery === null) {
-      return;
-    }
-
-    await writeTradingWalletIdentity(mainWalletAddress, recovery.derived);
-
-    if (walletAddressRef.current === mainWalletAddress) {
-      setRecovery(null);
-      setStatus('locked');
-    }
-  }, [mainWalletAddress, recovery]);
+  }, [clearSecret, mainWalletAddress, status, wallet]);
 
   const signer = useMemo<GatewayRequestSigner | null>(() => {
     if (status !== 'ready' || address === null) {
@@ -192,7 +263,7 @@ export function TradingSessionProvider({
         const seed = seedRef.current;
 
         if (seed === null) {
-          throw new Error('Trading wallet is locked.');
+          throw new Error('Private trading wallet is unavailable.');
         }
 
         return ed25519.sign(message, seed);
@@ -202,23 +273,15 @@ export function TradingSessionProvider({
 
   const value = useMemo(
     () => ({
+      activate,
       address,
-      lock,
+      error,
       recovery,
-      replaceRecordedIdentity,
+      retryRestore: () => setRestoreAttempt((attempt) => attempt + 1),
       signer,
       status,
-      unlock,
     }),
-    [
-      address,
-      lock,
-      recovery,
-      replaceRecordedIdentity,
-      signer,
-      status,
-      unlock,
-    ],
+    [activate, address, error, recovery, signer, status],
   );
 
   return (
@@ -238,9 +301,13 @@ export function useTradingSession(): TradingSession {
   return session;
 }
 
-function logUnlockError(cause: unknown): void {
+function logActivationError(
+  phase: 'activate' | 'restore',
+  cause: unknown,
+): void {
   if (__DEV__) {
-    console.error('[Perpal trading wallet unlock failed]', {
+    console.error('[Perpal private trading wallet failed]', {
+      phase,
       errorName: cause instanceof Error ? cause.name : typeof cause,
     });
   }

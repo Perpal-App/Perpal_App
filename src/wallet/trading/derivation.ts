@@ -7,9 +7,10 @@ import { base58, base64 } from '@scure/base';
 /**
  * Deterministic derivation of the trading wallet (T) from the main wallet (M).
  *
- * The same Privy identity always re-derives the same T, so logout, reinstall, and
- * a new device all recover by signing in again. There is no seed phrase to back
- * up, which is the whole point of D3.
+ * The same Privy identity always re-derives the same root T, so a lost local
+ * activation can recover by signing the fixed message again. After activation
+ * the verified seed is kept in platform secure storage; normal app sessions do
+ * not ask the user to unlock it again.
  *
  * The scheme is versioned because it may have to change. If Privy can observe the
  * signature we derive from, then Privy could derive T, and the fix is to mix in a
@@ -34,6 +35,7 @@ export const DERIVATION_MESSAGE =
   'It authorises no transaction and moves no funds.';
 
 const HKDF_INFO = 'perpal/trading-wallet/v2/ed25519';
+const ROTATION_HKDF_INFO = 'perpal/trading-wallet/v2/rotation';
 
 /** Ed25519 signatures are deterministic (RFC 8032), which is what makes this work. */
 const EXPECTED_SIGNATURE_BYTES = 64;
@@ -69,6 +71,7 @@ export function verifyDerivationSignature(
 
 export type TradingWalletIdentity = {
   readonly address: string;
+  readonly generation: number;
   readonly version: DerivationVersion;
 };
 
@@ -92,7 +95,17 @@ export function parseTradingWalletIdentity(
       return null;
     }
 
-    return { address: candidate.address, version: candidate.version };
+    const generation = candidate.generation ?? 0;
+
+    if (!Number.isSafeInteger(generation) || Number(generation) < 0) {
+      return null;
+    }
+
+    return {
+      address: candidate.address,
+      generation: Number(generation),
+      version: candidate.version,
+    };
   } catch {
     return null;
   }
@@ -104,6 +117,7 @@ export function serializeTradingWalletIdentity(
 ): string {
   return JSON.stringify({
     address: identity.address,
+    generation: identity.generation,
     version: identity.version,
   });
 }
@@ -142,6 +156,36 @@ export function deriveTradingWallet(
 
   return {
     address: base58.encode(publicKey),
+    generation: 0,
+    version: DERIVATION_VERSION,
+    secretKey: seed,
+  };
+}
+
+/** Derives a new T from the activated root without another Privy signature. */
+export function deriveRotatedTradingWallet(
+  rootSeed: Uint8Array,
+  salt: string,
+  generation: number,
+): DerivedTradingWallet {
+  if (rootSeed.length !== 32) {
+    throw new DerivationError('Trading-wallet root seed must contain 32 bytes.');
+  }
+
+  if (salt.trim().length === 0) {
+    throw new DerivationError('Derivation salt must not be empty.');
+  }
+
+  if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new DerivationError('Rotation generation must be a positive integer.');
+  }
+
+  const info = utf8ToBytes(`${ROTATION_HKDF_INFO}/${generation}`);
+  const seed = hkdf(sha512, rootSeed, utf8ToBytes(salt), info, 32);
+
+  return {
+    address: base58.encode(ed25519.getPublicKey(seed)),
+    generation,
     version: DERIVATION_VERSION,
     secretKey: seed,
   };
@@ -188,12 +232,23 @@ export function checkTradingWalletIdentity(
   }
 
   if (recorded.version !== derived.version) {
-    return { status: 'version-upgrade', recorded, derived };
+    return { status: 'version-upgrade', recorded, derived: publicIdentity(derived) };
   }
 
-  if (recorded.address !== derived.address) {
-    return { status: 'mismatch', recorded, derived };
+  if (
+    recorded.generation !== derived.generation ||
+    recorded.address !== derived.address
+  ) {
+    return { status: 'mismatch', recorded, derived: publicIdentity(derived) };
   }
 
   return { status: 'match' };
+}
+
+function publicIdentity(identity: TradingWalletIdentity): TradingWalletIdentity {
+  return {
+    address: identity.address,
+    generation: identity.generation,
+    version: identity.version,
+  };
 }

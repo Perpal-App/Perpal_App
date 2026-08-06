@@ -13,6 +13,11 @@ export type AppConfig = {
     readonly flashProgramId: string;
     readonly flashErRpc: string;
   };
+  readonly privacy: {
+    readonly umbraIndexerUrl: string;
+    readonly umbraRelayerUrl: string;
+    readonly umbraZkAssetBaseUrl: string;
+  };
   readonly api: {
     readonly origin: string;
     readonly rpcPath: string;
@@ -49,6 +54,9 @@ export type RawAppEnv = {
   readonly velocityProgramId: string;
   readonly flashProgramId: string;
   readonly flashErRpc: string;
+  readonly umbraIndexerUrl: string;
+  readonly umbraRelayerUrl: string;
+  readonly umbraZkAssetBaseUrl: string;
   readonly telemetryEnabled: string;
   readonly telemetrySampleRate: string;
   readonly privyAppId: string;
@@ -70,6 +78,12 @@ export function readRawAppEnv(): RawAppEnv {
     flashProgramId:
       process.env.EXPO_PUBLIC_FLASH_PROGRAM_ID?.trim() ?? '',
     flashErRpc: process.env.EXPO_PUBLIC_FLASH_ER_RPC?.trim() ?? '',
+    umbraIndexerUrl:
+      process.env.EXPO_PUBLIC_UMBRA_INDEXER_URL?.trim() ?? '',
+    umbraRelayerUrl:
+      process.env.EXPO_PUBLIC_UMBRA_RELAYER_URL?.trim() ?? '',
+    umbraZkAssetBaseUrl:
+      process.env.EXPO_PUBLIC_UMBRA_ZK_ASSET_BASE_URL?.trim() ?? '',
     telemetryEnabled: process.env.EXPO_PUBLIC_TELEMETRY_ENABLED?.trim() ?? '',
     telemetrySampleRate:
       process.env.EXPO_PUBLIC_TELEMETRY_SAMPLE_RATE?.trim() ?? '',
@@ -170,6 +184,38 @@ function validateFlashErRpc(raw: string, issues: ConfigIssue[]): string {
   return raw;
 }
 
+function validatePublicServiceOrigin(
+  raw: string,
+  variable:
+    | 'EXPO_PUBLIC_UMBRA_INDEXER_URL'
+    | 'EXPO_PUBLIC_UMBRA_RELAYER_URL'
+    | 'EXPO_PUBLIC_UMBRA_ZK_ASSET_BASE_URL',
+  issues: ConfigIssue[],
+): string {
+  try {
+    const parsed = new URL(raw);
+
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0 ||
+      parsed.search.length > 0 ||
+      parsed.hash.length > 0 ||
+      raw.endsWith('/')
+    ) {
+      throw new Error('invalid service origin');
+    }
+  } catch {
+    issues.push({
+      variable,
+      problem: 'must be an HTTPS URL without credentials or a trailing slash',
+    });
+    return '';
+  }
+
+  return raw;
+}
+
 function validateSampleRate(raw: string, issues: ConfigIssue[]): number {
   if (raw.length === 0) {
     return 0;
@@ -226,6 +272,21 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     issues,
   );
   const flashErRpc = validateFlashErRpc(raw.flashErRpc, issues);
+  const umbraIndexerUrl = validatePublicServiceOrigin(
+    raw.umbraIndexerUrl,
+    'EXPO_PUBLIC_UMBRA_INDEXER_URL',
+    issues,
+  );
+  const umbraRelayerUrl = validatePublicServiceOrigin(
+    raw.umbraRelayerUrl,
+    'EXPO_PUBLIC_UMBRA_RELAYER_URL',
+    issues,
+  );
+  const umbraZkAssetBaseUrl = validatePublicServiceOrigin(
+    raw.umbraZkAssetBaseUrl,
+    'EXPO_PUBLIC_UMBRA_ZK_ASSET_BASE_URL',
+    issues,
+  );
   const sampleRate = validateSampleRate(raw.telemetrySampleRate, issues);
 
   if (raw.privyAppId.length === 0) {
@@ -249,6 +310,11 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
       cluster: 'mainnet',
       privy: { appId: raw.privyAppId, clientId: raw.privyClientId },
       perps: { velocityProgramId, flashProgramId, flashErRpc },
+      privacy: {
+        umbraIndexerUrl,
+        umbraRelayerUrl,
+        umbraZkAssetBaseUrl,
+      },
       api: {
         origin,
         rpcPath,

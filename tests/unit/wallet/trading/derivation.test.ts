@@ -6,6 +6,7 @@ import {
   DERIVATION_VERSION,
   DerivationError,
   checkTradingWalletIdentity,
+  deriveRotatedTradingWallet,
   deriveTradingWallet,
   parseTradingWalletIdentity,
   serializeTradingWalletIdentity,
@@ -59,6 +60,7 @@ describe('deriveTradingWallet', () => {
     const wallet = deriveTradingWallet(signature(3), SALT);
 
     expect(wallet.secretKey).toHaveLength(32);
+    expect(wallet.generation).toBe(0);
     expect(wallet.version).toBe(DERIVATION_VERSION);
     // base58 excludes 0, O, I, l by construction.
     expect(wallet.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
@@ -85,7 +87,7 @@ describe('zeroize', () => {
 });
 
 describe('checkTradingWalletIdentity', () => {
-  const derived = { address: 'AAA', version: DERIVATION_VERSION } as const;
+  const derived = { address: 'AAA', generation: 0, version: DERIVATION_VERSION } as const;
 
   it('reports first derivation when nothing is recorded', () => {
     expect(checkTradingWalletIdentity(null, derived).status).toBe('first-derivation');
@@ -93,14 +95,14 @@ describe('checkTradingWalletIdentity', () => {
 
   it('matches when the recorded address is identical', () => {
     expect(
-      checkTradingWalletIdentity({ address: 'AAA', version: DERIVATION_VERSION }, derived)
+      checkTradingWalletIdentity({ address: 'AAA', generation: 0, version: DERIVATION_VERSION }, derived)
         .status,
     ).toBe('match');
   });
 
   it('flags a mismatch instead of silently adopting a new wallet', () => {
     const result = checkTradingWalletIdentity(
-      { address: 'BBB', version: DERIVATION_VERSION },
+      { address: 'BBB', generation: 0, version: DERIVATION_VERSION },
       derived,
     );
 
@@ -108,7 +110,7 @@ describe('checkTradingWalletIdentity', () => {
   });
 
   it('flags a version upgrade separately from a mismatch', () => {
-    const result = checkTradingWalletIdentity({ address: 'AAA', version: 1 }, derived);
+    const result = checkTradingWalletIdentity({ address: 'AAA', generation: 0, version: 1 }, derived);
 
     expect(result.status).toBe('version-upgrade');
   });
@@ -122,11 +124,11 @@ describe('parseTradingWalletIdentity', () => {
       parseTradingWalletIdentity(
         JSON.stringify({ address, version: DERIVATION_VERSION }),
       ),
-    ).toEqual({ address, version: DERIVATION_VERSION });
+    ).toEqual({ address, generation: 0, version: DERIVATION_VERSION });
     expect(parseTradingWalletIdentity('{"address":"bad","version":1}')).toBeNull();
     expect(
       parseTradingWalletIdentity(JSON.stringify({ address, version: 1 })),
-    ).toEqual({ address, version: 1 });
+    ).toEqual({ address, generation: 0, version: 1 });
     expect(parseTradingWalletIdentity('{not json')).toBeNull();
   });
 
@@ -136,8 +138,23 @@ describe('parseTradingWalletIdentity', () => {
 
     expect(Object.keys(JSON.parse(serialized) as object)).toEqual([
       'address',
+      'generation',
       'version',
     ]);
     expect(serialized).not.toContain('secretKey');
+  });
+});
+
+describe('deriveRotatedTradingWallet', () => {
+  it('derives a deterministic, generation-bound address without mutating the root', () => {
+    const root = deriveTradingWallet(signature(6), SALT);
+    const original = Uint8Array.from(root.secretKey);
+    const first = deriveRotatedTradingWallet(root.secretKey, SALT, 1);
+    const again = deriveRotatedTradingWallet(root.secretKey, SALT, 1);
+
+    expect(first.address).toBe(again.address);
+    expect(first.address).not.toBe(root.address);
+    expect(first.generation).toBe(1);
+    expect(root.secretKey).toEqual(original);
   });
 });

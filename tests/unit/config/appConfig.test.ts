@@ -10,6 +10,9 @@ const VALID: RawAppEnv = {
   velocityProgramId: '11111111111111111111111111111111',
   flashProgramId: '11111111111111111111111111111111',
   flashErRpc: 'https://flash.magicblock.xyz',
+  umbraIndexerUrl: 'https://utxo-indexer.api.umbraprivacy.com',
+  umbraRelayerUrl: 'https://relayer.api.umbraprivacy.com',
+  umbraZkAssetBaseUrl: 'https://zk.api.umbraprivacy.com',
   telemetryEnabled: 'false',
   telemetrySampleRate: '0',
   privyAppId: 'app-id',
@@ -42,6 +45,9 @@ describe('parseAppConfig', () => {
       );
       expect(result.value.api.marketStreamUrl).toBe(
         'https://gateway.example/v1/markets/stream',
+      );
+      expect(result.value.privacy.umbraRelayerUrl).toBe(
+        'https://relayer.api.umbraprivacy.com',
       );
     }
   });
@@ -76,6 +82,9 @@ describe('parseAppConfig', () => {
     );
     expect(issueVariables({ telemetrySampleRate: '2' })).toContain(
       'EXPO_PUBLIC_TELEMETRY_SAMPLE_RATE',
+    );
+    expect(issueVariables({ umbraRelayerUrl: 'http://relay.example' })).toContain(
+      'EXPO_PUBLIC_UMBRA_RELAYER_URL',
     );
   });
 

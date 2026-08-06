@@ -47,6 +47,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     'expo-router',
+    'expo-asset',
     'expo-secure-store',
     'expo-status-bar',
     [
@@ -93,7 +94,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-local-authentication',
       {
-        faceIDPermission: 'Perpal uses Face ID to unlock your on-device trading key.',
+        faceIDPermission: 'Perpal uses device authentication to protect private trading actions.',
       },
     ],
   ],

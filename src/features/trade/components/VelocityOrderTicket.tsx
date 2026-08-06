@@ -1,4 +1,3 @@
-import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -74,7 +73,7 @@ export function VelocityOrderTicket({
 
   const prepare = async () => {
     if (session.address === null || session.signer === null) {
-      setError('Unlock trading wallet T before preparing an order.');
+      setError('Activate private trading before preparing an order.');
       return;
     }
 
@@ -129,7 +128,7 @@ export function VelocityOrderTicket({
 
   const submit = async (currentPlan: VelocityMarketOrderPlan) => {
     if (session.address === null || session.signer === null) {
-      setError('Trading wallet T locked before signing.');
+      setError('Private trading wallet T became unavailable before signing.');
       setPlan(null);
       setPhase('idle');
       return;
@@ -173,10 +172,10 @@ export function VelocityOrderTicket({
       <View style={styles.panel}>
         <Text accessibilityRole="header" style={styles.title}>Trade {market.symbol}</Text>
         <Text style={styles.message}>
-          Market data stays public. Unlock trading wallet T only when you want to prepare a mainnet order.
+          Market data stays public. Activate private trading once before preparing an order.
         </Text>
-        {session.status === 'locked' || session.status === 'error' ? (
-          <Button label="Unlock trading wallet" onPress={() => void session.unlock()} />
+        {session.status === 'inactive' ? (
+          <Button label="Activate private trading" onPress={() => void session.activate()} />
         ) : null}
       </View>
     );
@@ -260,13 +259,8 @@ export function VelocityOrderTicket({
       {plan?.simulation === 'insufficient-sol' ? (
         <View style={styles.notice}>
           <Text accessibilityRole="alert" style={styles.message}>
-            Send at least {sol(plan.feeLamports - plan.solBalanceLamports)} to trading wallet T, then prepare again.
+            Trading wallet T needs {sol(plan.feeLamports - plan.solBalanceLamports)} for this transaction. Do not fund T directly from the Privy wallet because that would expose the M-to-T link. Private fee funding is required before trading.
           </Text>
-          <Button
-            label="Copy trading wallet address"
-            onPress={() => void Clipboard.setStringAsync(session.address!)}
-            variant="secondary"
-          />
         </View>
       ) : null}
 

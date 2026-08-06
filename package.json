@@ -25,6 +25,7 @@
     "clean:modules": "node scripts/clean.mjs --modules",
     "emu:list": "emulator -list-avds",
     "emu:start": "emulator -avd",
+    "postinstall": "patch-package",
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "smoke:gateway": "node scripts/smoke-gateway.mjs",
@@ -46,17 +47,21 @@
     "@scure/bip39": "^2.2.0",
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "1.98.0",
+    "@umbra-privacy/rn-zk-prover": "5.0.0",
+    "@umbra-privacy/sdk": "5.0.0-rc.6",
     "@velocity-exchange/sdk": "0.13.0",
     "buffer": "6.0.3",
     "events": "3.3.0",
     "expo": "57.0.10",
     "expo-apple-authentication": "~57.0.1",
     "expo-application": "~57.0.2",
+    "expo-asset": "~57.0.8",
     "expo-blur": "~57.0.2",
     "expo-clipboard": "~57.0.1",
     "expo-constants": "57.0.9",
     "expo-crypto": "~57.0.1",
     "expo-dev-client": "~57.0.10",
+    "expo-file-system": "~57.0.1",
     "expo-font": "~57.0.1",
     "expo-linear-gradient": "~57.0.1",
     "expo-linking": "57.0.5",
@@ -84,6 +89,7 @@
     "react-native-svg": "15.15.4",
     "react-native-webview": "13.16.1",
     "react-native-worklets": "0.10.1",
+    "snarkjs": "0.7.6",
     "viem": "2.55.5"
   },
   "devDependencies": {
@@ -93,6 +99,7 @@
     "eslint-config-expo": "~57.0.1",
     "jest": "29.7.0",
     "jest-expo": "57.0.3",
+    "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
   }
 }

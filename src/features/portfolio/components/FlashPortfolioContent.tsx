@@ -27,16 +27,19 @@ export function FlashPortfolioContent({
         </View>
 
         <View style={styles.summary}>
-          <StatusRow label="Trading wallet" value={shortAddress(walletAddress)} />
-          <StatusRow label="Flash basket" value={shortAddress(snapshot.accountAddress)} />
+          <StatusRow label="Private trading wallet" value={shortAddress(walletAddress)} />
+          <StatusRow
+            label="Provider"
+            value={snapshot.initialized ? 'Flash Trade v2 ready' : 'Setup on first deposit'}
+          />
           <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
           <StatusRow label="ER slot" value={snapshot.slot.toLocaleString()} />
         </View>
 
         {!snapshot.initialized ? (
           <InlineState
-            title="Flash account not initialized"
-            message="No Flash basket exists for this trading wallet. Basket creation belongs to the explicit funding or first-trade flow."
+            title="Ready for private funding"
+            message="Flash setup is an internal protocol step. Perpal will initialize it automatically when the first private collateral deposit is confirmed."
           />
         ) : snapshot.positions.length === 0 ? (
           <InlineState

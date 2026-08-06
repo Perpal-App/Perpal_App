@@ -13,9 +13,7 @@ import {
   type Amount,
 } from '@/domain/money/amount';
 import { FlashPortfolioContent } from '@/features/portfolio/components/FlashPortfolioContent';
-import { VelocityCollateralDepositAction } from '@/features/portfolio/components/VelocityCollateralDepositAction';
 import { useFlashPortfolio } from '@/features/portfolio/hooks/useFlashPortfolio';
-import { VelocityInitializationAction } from '@/features/portfolio/components/VelocityInitializationAction';
 import { useVelocityPortfolio } from '@/features/portfolio/hooks/useVelocityPortfolio';
 import { usePublicMarkets } from '@/features/trade/hooks/usePublicMarkets';
 import type {
@@ -78,8 +76,8 @@ export function PortfolioScreen() {
     );
   }
 
-  if (session.status === 'unlocking') {
-    return <LoadingState label="Waiting for wallet signature" />;
+  if (session.status === 'restoring' || session.status === 'activating') {
+    return <LoadingState label="Preparing private trading" />;
   }
 
   if (session.status !== 'ready') {
@@ -88,19 +86,19 @@ export function PortfolioScreen() {
         title={
           session.status === 'recovery-required'
             ? 'Trading wallet recovery required'
-            : 'Unlock your portfolio'
+            : 'Activate private trading'
         }
         message={
           session.status === 'recovery-required'
             ? 'The derived trading wallet does not match the recorded identity. No new identity was adopted.'
-            : 'One Privy message signature unlocks the deterministic trading wallet for this app session. It does not submit a transaction.'
+            : 'Activate T once from Account. It is restored automatically on normal sessions.'
         }
         action={
           session.status === 'recovery-required'
             ? undefined
             : {
-                label: 'Unlock trading wallet',
-                onPress: () => void session.unlock(),
+                label: 'Open private trading setup',
+                onPress: () => router.push('/(tabs)/account'),
               }
         }
       />
@@ -111,7 +109,7 @@ export function PortfolioScreen() {
     return (
       <PortfolioState
         title="Trading signer unavailable"
-        message="Lock and unlock the trading wallet again before using provider actions."
+        message="Open Account and retry the secure private-wallet restore."
       />
     );
   }
@@ -155,11 +153,6 @@ export function PortfolioScreen() {
     <PortfolioContent
       snapshot={portfolio.snapshot}
       walletAddress={session.address}
-      initialization={{
-        programId: config.value.perps.velocityProgramId,
-        rpcUrl: config.value.api.rpcUrl,
-        signer: session.signer,
-      }}
     />
   );
 }
@@ -167,15 +160,9 @@ export function PortfolioScreen() {
 function PortfolioContent({
   snapshot,
   walletAddress,
-  initialization,
 }: {
   readonly snapshot: VelocityPortfolioSnapshot;
   readonly walletAddress: string;
-  readonly initialization: {
-    readonly programId: string;
-    readonly rpcUrl: string;
-    readonly signer: NonNullable<ReturnType<typeof useTradingSession>['signer']>;
-  };
 }) {
   return (
     <AppScreen>
@@ -188,8 +175,11 @@ function PortfolioContent({
         </View>
 
         <View style={styles.summary}>
-          <StatusRow label="Trading wallet" value={shortAddress(walletAddress)} />
-          <StatusRow label="Velocity account" value={shortAddress(snapshot.accountAddress)} />
+          <StatusRow label="Private trading wallet" value={shortAddress(walletAddress)} />
+          <StatusRow
+            label="Provider"
+            value={snapshot.initialized ? 'Velocity ready' : 'Setup on first deposit'}
+          />
           <StatusRow label="Open orders" value={snapshot.openOrders.toString()} />
           <StatusRow label="Account slot" value={snapshot.slot.toLocaleString()} />
         </View>
@@ -226,14 +216,8 @@ function PortfolioContent({
         {!snapshot.initialized ? (
           <View style={styles.positions}>
             <InlineState
-              title="Velocity account not initialized"
-              message="No Velocity user account exists for this trading wallet. Account creation is an explicit verified mainnet action."
-            />
-            <VelocityInitializationAction
-              owner={walletAddress}
-              programId={initialization.programId}
-              rpcUrl={initialization.rpcUrl}
-              signer={initialization.signer}
+              title="Ready for private funding"
+              message="Velocity setup is an internal protocol step. Perpal will initialize it automatically when the first private collateral deposit is confirmed."
             />
           </View>
         ) : snapshot.positions.length === 0 ? (
@@ -251,15 +235,6 @@ function PortfolioContent({
             ))}
           </View>
         )}
-
-        {snapshot.initialized ? (
-          <VelocityCollateralDepositAction
-            owner={walletAddress}
-            programId={initialization.programId}
-            rpcUrl={initialization.rpcUrl}
-            signer={initialization.signer}
-          />
-        ) : null}
 
         {snapshot.margin === null && snapshot.initialized ? (
           <InlineState
