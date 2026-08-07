@@ -32,6 +32,7 @@ type Phase = 'idle' | 'preparing' | 'prepared' | 'submitting' | 'complete';
 export function FlashOrderTicket({
   baseRpcUrl,
   erRpcUrl,
+  initialSide = 'long',
   market,
   programId,
   rpcUrl,
@@ -40,6 +41,12 @@ export function FlashOrderTicket({
 }: {
   readonly baseRpcUrl: string;
   readonly erRpcUrl: string;
+  /**
+   * Side the ticket opens on. Only the initial value: the ticket's own Long and
+   * Short controls stay in charge once it is on screen, so a caller cannot move
+   * the side out from under a half-filled order.
+   */
+  readonly initialSide?: FlashOrderSide;
   readonly market: MainnetMarket;
   readonly programId: string;
   readonly rpcUrl: string;
@@ -49,7 +56,7 @@ export function FlashOrderTicket({
   const router = useRouter();
   const session = useTradingSession();
   const [action, setAction] = useState<FlashOrderAction>('open');
-  const [side, setSide] = useState<FlashOrderSide>('long');
+  const [side, setSide] = useState<FlashOrderSide>(initialSide);
   const [collateral, setCollateral] = useState('');
   const [leverage, setLeverage] = useState('5');
   const [phase, setPhase] = useState<Phase>('idle');

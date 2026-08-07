@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   FlatList,
@@ -8,11 +9,8 @@ import {
 } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
+import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import { readAppConfig } from '@/config/appConfig';
-import {
-  MarketCategoryTabs,
-  type MarketCategoryOption,
-} from '@/features/trade/components/MarketCategoryTabs';
 import {
   MarketTableHeader,
   MarketTableRow,
@@ -41,6 +39,7 @@ import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
  * reflow on launch on any device.
  */
 export function TradeScreen() {
+  const router = useRouter();
   const config = readAppConfig();
   // Width only, and only to pick a gutter: the table needs the extra 16pt on the
   // narrowest phones for its widest symbol and price to stay inside their
@@ -110,8 +109,8 @@ export function TradeScreen() {
               </Text>
             ) : null}
 
-            <MarketCategoryTabs
-              compact={compact}
+            <UnderlineTabs
+              contentStyle={[styles.tabStrip, compact && styles.compactGutter]}
               onSelect={(id) => setSelectedCategory(id as MarketFilter)}
               options={categories}
               selectedId={selectedCategory}
@@ -122,7 +121,16 @@ export function TradeScreen() {
         )}
         maxToRenderPerBatch={12}
         removeClippedSubviews
-        renderItem={({ item }) => <MarketTableRow compact={compact} entry={item} />}
+        renderItem={({ item }) => (
+          <MarketTableRow
+            compact={compact}
+            entry={item}
+            onPress={() => router.push({
+              pathname: '/(tabs)/trade/[venueRef]',
+              params: { venueRef: item.market.venueRef },
+            })}
+          />
+        )}
         showsVerticalScrollIndicator={false}
         windowSize={5}
       />
@@ -163,7 +171,7 @@ const CATEGORY_ORDER: readonly MainnetMarketCategory[] = [
 
 function marketCategories(
   markets: ReturnType<typeof listMainnetMarkets>,
-): readonly MarketCategoryOption[] {
+): readonly UnderlineTabOption[] {
   const present = CATEGORY_ORDER.flatMap((category) =>
     markets.some((market) => market.category === category)
       ? [{ id: category, label: categoryLabel(category) }]
@@ -203,6 +211,10 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
   },
   compactGutter: { paddingHorizontal: layout.screenPaddingCompact },
+  // The strip carries the gutter inside its scroll content so it spans the
+  // screen: the first tab lines up with the title and the rows, and tabs
+  // scrolling past either end travel to the edge rather than to a margin.
+  tabStrip: { paddingHorizontal: layout.screenPadding },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

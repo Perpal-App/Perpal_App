@@ -14,6 +14,21 @@ config.resolver.assetExts.push('lottie');
 // globally makes Solana Kit bypass its React Native assertions. Keep both
 // resolver workarounds package-scoped so native exports remain authoritative.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (nativePlatforms.includes(platform) && moduleName === 'rpc-websockets') {
+    const packageEntry = require.resolve('rpc-websockets', {
+      paths: [path.dirname(context.originModulePath)],
+    });
+
+    return {
+      // rpc-websockets 9.x has browser/node export conditions but no
+      // react-native/default condition, so Metro otherwise warns and falls
+      // back to its Node entry. React Native supplies the WebSocket global
+      // expected by this browser build.
+      filePath: path.join(path.dirname(packageEntry), 'index.browser.cjs'),
+      type: 'sourceFile',
+    };
+  }
+
   if (nativePlatforms.includes(platform) && moduleName === 'jose') {
     const packageRoot = path.dirname(
       require.resolve('jose/package.json', {

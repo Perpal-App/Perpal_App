@@ -31,7 +31,15 @@ export type FlashMarketSnapshot = FlashVenueSnapshot & {
   readonly pricePublishedAtMs: number | null;
   readonly priceStale: boolean;
   readonly change24hBps: number | null;
+  readonly high24h: Amount | null;
+  readonly low24h: Amount | null;
   readonly volume24h: Amount | null;
+};
+
+type FlashDailyRange = {
+  readonly changeBps: number;
+  readonly high: Amount;
+  readonly low: Amount;
 };
 
 export async function fetchFlashMarketSnapshots(
@@ -50,7 +58,7 @@ export async function fetchFlashMarketSnapshots(
     byPool.set(market.poolName, group);
   }
 
-  const [venueSnapshots, prices, changes, stats] = await Promise.all([
+  const [venueSnapshots, prices, ranges, stats] = await Promise.all([
     Promise.all(
       [...byPool.entries()].map(([poolName, poolMarkets]) =>
         fetchPoolSnapshots(
@@ -76,13 +84,16 @@ export async function fetchFlashMarketSnapshots(
     }
 
     const price = prices.get(market.baseAsset.toUpperCase()) ?? null;
+    const range = ranges.get(market.oracleSymbol.toUpperCase()) ?? null;
 
     return {
       ...snapshot,
       price: price?.price ?? null,
       pricePublishedAtMs: price?.publishedAtMs ?? null,
       priceStale: price === null || isPriceStale(price.publishedAtMs, nowMs),
-      change24hBps: changes.get(market.oracleSymbol.toUpperCase()) ?? null,
+      change24hBps: range?.changeBps ?? null,
+      high24h: range?.high ?? null,
+      low24h: range?.low ?? null,
       volume24h: stats.get(market.baseAsset.toUpperCase()) ?? null,
     };
   });
@@ -231,34 +242,54 @@ async function fetchFlashPrices(
 async function fetchFlashChanges(
   origin: string,
   signal: AbortSignal,
-): Promise<ReadonlyMap<string, number>> {
+): Promise<ReadonlyMap<string, FlashDailyRange>> {
   const values = array(await fetchJson(new URL('/token-prices/all', origin), signal));
 
   if (values.length === 0 || values.length > MAX_MARKET_ENTRIES) {
     throw new Error('Flash returned an invalid 24-hour price catalog.');
   }
 
-  const changes = new Map<string, number>();
+  const ranges = new Map<string, FlashDailyRange>();
 
   for (const value of values) {
     const entry = record(value, 'Flash 24-hour price');
     const symbol = entry.symbol;
     const percent = entry.percentageChange24h;
+    const high = entry.high;
+    const low = entry.low;
 
     if (
       typeof symbol !== 'string' ||
       symbol.length === 0 ||
       typeof percent !== 'number' ||
       !Number.isFinite(percent) ||
-      Math.abs(percent) > 100_000
+      Math.abs(percent) > 100_000 ||
+      typeof high !== 'number' ||
+      typeof low !== 'number' ||
+      !Number.isFinite(high) ||
+      !Number.isFinite(low) ||
+      high < low ||
+      low <= 0
     ) {
       throw new Error('Flash returned invalid 24-hour price data.');
     }
 
-    changes.set(symbol.toUpperCase(), Math.round(percent * 100));
+    ranges.set(symbol.toUpperCase(), {
+      changeBps: Math.round(percent * 100),
+      high: displayPrice(high),
+      low: displayPrice(low),
+    });
   }
 
-  return changes;
+  return ranges;
+}
+
+function displayPrice(value: number): Amount {
+  const scale = 100_000_000;
+  if (value > Number.MAX_SAFE_INTEGER / scale) {
+    throw new Error('Flash returned an unsupported 24-hour price.');
+  }
+  return amountFromBaseUnits(BigInt(Math.round(value * scale)), 8);
 }
 
 async function fetchFlashStats(

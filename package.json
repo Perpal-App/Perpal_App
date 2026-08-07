@@ -34,7 +34,8 @@
     "check:file-size": "node scripts/check-file-size.mjs",
     "validate": "npm run typecheck && npm run lint && npm run deps:check && npm run check:file-size",
     "deps:check": "expo install --check",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "generate:chart": "node scripts/generate-tradingview-chart.mjs"
   },
   "dependencies": {
     "@ethersproject/shims": "^5.8.0",
@@ -69,12 +70,14 @@
     "expo-linking": "57.0.5",
     "expo-local-authentication": "~57.0.2",
     "expo-router": "57.0.10",
+    "expo-screen-orientation": "~57.0.1",
     "expo-secure-store": "~57.0.1",
     "expo-splash-screen": "~57.0.5",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.2",
     "expo-web-browser": "~57.0.2",
     "fast-text-encoding": "^1.0.6",
+    "lightweight-charts": "5.2.0",
     "lottie-react-native": "~7.3.8",
     "react": "19.2.3",
     "react-dom": "19.2.3",

@@ -98,6 +98,7 @@ export function AuthNavigationGate() {
 
         <Stack.Protected guard={isAuthenticatedSession}>
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="market-chart" />
         </Stack.Protected>
       </Stack>
     </AuthHandoffProvider>

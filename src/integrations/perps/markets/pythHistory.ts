@@ -11,7 +11,7 @@ export type MarketCandle = {
   readonly close: number;
 };
 
-export type MarketTimeframe = '1' | '5' | '15' | '60';
+export type MarketTimeframe = '1' | '5' | '15' | '60' | '240' | 'D';
 
 export const MARKET_TIMEFRAMES: readonly {
   readonly id: MarketTimeframe;
@@ -22,6 +22,8 @@ export const MARKET_TIMEFRAMES: readonly {
   { id: '5', label: '5m', lookbackSeconds: 6 * 60 * 60 },
   { id: '15', label: '15m', lookbackSeconds: 24 * 60 * 60 },
   { id: '60', label: '1h', lookbackSeconds: 3 * 24 * 60 * 60 },
+  { id: '240', label: '4h', lookbackSeconds: 14 * 24 * 60 * 60 },
+  { id: 'D', label: '1D', lookbackSeconds: 90 * 24 * 60 * 60 },
 ];
 
 export async function fetchPythMarketHistory(

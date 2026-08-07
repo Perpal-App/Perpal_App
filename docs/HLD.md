@@ -28,7 +28,9 @@ The deployed Worker exposes HTTP JSON-RPC, not Solana WebSocket subscriptions. U
 
 - The installed Flash SDK is the routing catalog. Markets are grouped by active mainnet pool; incomplete one-sided entries are not advertised as tradeable.
 - Flash ER account snapshots supply live venue availability and open interest. Requests are bounded to 24 accounts and batched per selected market group.
-- Flash's public price and statistics services supply the full catalog's Pyth Lazer price, 24-hour change, and Flash 24-hour volume. The app polls the bounded public responses every 15 seconds, validates their shape, and keeps the executable Flash quote authoritative in order review.
+- Flash's public price and statistics services supply the full catalog's Pyth Lazer price, 24-hour high/low/change, and Flash 24-hour volume. The app polls the bounded public responses every 15 seconds, validates their shape, and keeps the executable Flash quote authoritative in order review.
+- Selecting a market opens a detail route with Flash metrics, the verified order ticket, and TradingView Lightweight Charts rendering validated public Pyth Benchmarks OHLC candles. The chart supports 1m through 1D resolutions, crosshair inspection, touch pan/zoom, candle/line modes, SMA/EMA overlays, and a full-screen workspace that follows Android rotation. The TradingView attribution remains visible.
+- Flash exposes no central order book or trade tape, so neither is represented in the product. The chart never substitutes a TradingView exchange symbol for the selected Flash/Pyth market.
 - A stale or missing reference never silently replaces the Flash quote. The quote is bound to pool, market, side, size, collateral, leverage, fees, expiry, and signer.
 
 ## Position isolation

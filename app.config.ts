@@ -49,7 +49,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'perpal',
   version: '0.1.0',
   scheme: URL_SCHEME,
-  orientation: 'portrait',
+  orientation: 'default',
   userInterfaceStyle: 'dark',
   // New architecture is always enabled on SDK 57; the config key no longer exists.
   icon: './assets/icon.png',

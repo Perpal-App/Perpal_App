@@ -1,4 +1,5 @@
 import {
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -101,9 +102,11 @@ function ColumnHeader({
 export function MarketTableRow({
   entry,
   compact = false,
+  onPress,
 }: {
   readonly entry: MarketTableEntry;
   readonly compact?: boolean;
+  readonly onPress: () => void;
 }) {
   const { market, venue } = entry;
   const price = venue !== null && !venue.priceStale ? venue.price : null;
@@ -121,7 +124,7 @@ export function MarketTableRow({
     : formatCompactUsd(openInterest);
 
   return (
-    <View
+    <Pressable
       accessible
       accessibilityLabel={[
         `${market.baseAsset} perpetual, ${market.displayName}`,
@@ -131,7 +134,14 @@ export function MarketTableRow({
         `24 hour volume ${spoken(volumeText)}`,
         `open interest ${spoken(openInterestText)}`,
       ].join('. ')}
-      style={[styles.row, compact && styles.compactGutter]}
+      accessibilityHint="Opens market details and trade controls"
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.row,
+        compact && styles.compactGutter,
+        pressed && styles.rowPressed,
+      ]}
     >
       <View style={styles.marketColumn}>
         <MarketLogo symbol={market.baseAsset} url={market.iconUrl} />
@@ -161,7 +171,7 @@ export function MarketTableRow({
         </TableText>
         <TableText style={styles.secondaryValue}>{openInterestText}</TableText>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -239,6 +249,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
+  rowPressed: { backgroundColor: colors.surfaceElevated },
   compactGutter: { paddingHorizontal: layout.screenPaddingCompact },
   // Tracked a half step tighter than the token: at full tracking `24H VOL / OI`
   // measures 81pt against an 80pt column on a 360pt screen, and the trailing gap

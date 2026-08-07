@@ -2,7 +2,7 @@ diff --git a/node_modules/@flash_trade/flash-sdk-v2/dist/utils.js b/node_modules
 index 4c83b00..d25e653 100644
 --- a/node_modules/@flash_trade/flash-sdk-v2/dist/utils.js
 +++ b/node_modules/@flash_trade/flash-sdk-v2/dist/utils.js
-@@ -58,7 +58,7 @@ exports.sideToAnchor = sideToAnchor;
+@@ -58,5 +58,5 @@ exports.sideToAnchor = sideToAnchor;
  const web3_js_1 = require("@solana/web3.js");
 -const crypto_1 = require("crypto");
 +const sha2_js_1 = require("@noble/hashes/sha2.js");
@@ -22,14 +22,14 @@ diff --git a/node_modules/@flash_trade/flash-sdk-v2/dist/utils/erWire.js b/node_
 index ac6f73b..37f7f91 100644
 --- a/node_modules/@flash_trade/flash-sdk-v2/dist/utils/erWire.js
 +++ b/node_modules/@flash_trade/flash-sdk-v2/dist/utils/erWire.js
-@@ -8,6 +8,7 @@ exports.rebaseProgramIndices = rebaseProgramIndices;
+@@ -8,5 +8,6 @@ exports.rebaseProgramIndices = rebaseProgramIndices;
  exports.buildUnboundedLegacyTx = buildUnboundedLegacyTx;
  exports.buildUnboundedSimulateBytes = buildUnboundedSimulateBytes;
  const web3_js_1 = require("@solana/web3.js");
 +const ed25519_js_1 = require("@noble/curves/ed25519.js");
  // eslint-disable-next-line @typescript-eslint/no-require-imports
  const bs58 = require("bs58");
-@@ -49,14 +50,8 @@ const NODE_ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420",
+@@ -49,14 +50,7 @@ const NODE_ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420",
   * `crypto` so this module stays importable in the browser; browsers should
   * pass a tweetnacl-backed signer via `Ed25519Signer` instead.
   */
