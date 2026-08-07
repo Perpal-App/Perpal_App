@@ -14,7 +14,14 @@ import { colors } from '@/theme/tokens';
 type AppScreenProps = {
   children: ReactNode;
   background?: ReactNode;
+  /** Applies to the built-in scroll container, so it is ignored when `scroll` is false. */
   contentContainerStyle?: StyleProp<ViewStyle>;
+  /**
+   * Set false when the screen brings its own scroller — a virtualized list
+   * cannot live inside another vertical ScrollView. The safe area and keyboard
+   * avoidance stay here either way, so a screen never reads insets itself.
+   */
+  scroll?: boolean;
 };
 
 /**
@@ -26,6 +33,7 @@ export function AppScreen({
   children,
   background,
   contentContainerStyle,
+  scroll = true,
 }: AppScreenProps) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'right', 'bottom', 'left']}>
@@ -44,16 +52,20 @@ export function AppScreen({
           the keyboard opens, the scroll area shrinks so flex-based screen
           layouts recompute and lift their content clear of the keypad. */}
       <KeyboardAvoidingView behavior="padding" style={styles.keyboardAvoider}>
-        <ScrollView
-          bounces={false}
-          contentContainerStyle={[styles.content, contentContainerStyle]}
-          contentInsetAdjustmentBehavior="never"
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          style={styles.scroll}
-        >
-          {children}
-        </ScrollView>
+        {scroll ? (
+          <ScrollView
+            bounces={false}
+            contentContainerStyle={[styles.content, contentContainerStyle]}
+            contentInsetAdjustmentBehavior="never"
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            style={styles.scroll}
+          >
+            {children}
+          </ScrollView>
+        ) : (
+          children
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

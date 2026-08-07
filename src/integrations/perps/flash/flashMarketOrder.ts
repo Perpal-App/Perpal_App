@@ -225,8 +225,15 @@ function assertInput(input: Input): void {
   if (input.action === 'open' && input.collateralInputBaseUnits <= 0n) {
     throw new FlashMarketOrderError('Enter USDC collateral greater than zero.', 'amount_invalid');
   }
-  if (!Number.isSafeInteger(input.leverage) || input.leverage < 1 || input.leverage > 100) {
-    throw new FlashMarketOrderError('Choose leverage from 1× to 100×.', 'leverage_invalid');
+  if (
+    !Number.isSafeInteger(input.leverage) ||
+    input.leverage < 1 ||
+    input.leverage > input.market.maxLeverage
+  ) {
+    throw new FlashMarketOrderError(
+      `Choose leverage from 1× to ${input.market.maxLeverage}×.`,
+      'leverage_invalid',
+    );
   }
   if (Buffer.from(input.signer.publicKey).toString('hex') !== Buffer.from(new PublicKey(input.owner).toBytes()).toString('hex')) {
     throw new FlashMarketOrderError('Private wallet T does not match the signer.', 'signer_mismatch');

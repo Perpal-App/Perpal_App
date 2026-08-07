@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 
 import { Button } from '@/components/ui/Button';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, fonts, spacing, typography } from '@/theme/tokens';
 
 // dotLottie brand success animation (registered as a Metro asset in
 // metro.config.js). It is already in the brand purple, so no tint is applied.
@@ -92,9 +92,9 @@ const styles = StyleSheet.create({
   },
   title: {
     ...typography.heading,
+    fontFamily: fonts.bold,
     marginTop: spacing.sm,
     color: colors.onLight,
-    fontWeight: '700',
     textAlign: 'center',
   },
   message: {

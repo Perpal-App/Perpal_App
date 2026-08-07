@@ -7,22 +7,30 @@ import {
 } from '@/integrations/perps/flash/flashMarketData';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
 
-type VenueState = 'idle' | 'loading' | 'ready' | 'error';
-const REFRESH_INTERVAL_MS = 3_000;
+export type FlashVenueState = 'idle' | 'loading' | 'ready' | 'error';
+const REFRESH_INTERVAL_MS = 15_000;
 
 export function useFlashVenueMarkets(
   erRpcUrl: string,
   programId: string,
+  dataOrigin: string,
+  statsOrigin: string,
   markets: readonly MainnetMarket[],
 ) {
   const [snapshots, setSnapshots] = useState<readonly FlashMarketSnapshot[]>([]);
-  const [status, setStatus] = useState<VenueState>('idle');
+  const [status, setStatus] = useState<FlashVenueState>('idle');
   const hasSnapshotsRef = useRef(false);
   const lastLoggedErrorRef = useRef<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
-      if (erRpcUrl.length === 0 || programId.length === 0 || markets.length === 0) {
+      if (
+        erRpcUrl.length === 0 ||
+        programId.length === 0 ||
+        dataOrigin.length === 0 ||
+        statsOrigin.length === 0 ||
+        markets.length === 0
+      ) {
         hasSnapshotsRef.current = false;
         setSnapshots([]);
         setStatus('idle');
@@ -49,6 +57,8 @@ export function useFlashVenueMarkets(
           const next = await fetchFlashMarketSnapshots(
             erRpcUrl,
             programId,
+            dataOrigin,
+            statsOrigin,
             markets,
             controller.signal,
           );
@@ -91,7 +101,7 @@ export function useFlashVenueMarkets(
           clearTimeout(timer);
         }
       };
-    }, [erRpcUrl, markets, programId]),
+    }, [dataOrigin, erRpcUrl, markets, programId, statsOrigin]),
   );
 
   return { snapshots, status };

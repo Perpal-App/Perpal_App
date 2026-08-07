@@ -11,6 +11,9 @@ export type AppConfig = {
   readonly perps: {
     readonly flashProgramId: string;
     readonly flashErRpc: string;
+    readonly flashDataOrigin: string;
+    readonly flashStatsOrigin: string;
+    readonly pythBenchmarksOrigin: string;
     readonly usdtMint: string;
   };
   readonly privacy: {
@@ -56,6 +59,9 @@ export type RawAppEnv = {
   readonly swapBuildPath: string;
   readonly flashProgramId: string;
   readonly flashErRpc: string;
+  readonly flashDataOrigin: string;
+  readonly flashStatsOrigin: string;
+  readonly pythBenchmarksOrigin: string;
   readonly usdtMint: string;
   readonly umbraIndexerUrl: string;
   readonly umbraRelayerUrl: string;
@@ -81,6 +87,12 @@ export function readRawAppEnv(): RawAppEnv {
     flashProgramId:
       process.env.EXPO_PUBLIC_FLASH_PROGRAM_ID?.trim() ?? '',
     flashErRpc: process.env.EXPO_PUBLIC_FLASH_ER_RPC?.trim() ?? '',
+    flashDataOrigin:
+      process.env.EXPO_PUBLIC_FLASH_DATA_ORIGIN?.trim() ?? '',
+    flashStatsOrigin:
+      process.env.EXPO_PUBLIC_FLASH_STATS_ORIGIN?.trim() ?? '',
+    pythBenchmarksOrigin:
+      process.env.EXPO_PUBLIC_PYTH_BENCHMARKS_ORIGIN?.trim() ?? '',
     usdtMint: process.env.EXPO_PUBLIC_USDT_MINT?.trim() ?? '',
     umbraIndexerUrl:
       process.env.EXPO_PUBLIC_UMBRA_INDEXER_URL?.trim() ?? '',
@@ -192,6 +204,9 @@ function validateFlashErRpc(raw: string, issues: ConfigIssue[]): string {
 function validatePublicServiceOrigin(
   raw: string,
   variable:
+    | 'EXPO_PUBLIC_FLASH_DATA_ORIGIN'
+    | 'EXPO_PUBLIC_FLASH_STATS_ORIGIN'
+    | 'EXPO_PUBLIC_PYTH_BENCHMARKS_ORIGIN'
     | 'EXPO_PUBLIC_UMBRA_INDEXER_URL'
     | 'EXPO_PUBLIC_UMBRA_RELAYER_URL'
     | 'EXPO_PUBLIC_UMBRA_ZK_ASSET_BASE_URL',
@@ -282,6 +297,21 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     issues,
   );
   const flashErRpc = validateFlashErRpc(raw.flashErRpc, issues);
+  const flashDataOrigin = validatePublicServiceOrigin(
+    raw.flashDataOrigin,
+    'EXPO_PUBLIC_FLASH_DATA_ORIGIN',
+    issues,
+  );
+  const flashStatsOrigin = validatePublicServiceOrigin(
+    raw.flashStatsOrigin,
+    'EXPO_PUBLIC_FLASH_STATS_ORIGIN',
+    issues,
+  );
+  const pythBenchmarksOrigin = validatePublicServiceOrigin(
+    raw.pythBenchmarksOrigin,
+    'EXPO_PUBLIC_PYTH_BENCHMARKS_ORIGIN',
+    issues,
+  );
   const umbraIndexerUrl = validatePublicServiceOrigin(
     raw.umbraIndexerUrl,
     'EXPO_PUBLIC_UMBRA_INDEXER_URL',
@@ -319,7 +349,14 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     value: {
       cluster: 'mainnet',
       privy: { appId: raw.privyAppId, clientId: raw.privyClientId },
-      perps: { flashProgramId, flashErRpc, usdtMint },
+      perps: {
+        flashProgramId,
+        flashErRpc,
+        flashDataOrigin,
+        flashStatsOrigin,
+        pythBenchmarksOrigin,
+        usdtMint,
+      },
       privacy: {
         umbraIndexerUrl,
         umbraRelayerUrl,

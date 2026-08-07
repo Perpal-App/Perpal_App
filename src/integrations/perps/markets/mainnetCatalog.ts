@@ -2,13 +2,29 @@ import { PoolConfig } from '@flash_trade/flash-sdk-v2/dist/PoolConfig';
 import poolConfigJson from '@flash_trade/flash-sdk-v2/dist/PoolConfig.json';
 
 export type MainnetMarketSymbol = `${string}-PERP`;
+export type MainnetMarketCategory =
+  | 'crypto'
+  | 'forex'
+  | 'commodities'
+  | 'metals'
+  | 'equities'
+  | 'other';
 
 export type MainnetMarket = {
   readonly symbol: MainnetMarketSymbol;
   readonly baseAsset: string;
+  readonly displayName: string;
+  readonly category: MainnetMarketCategory;
+  readonly oracleSymbol: string;
   readonly poolName: string;
   readonly maxLeverage: number;
   readonly venueRef: string;
+  /**
+   * Venue-published icon for the asset, carried in the pool config next to the
+   * rest of the market's metadata. Empty when the venue lists none, which the
+   * UI renders as a monogram rather than substituting another image source.
+   */
+  readonly iconUrl: string;
 };
 
 const ACTIVE_POOL_NAMES = poolConfigJson.pools
@@ -38,7 +54,9 @@ function marketsInPool(pool: PoolConfig): readonly MainnetMarket[] {
     }
 
     const directions = assets.get(match[1]) ?? { long: [], short: [] };
-    directions[match[2] === 'Long' ? 'long' : 'short'].push(market.maxLev);
+    directions[match[2] === 'Long' ? 'long' : 'short'].push(
+      market.degenMaxLev,
+    );
     assets.set(match[1], directions);
   }
 
@@ -47,12 +65,37 @@ function marketsInPool(pool: PoolConfig): readonly MainnetMarket[] {
       return [];
     }
 
+    const token = pool.tokens.find((candidate) => candidate.symbol === baseAsset);
+
+    if (token === undefined || token.pythTicker.length === 0) {
+      return [];
+    }
+
     return [{
       symbol: `${baseAsset}-PERP` as const,
       baseAsset,
+      displayName: token.fullName.trim() || baseAsset,
+      category: marketCategory(token.category[0]),
+      oracleSymbol: token.pythTicker,
       poolName: pool.poolName,
       maxLeverage: Math.max(...directions.long, ...directions.short),
       venueRef: `${pool.poolName}:${baseAsset}`,
+      iconUrl: token.iconUrl.trim(),
     }];
   });
+}
+
+function marketCategory(value: string | undefined): MainnetMarketCategory {
+  switch (value?.toLowerCase()) {
+    case 'crypto':
+    case 'forex':
+    case 'commodities':
+    case 'metals':
+      return value.toLowerCase() as MainnetMarketCategory;
+    case 'stocks':
+    case 'equities':
+      return 'equities';
+    default:
+      return 'other';
+  }
 }

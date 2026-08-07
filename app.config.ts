@@ -19,6 +19,30 @@ const URL_SCHEME = 'perpal';
 // Surface-level brand colors only. Semantic design tokens live in the app.
 const BACKGROUND = '#0B0D10';
 
+/**
+ * Every font the app is allowed to render, embedded natively at build time so
+ * the faces are available synchronously on the first frame with no runtime
+ * loading. Only these files ship; the rest of `assets/fonts` is unused.
+ *
+ * Each face is registered under its own PostScript name rather than as weights
+ * of a single "Poppins" family. That is what makes `fontFamily: 'Poppins-SemiBold'`
+ * resolve the real SemiBold file on both platforms — iOS matches the PostScript
+ * name, Android matches the family name declared below — instead of letting
+ * Android synthesise a bold from Regular. Each face is declared at weight 400
+ * for the same reason: styles pick a face by name and never set `fontWeight`.
+ * The app-side counterpart of this list is `src/theme/fonts.ts`.
+ */
+const APP_FONTS = [
+  { family: 'Poppins-Regular', path: './assets/fonts/poppins/Poppins-Regular.ttf' },
+  { family: 'Poppins-Medium', path: './assets/fonts/poppins/Poppins-Medium.ttf' },
+  { family: 'Poppins-SemiBold', path: './assets/fonts/poppins/Poppins-SemiBold.ttf' },
+  { family: 'Poppins-Bold', path: './assets/fonts/poppins/Poppins-Bold.ttf' },
+  {
+    family: 'PatrickHand-Regular',
+    path: './assets/fonts/Patrick_Hand/PatrickHand-Regular.ttf',
+  },
+] as const;
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Perpal',
@@ -51,27 +75,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-secure-store',
     'expo-status-bar',
     [
-      // Embed fonts natively at build time so the family is available
-      // synchronously at runtime with no runtime font loading. iOS derives the
-      // family name from the file ("Patrick Hand"); Android is given the same
-      // family explicitly so a single family string works on both platforms.
       'expo-font',
       {
-        ios: {
-          fonts: ['./assets/fonts/Patrick_Hand/PatrickHand-Regular.ttf'],
-        },
+        ios: { fonts: APP_FONTS.map((font) => font.path) },
         android: {
-          fonts: [
-            {
-              fontFamily: 'Patrick Hand',
-              fontDefinitions: [
-                {
-                  path: './assets/fonts/Patrick_Hand/PatrickHand-Regular.ttf',
-                  weight: 400,
-                },
-              ],
-            },
-          ],
+          fonts: APP_FONTS.map((font) => ({
+            fontFamily: font.family,
+            fontDefinitions: [{ path: font.path, weight: 400 }],
+          })),
         },
       },
     ],

@@ -10,6 +10,8 @@ export const colors = {
   accent: '#8B5CF6',
   accentPressed: '#7447E8',
   accentSoft: '#C4B5FD',
+  positive: '#4ADE80',
+  negative: '#EF6262',
   onAccent: '#FFFFFF',
   onLight: '#111116',
   lightAction: '#F5F3FA',
@@ -59,64 +61,11 @@ export const radii = {
 } as const;
 
 /**
- * Font families embedded natively at build time (see the expo-font plugin in
- * app.config.ts). The family string is identical on iOS and Android.
+ * Font faces and the type scale live in `./fonts` and are re-exported here so
+ * `@/theme/tokens` stays the single barrel for design tokens. Import either
+ * path; both resolve to the same objects.
  */
-export const fonts = {
-  brand: 'Patrick Hand',
-} as const;
-
-export const typography = {
-  wordmark: {
-    // Patrick Hand is a handwriting face; heavy tracking breaks its flow, so
-    // the letters keep only a light, breathable gap. Sized to read as a brand
-    // mark without competing with the headline below it.
-    fontFamily: fonts.brand,
-    fontSize: 46,
-    lineHeight: 52,
-    fontWeight: '700' as const,
-    letterSpacing: 1.5,
-  },
-  display: {
-    fontSize: 44,
-    lineHeight: 50,
-    fontWeight: '700' as const,
-    letterSpacing: -1.5,
-  },
-  title: {
-    fontSize: 32,
-    lineHeight: 38,
-    fontWeight: '700' as const,
-    letterSpacing: -0.8,
-  },
-  heading: {
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '600' as const,
-    letterSpacing: -0.2,
-  },
-  body: {
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: '400' as const,
-  },
-  bodyCompact: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '400' as const,
-  },
-  label: {
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: '600' as const,
-  },
-  eyebrow: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600' as const,
-    letterSpacing: 1.4,
-  },
-} as const;
+export { fonts, typography, type FontFace } from './fonts';
 
 /**
  * Full-screen onboarding gradients.
@@ -181,6 +130,13 @@ export const gradients = {
 
 export const layout = {
   screenPadding: spacing.xl,
+  /**
+   * Gutter below `compactWidth`. A dense screen buys column room back from the
+   * margin rather than from the type or the data.
+   */
+  screenPaddingCompact: spacing.sm,
+  /** Width under which a screen switches to the compact gutter. */
+  compactWidth: 360,
   maxContentWidth: 520,
   minTouchTarget: 48,
 } as const;

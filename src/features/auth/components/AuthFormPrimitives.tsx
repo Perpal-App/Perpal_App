@@ -11,7 +11,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, fonts, spacing, typography } from '@/theme/tokens';
 
 // Transform-only press feedback keeps text actions from reflowing their row.
 const TEXT_ACTION_PRESSED_SCALE = 0.92;
@@ -156,8 +156,8 @@ const styles = StyleSheet.create({
   },
   textActionLabel: {
     ...typography.bodyCompact,
+    fontFamily: fonts.semiBold,
     color: colors.accent,
-    fontWeight: '600',
   },
   disabledText: {
     color: PRIVY_MUTED,
@@ -170,8 +170,9 @@ const styles = StyleSheet.create({
     gap: spacing.xxs,
   },
   footerText: {
+    fontFamily: fonts.regular,
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 20,
     color: PRIVY_MUTED,
   },
   privyMark: {
@@ -195,10 +196,10 @@ const styles = StyleSheet.create({
     backgroundColor: PRIVY_MUTED,
   },
   privyText: {
+    fontFamily: fonts.bold,
     fontSize: 16,
-    lineHeight: 20,
+    lineHeight: 24,
     color: PRIVY_MUTED,
-    fontWeight: '700',
   },
   errorBanner: {
     alignSelf: 'stretch',
@@ -214,10 +215,8 @@ const styles = StyleSheet.create({
   },
   errorText: {
     ...typography.bodyCompact,
+    fontFamily: fonts.medium,
     flex: 1,
     color: PRIVY_ERROR,
-    fontWeight: '500',
-    fontSize: 14,
-    lineHeight: 20,
   },
 });

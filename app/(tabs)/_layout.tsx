@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { StyleSheet } from 'react-native';
 
 import { TabBarIcon } from '@/assets/svg/TabBarIcon';
-import { colors } from '@/theme/tokens';
+import { colors, fonts } from '@/theme/tokens';
 
 /**
  * Authenticated bottom-tab shell. Uses expo-router's JS Tabs (which wraps its
@@ -57,7 +57,9 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   tabLabel: {
+    // No lineHeight: the tab bar sizes its own label box, and Poppins' natural
+    // 1.5em leading is what keeps the descender in "Portfolio" off the crop.
+    fontFamily: fonts.semiBold,
     fontSize: 11,
-    fontWeight: '600',
   },
 });

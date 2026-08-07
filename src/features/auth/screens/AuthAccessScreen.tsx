@@ -238,7 +238,8 @@ const styles = StyleSheet.create({
   },
   compactWordmark: {
     fontSize: 40,
-    lineHeight: 46,
+    // Patrick Hand needs 1.36x its size to keep the "p" descender intact.
+    lineHeight: 55,
   },
   // Absolute within the inset content: dims the screen above the sheet without
   // reaching past the safe area. Final translucency comes from the fade's

@@ -164,7 +164,8 @@ const styles = StyleSheet.create({
   },
   compactWordmark: {
     fontSize: 40,
-    lineHeight: 46,
+    // Patrick Hand needs 1.36x its size to keep the "p" descender intact.
+    lineHeight: 55,
   },
   spark: {
     marginBottom: spacing.xl,
@@ -175,8 +176,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   compactTitle: {
-    fontSize: 36,
-    lineHeight: 42,
+    fontSize: 30,
+    lineHeight: 45,
   },
   description: {
     ...typography.bodyCompact,

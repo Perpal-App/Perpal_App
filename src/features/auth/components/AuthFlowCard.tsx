@@ -23,7 +23,7 @@ import {
   usePrivyAuth,
   type SocialAuthProvider,
 } from '@/integrations/privy/usePrivyAuth';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, fonts, spacing, typography } from '@/theme/tokens';
 
 type AuthStep = 'methods' | 'otp';
 type PendingAction = 'send-email' | 'verify-email' | SocialAuthProvider;
@@ -400,9 +400,9 @@ const styles = StyleSheet.create({
   },
   title: {
     color: PRIVY_TEXT,
+    fontFamily: fonts.semiBold,
     fontSize: 24,
-    fontWeight: '600',
-    lineHeight: 32,
+    lineHeight: 36,
     textAlign: 'center',
   },
   body: {
@@ -418,9 +418,9 @@ const styles = StyleSheet.create({
   socialLabel: {
     marginTop: spacing.xs,
     color: '#64668B',
+    fontFamily: fonts.medium,
     fontSize: 14,
-    fontWeight: '500',
-    lineHeight: 20,
+    lineHeight: 21,
     textAlign: 'center',
   },
   socialRow: {
@@ -450,8 +450,10 @@ const styles = StyleSheet.create({
   emailInput: {
     flex: 1,
     color: PRIVY_TEXT,
+    fontFamily: fonts.regular,
     fontSize: 18,
-    lineHeight: 24,
+    // No lineHeight on an input: Android derives the caret box from the font's
+    // own metrics, and forcing a shorter line clips the typed text.
   },
   inlineActions: {
     flexDirection: 'row',

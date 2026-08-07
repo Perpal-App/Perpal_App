@@ -28,7 +28,7 @@ The deployed Worker exposes HTTP JSON-RPC, not Solana WebSocket subscriptions. U
 
 - The installed Flash SDK is the routing catalog. Markets are grouped by active mainnet pool; incomplete one-sided entries are not advertised as tradeable.
 - Flash ER account snapshots supply live venue availability and open interest. Requests are bounded to 24 accounts and batched per selected market group.
-- Pyth Hermes currently supplies streaming reference prices for BTC, ETH, and SOL. Other Flash markets display provider state and receive an authoritative price in the required Flash order review.
+- Flash's public price and statistics services supply the full catalog's Pyth Lazer price, 24-hour change, and Flash 24-hour volume. The app polls the bounded public responses every 15 seconds, validates their shape, and keeps the executable Flash quote authoritative in order review.
 - A stale or missing reference never silently replaces the Flash quote. The quote is bound to pool, market, side, size, collateral, leverage, fees, expiry, and signer.
 
 ## Position isolation

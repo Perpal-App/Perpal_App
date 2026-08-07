@@ -12,5 +12,9 @@ describe('Flash mainnet catalog', () => {
       market.venueRef === `${market.poolName}:${market.baseAsset}` &&
       market.maxLeverage > 0,
     )).toBe(true);
+    expect(markets.find((market) => market.symbol === 'SOL-PERP')?.maxLeverage)
+      .toBe(500);
+    expect(markets.find((market) => market.symbol === 'ZEC-PERP')?.maxLeverage)
+      .toBe(10);
   });
 });

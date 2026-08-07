@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, gradients, motion, radii, typography } from '@/theme/tokens';
+import { colors, fonts, gradients, motion, radii, typography } from '@/theme/tokens';
 
 type GlassButtonProps = {
   label: string;
@@ -110,8 +110,8 @@ const styles = StyleSheet.create({
   },
   label: {
     ...typography.heading,
+    fontFamily: fonts.bold,
     color: colors.textPrimary,
-    fontWeight: '700',
     textAlign: 'center',
     letterSpacing: 0.2,
   },

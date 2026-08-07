@@ -10,6 +10,9 @@ const VALID: RawAppEnv = {
   swapBuildPath: '/v1/swap/build',
   flashProgramId: '11111111111111111111111111111111',
   flashErRpc: 'https://flash.magicblock.xyz',
+  flashDataOrigin: 'https://flashapi.trade',
+  flashStatsOrigin: 'https://api.prod.flash.trade',
+  pythBenchmarksOrigin: 'https://benchmarks.pyth.network',
   usdtMint: '11111111111111111111111111111111',
   umbraIndexerUrl: 'https://utxo-indexer.api.umbraprivacy.com',
   umbraRelayerUrl: 'https://relayer.api.umbraprivacy.com',
@@ -47,6 +50,12 @@ describe('parseAppConfig', () => {
       expect(result.value.api.marketStreamUrl).toBe(
         'https://gateway.example/v1/markets/stream',
       );
+      expect(result.value.perps.flashDataOrigin).toBe(
+        'https://flashapi.trade',
+      );
+      expect(result.value.perps.pythBenchmarksOrigin).toBe(
+        'https://benchmarks.pyth.network',
+      );
       expect(result.value.privacy.umbraRelayerUrl).toBe(
         'https://relayer.api.umbraprivacy.com',
       );
@@ -63,6 +72,8 @@ describe('parseAppConfig', () => {
     const variables = issueVariables({
       flashProgramId: 'invalid',
       flashErRpc: 'http://flash.magicblock.xyz',
+      flashDataOrigin: 'http://flashapi.trade',
+      pythBenchmarksOrigin: 'http://benchmarks.pyth.network',
       usdtMint: '',
       marketDataPath: 'v1/markets',
     });
@@ -71,6 +82,8 @@ describe('parseAppConfig', () => {
       expect.arrayContaining([
         'EXPO_PUBLIC_FLASH_PROGRAM_ID',
         'EXPO_PUBLIC_FLASH_ER_RPC',
+        'EXPO_PUBLIC_FLASH_DATA_ORIGIN',
+        'EXPO_PUBLIC_PYTH_BENCHMARKS_ORIGIN',
         'EXPO_PUBLIC_USDT_MINT',
         'EXPO_PUBLIC_MARKET_DATA_PATH',
       ]),

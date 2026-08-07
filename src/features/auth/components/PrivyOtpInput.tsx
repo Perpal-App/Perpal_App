@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 
-import { colors, spacing } from '@/theme/tokens';
+import { colors, fonts, spacing } from '@/theme/tokens';
 
 const CODE_LENGTH = 6;
 const PRIVY_BORDER = '#E2E3F0';
@@ -155,14 +155,14 @@ const styles = StyleSheet.create({
   },
   digit: {
     color: PRIVY_TEXT,
+    fontFamily: fonts.semiBold,
     fontSize: 18,
-    lineHeight: 24,
-    fontWeight: '600',
+    lineHeight: 27,
   },
   separator: {
     color: PRIVY_TEXT,
+    fontFamily: fonts.semiBold,
     fontSize: 18,
-    lineHeight: 24,
-    fontWeight: '600',
+    lineHeight: 27,
   },
 });

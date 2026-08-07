@@ -80,7 +80,7 @@ describe('display formatting', () => {
     const openInterest = amountFromBaseUnits(395_855_907_958n, 6);
 
     expect(formatCompactTokenPrice(btc)).toBe('$64,628.27');
-    expect(formatCompactUsd(openInterest)).toBe('$395.9K');
+    expect(formatCompactUsd(openInterest)).toBe('$395.86K');
     expect(formatDetailedUsd(openInterest)).toBe('$395,855.91');
     expect(formatAmountWithCommas(openInterest)).toBe('395,855.907958');
   });

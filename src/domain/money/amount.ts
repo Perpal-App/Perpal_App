@@ -8,7 +8,7 @@
  * balance. Nothing in this module accepts or returns a float.
  */
 
-export type TokenDecimals = 0 | 6 | 8 | 9;
+export type TokenDecimals = 0 | 2 | 3 | 5 | 6 | 8 | 9 | 10;
 
 /** An exact amount in a token's smallest unit, tagged with its scale. */
 export type Amount = {
@@ -112,16 +112,31 @@ export function formatAmountWithCommas(amount: Amount): string {
 export function formatCompactTokenPrice(amount: Amount): string {
   const magnitude = amount.baseUnits < 0n ? -amount.baseUnits : amount.baseUnits;
   const unit = 10n ** BigInt(amount.decimals);
-  const decimals = magnitude >= 1_000n * unit
+  const decimals = magnitude >= unit
     ? 2
-    : magnitude >= 100n * unit
-      ? 0
-      : magnitude >= unit
-        ? 1
-        : Math.min(amount.decimals, 8);
+    : subUnitDecimals(magnitude, amount.decimals);
   const body = formatRoundedMagnitude(magnitude, amount.decimals, decimals, true);
 
   return amount.baseUnits < 0n ? `-$${body}` : `$${body}`;
+}
+
+/**
+ * Decimal places that leave four significant digits in a value below one unit.
+ *
+ * A sub-unit price is only legible by its significant digits: `0.00231` says as
+ * much as `0.00231028` and fits a column, while `0.9877` keeps the precision
+ * that matters at that magnitude. The count is clamped to the token's own scale
+ * so the result is never padded past the precision the amount actually carries.
+ */
+const SUB_UNIT_SIGNIFICANT_DIGITS = 4;
+
+function subUnitDecimals(magnitude: bigint, decimals: TokenDecimals): number {
+  const leadingZeros = decimals - magnitude.toString().length;
+
+  return Math.min(
+    decimals,
+    Math.max(leadingZeros, 0) + SUB_UNIT_SIGNIFICANT_DIGITS,
+  );
 }
 
 export function formatCompactUsd(amount: Amount): string {
@@ -142,12 +157,10 @@ export function formatCompactUsd(amount: Amount): string {
   const scale = scales.find((candidate) => magnitude >= candidate.value * unit);
 
   if (scale !== undefined) {
-    const tenths = (magnitude * 10n + (scale.value * unit) / 2n) /
+    const hundredths = (magnitude * 100n + (scale.value * unit) / 2n) /
       (scale.value * unit);
-    const fraction = tenths % 10n;
-    const body = fraction === 0n
-      ? (tenths / 10n).toString()
-      : `${tenths / 10n}.${fraction}`;
+    const fraction = (hundredths % 100n).toString().padStart(2, '0');
+    const body = `${hundredths / 100n}.${fraction}`;
 
     return `${negative ? '-' : ''}$${body}${scale.suffix}`;
   }
