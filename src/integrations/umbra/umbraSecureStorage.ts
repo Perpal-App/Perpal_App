@@ -180,7 +180,7 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       typeof record.id !== 'string' ||
       !isAddress(record.mainWalletAddress) ||
       !isAddress(record.tradingWalletAddress) ||
-      (record.provider !== 'flash' && record.provider !== 'velocity') ||
+      record.provider !== 'flash' ||
       !isAddress(record.mint) ||
       (record.symbol !== 'USDC' && record.symbol !== 'USDT') ||
       typeof record.amountBaseUnits !== 'string' ||

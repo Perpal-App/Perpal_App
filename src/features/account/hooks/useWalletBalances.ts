@@ -65,8 +65,8 @@ export function useWalletBalances(input: {
 
         try {
           const [publicWallet, privateWallet] = await Promise.all([
-            readWalletBalance(input.publicAddress!, input.signer!, config.value.api.rpcUrl, config.value.perps.flashProgramId, controller.signal),
-            readWalletBalance(input.privateAddress!, input.signer!, config.value.api.rpcUrl, config.value.perps.flashProgramId, controller.signal),
+            readWalletBalance(input.publicAddress!, input.signer!, config.value.api.rpcUrl, config.value.perps.flashProgramId, config.value.perps.usdtMint, controller.signal),
+            readWalletBalance(input.privateAddress!, input.signer!, config.value.api.rpcUrl, config.value.perps.flashProgramId, config.value.perps.usdtMint, controller.signal),
           ]);
           if (active) {
             hasBalances.current = true;
@@ -99,9 +99,10 @@ async function readWalletBalance(
   signer: GatewayRequestSigner,
   rpcUrl: string,
   flashProgramId: string,
+  usdtMint: string,
   signal: AbortSignal,
 ): Promise<WalletBalance> {
-  const collateral = listTradingCollateralOptions(flashProgramId);
+  const collateral = listTradingCollateralOptions(flashProgramId, usdtMint);
   const usdc = collateral.find((token) => token.symbol === 'USDC');
   const usdt = collateral.find((token) => token.symbol === 'USDT');
   if (usdc === undefined || usdt === undefined) throw new Error('Collateral unavailable.');

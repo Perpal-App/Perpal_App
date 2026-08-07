@@ -8,9 +8,9 @@ const VALID: RawAppEnv = {
   marketDataPath: '/v1/markets',
   marketStreamPath: '/v1/markets/stream',
   swapBuildPath: '/v1/swap/build',
-  velocityProgramId: '11111111111111111111111111111111',
   flashProgramId: '11111111111111111111111111111111',
   flashErRpc: 'https://flash.magicblock.xyz',
+  usdtMint: '11111111111111111111111111111111',
   umbraIndexerUrl: 'https://utxo-indexer.api.umbraprivacy.com',
   umbraRelayerUrl: 'https://relayer.api.umbraprivacy.com',
   umbraZkAssetBaseUrl: 'https://zk.api.umbraprivacy.com',
@@ -30,7 +30,7 @@ function issueVariables(overrides: Partial<RawAppEnv>): readonly string[] {
 }
 
 describe('parseAppConfig', () => {
-  it('accepts both provider programs on one mainnet build', () => {
+  it('accepts the Flash mainnet configuration', () => {
     const result = parseAppConfig(VALID);
 
     expect(result.ok).toBe(true);
@@ -61,17 +61,17 @@ describe('parseAppConfig', () => {
 
   it('rejects missing provider addresses and malformed paths', () => {
     const variables = issueVariables({
-      velocityProgramId: '',
       flashProgramId: 'invalid',
       flashErRpc: 'http://flash.magicblock.xyz',
+      usdtMint: '',
       marketDataPath: 'v1/markets',
     });
 
     expect(variables).toEqual(
       expect.arrayContaining([
-        'EXPO_PUBLIC_VELOCITY_PROGRAM_ID',
         'EXPO_PUBLIC_FLASH_PROGRAM_ID',
         'EXPO_PUBLIC_FLASH_ER_RPC',
+        'EXPO_PUBLIC_USDT_MINT',
         'EXPO_PUBLIC_MARKET_DATA_PATH',
       ]),
     );

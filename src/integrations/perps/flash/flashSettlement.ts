@@ -47,7 +47,9 @@ export async function resumeFlashSettlements(input: Input): Promise<void> {
       } catch (cause) {
         const latest = (await readPendingFlashSettlements(input.owner)).find(
           (candidate) =>
-            candidate.symbol === record.symbol && candidate.side === record.side,
+            candidate.poolName === record.poolName &&
+            candidate.symbol === record.symbol &&
+            candidate.side === record.side,
         );
         if (latest !== undefined) {
           await writePendingFlashSettlement({
@@ -144,7 +146,9 @@ async function resumeOne(record: PendingFlashSettlement, input: Input): Promise<
     new AbortController().signal,
   );
   const stillOpen = portfolio.positions.some((position) =>
-    position.symbol === record.symbol && position.side.toLowerCase() === record.side,
+    position.poolName === record.poolName &&
+    position.symbol === record.symbol &&
+    position.side.toLowerCase() === record.side,
   );
   const available = portfolio.deposits.USDC?.baseUnits ?? 0n;
   if (stillOpen || available < amount) return;
@@ -310,7 +314,12 @@ async function rent(bytes: number, input: Input): Promise<bigint> {
   return BigInt(await signedSolanaRpc<number>({ method: 'getMinimumBalanceForRentExemption', params: [bytes, { commitment: 'confirmed' }], rpcUrl: input.rpcUrl, signer: input.signer }));
 }
 async function remove(record: PendingFlashSettlement) {
-  await removePendingFlashSettlement(record.owner, record.symbol, record.side);
+  await removePendingFlashSettlement(
+    record.owner,
+    record.poolName,
+    record.symbol,
+    record.side,
+  );
 }
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

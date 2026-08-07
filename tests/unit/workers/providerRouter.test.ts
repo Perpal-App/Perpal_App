@@ -201,7 +201,7 @@ describe('redactUrl', () => {
 describe('resolveConfig provider secrets', () => {
   const base = {
     SOLANA_CLUSTER: 'mainnet',
-    PERPS_PROVIDERS: 'flash-v2,velocity',
+    PERPS_PROVIDERS: 'flash-v2',
     PYTH_HERMES_ORIGIN: 'https://hermes.pyth.network',
     PYTH_MARKET_FEEDS:
       'BTC:e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43,ETH:ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace,SOL:ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d',

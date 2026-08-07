@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { getUmbraRelayer } from '@umbra-privacy/sdk/relayer';
 
-import type { AppConfig, PerpsProviderId } from '@/config/appConfig';
+import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
   listTradingCollateralOptions,
@@ -47,7 +47,6 @@ export type PrivateFundingInput = {
   readonly feeReserveLamports: bigint;
   readonly gatewaySigner: GatewayRequestSigner;
   readonly mainWalletAddress: string;
-  readonly provider: PerpsProviderId;
   readonly privyProvider: PrivySolanaProvider;
   readonly tradingWalletAddress: string;
 };
@@ -77,6 +76,7 @@ export async function beginPrivateFunding(
 
   const collateral = listTradingCollateralOptions(
     input.config.perps.flashProgramId,
+    input.config.perps.usdtMint,
   ).find(
     (option) =>
       option.symbol === input.collateral.symbol &&
@@ -95,7 +95,7 @@ export async function beginPrivateFunding(
     id: Crypto.randomUUID(),
     mainWalletAddress: input.mainWalletAddress,
     tradingWalletAddress: input.tradingWalletAddress,
-    provider: input.provider,
+    provider: 'flash',
     mint: collateral.mint,
     symbol: collateral.symbol,
     amountBaseUnits: input.amountBaseUnits.toString(),
@@ -141,7 +141,7 @@ export async function resumePrivateFunding(
   initialRecord: PrivateFundingRecord,
   input: Omit<
     PrivateFundingInput,
-    'amountBaseUnits' | 'collateral' | 'feeReserveLamports' | 'provider'
+    'amountBaseUnits' | 'collateral' | 'feeReserveLamports'
   >,
   onRecord: (record: PrivateFundingRecord) => void,
   legacyFeeReserveLamports?: bigint,
@@ -192,7 +192,6 @@ export async function resumePrivateFunding(
         symbol: record.symbol,
       },
       feeReserveLamports: BigInt(record.feeFundingLamports),
-      provider: record.provider,
     },
     onRecord,
   );

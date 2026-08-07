@@ -13,7 +13,7 @@ import {
 } from '@/integrations/perps/flash/flashErRpc';
 import { flashPool } from '@/integrations/perps/flash/flashMarketData';
 import { fetchFlashPortfolio } from '@/integrations/perps/flash/flashPortfolio';
-import type { PublicMarketSymbol } from '@/integrations/perps/markets/publicMarketData';
+import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
 
 const LEVERAGE_SCALE = 10_000n;
 const SLIPPAGE_BPS = 50n;
@@ -35,12 +35,13 @@ export type FlashMarketOrderPlan = {
   readonly limitPrice: { readonly price: bigint; readonly exponent: number };
   readonly liquidationPriceUsdBaseUnits: bigint | null;
   readonly message: Uint8Array;
+  readonly poolName: string;
   readonly receiveAmountBaseUnits: bigint | null;
   readonly side: FlashOrderSide;
   readonly simulation: 'passed';
   readonly sizeAmountBaseUnits: bigint;
   readonly sizeUsdBaseUnits: bigint;
-  readonly symbol: PublicMarketSymbol;
+  readonly symbol: MainnetMarket['symbol'];
 };
 
 type Input = {
@@ -49,11 +50,11 @@ type Input = {
   readonly collateralInputBaseUnits: bigint;
   readonly erRpcUrl: string;
   readonly leverage: number;
+  readonly market: MainnetMarket;
   readonly owner: string;
   readonly programId: string;
   readonly side: FlashOrderSide;
   readonly signer: GatewayRequestSigner;
-  readonly symbol: PublicMarketSymbol;
   readonly signal?: AbortSignal;
 };
 
@@ -67,9 +68,9 @@ export class FlashMarketOrderError extends Error {
 export async function prepareFlashMarketOrder(input: Input): Promise<FlashMarketOrderPlan> {
   assertInput(input);
   const client = createReadOnlyFlashClient(input);
-  const pool = flashPool(input.programId);
-  const market = resolveMarket(pool, input.symbol, input.side);
-  const targetSymbol = input.symbol.slice(0, -5);
+  const pool = flashPool(input.programId, input.market.poolName);
+  const market = resolveMarket(pool, input.market.baseAsset, input.side);
+  const targetSymbol = input.market.baseAsset;
   const lockSymbol = custodySymbol(pool, market.collateralCustody.toBase58());
   const side = input.side === 'long' ? Side.Long : Side.Short;
 
@@ -116,7 +117,8 @@ export async function prepareFlashMarketOrder(input: Input): Promise<FlashMarket
       side: input.side,
       sizeAmountBaseUnits: BigInt(quote.sizeAmount.toString()),
       sizeUsdBaseUnits: BigInt(quote.sizeUsd.toString()),
-      symbol: input.symbol,
+      symbol: input.market.symbol,
+      poolName: input.market.poolName,
     };
   } else {
     const portfolio = await fetchFlashPortfolio(
@@ -127,7 +129,9 @@ export async function prepareFlashMarketOrder(input: Input): Promise<FlashMarket
     );
     const position = portfolio.positions.find(
       (candidate) =>
-        candidate.symbol === input.symbol && candidate.side.toLowerCase() === input.side,
+        candidate.poolName === input.market.poolName &&
+        candidate.symbol === input.market.symbol &&
+        candidate.side.toLowerCase() === input.side,
     );
     if (position === undefined) {
       throw new FlashMarketOrderError('No matching Flash position is open.', 'position_missing');
@@ -162,7 +166,8 @@ export async function prepareFlashMarketOrder(input: Input): Promise<FlashMarket
       side: input.side,
       sizeAmountBaseUnits: BigInt(quote.existingSize.toString()),
       sizeUsdBaseUnits: position.sizeUsdBaseUnits,
-      symbol: input.symbol,
+      symbol: input.market.symbol,
+      poolName: input.market.poolName,
     };
   }
 
@@ -194,7 +199,8 @@ export async function submitFlashMarketOrder(
   }
   if (
     input.plan.action !== input.action ||
-    input.plan.symbol !== input.symbol ||
+    input.plan.symbol !== input.market.symbol ||
+    input.plan.poolName !== input.market.poolName ||
     input.plan.side !== input.side ||
     input.plan.collateralInputBaseUnits !==
       (input.action === 'open' ? input.collateralInputBaseUnits : 0n)
@@ -227,8 +233,8 @@ function assertInput(input: Input): void {
   }
 }
 
-function resolveMarket(pool: PoolConfig, symbol: string, side: FlashOrderSide): MarketConfig {
-  const name = `${symbol.slice(0, -5)} ${side === 'long' ? 'Long' : 'Short'}`;
+function resolveMarket(pool: PoolConfig, baseAsset: string, side: FlashOrderSide): MarketConfig {
+  const name = `${baseAsset} ${side === 'long' ? 'Long' : 'Short'}`;
   const market = pool.markets.find((candidate) => candidate.marketNameUi === name);
   if (market === undefined) throw new FlashMarketOrderError('Flash market is unavailable.', 'market_missing');
   return market;

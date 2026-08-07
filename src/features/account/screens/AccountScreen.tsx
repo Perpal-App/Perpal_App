@@ -11,7 +11,6 @@ import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { usePrivateFunding } from '@/integrations/umbra/PrivateFundingProvider';
 import type { PrivateFundingRecord } from '@/integrations/umbra/umbraSecureStorage';
-import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 import {
   useTradingSession,
@@ -24,7 +23,6 @@ export function AccountScreen() {
   const auth = usePrivyAuth();
   const walletProvisioning = useWalletProvisioning();
   const tradingSession = useTradingSession();
-  const preferences = useAppPreferences();
   const funding = usePrivateFunding();
   const walletBalances = useWalletBalances({
     privateAddress: tradingSession.address,
@@ -205,10 +203,7 @@ export function AccountScreen() {
           ) : null}
 
           {tradingSession.status === 'ready' ? (
-            <PrivateFundingPanel
-              provider={preferences.selectedPerpsProvider}
-              tradingReady
-            />
+            <PrivateFundingPanel tradingReady />
           ) : null}
         </View>
 
@@ -281,9 +276,7 @@ function tradingSessionMessage(status: TradingSessionStatus): string {
 function privateFundingLocation(record: PrivateFundingRecord | null): string {
   if (record === null) return 'No private transfer';
   if (record.providerDepositSignature !== null) {
-    return record.provider === 'flash'
-      ? 'Flash execution account'
-      : 'Velocity execution account';
+    return 'Flash execution account';
   }
   if (record.claimSignature !== null) return 'Private wallet T';
   if (record.depositSignature !== null) return 'Umbra pool';

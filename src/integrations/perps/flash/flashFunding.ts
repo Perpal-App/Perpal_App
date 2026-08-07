@@ -27,6 +27,7 @@ import {
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import { createFlashProgram } from '@/integrations/perps/flash/flashProgram';
+import { fundingRequiredSol } from '@/integrations/perps/tradeCollateralMath';
 import {
   signAndSubmitLegacyTransaction,
   type SubmittedTransactionResult,
@@ -35,6 +36,8 @@ import {
 const PLAN_LIFETIME_MS = 60_000;
 const COMPUTE_UNIT_LIMIT = 600_000;
 const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 5_000;
+const BASKET_ACCOUNT_SIZE = 96;
+const USER_DEPOSIT_LEDGER_SIZE = 696;
 
 type AccountValue = {
   readonly owner: string;
@@ -73,6 +76,8 @@ export type FlashFundingPlan = {
   readonly mint: string;
   readonly owner: string;
   readonly recentBlockhash: string;
+  readonly rentLamports: bigint;
+  readonly requiredSolLamports: bigint;
   readonly simulation: 'passed' | 'insufficient-sol' | 'insufficient-token';
   readonly solBalanceLamports: bigint;
   readonly tokenBalanceBaseUnits: bigint;
@@ -118,18 +123,25 @@ export async function prepareFlashFunding(
     ...state,
     recentBlockhash: blockhash.value.blockhash,
   });
-  const fee = await signedSolanaRpc<ContextValue<number | null>>({
-    method: 'getFeeForMessage',
-    params: [base64.encode(transaction.serializeMessage()), { commitment: 'confirmed' }],
-    rpcUrl: input.rpcUrl,
-    signer: input.signer,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
+  const [fee, rentLamports] = await Promise.all([
+    signedSolanaRpc<ContextValue<number | null>>({
+      method: 'getFeeForMessage',
+      params: [base64.encode(transaction.serializeMessage()), { commitment: 'confirmed' }],
+      rpcUrl: input.rpcUrl,
+      signer: input.signer,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
+    flashFundingRent(state, input),
+  ]);
   const feeLamports = safeInteger(fee.value, 'network fee');
   const solBalanceLamports = safeInteger(solBalance.value, 'SOL balance');
+  const requiredSolLamports = fundingRequiredSol(
+    feeLamports,
+    rentLamports,
+  );
   const simulation = state.tokenBalanceBaseUnits < input.amountBaseUnits
     ? 'insufficient-token'
-    : solBalanceLamports < feeLamports
+    : solBalanceLamports < requiredSolLamports
       ? 'insufficient-sol'
       : await simulate(transaction, input);
   const plan: FlashFundingPlan = {
@@ -144,6 +156,8 @@ export async function prepareFlashFunding(
     mint: input.mint,
     owner: input.owner,
     recentBlockhash: blockhash.value.blockhash,
+    rentLamports,
+    requiredSolLamports,
     simulation,
     solBalanceLamports,
     tokenBalanceBaseUnits: state.tokenBalanceBaseUnits,
@@ -159,7 +173,10 @@ export async function prepareFlashFunding(
 }
 
 export async function submitFlashFunding(
-  input: ActionInput & { readonly plan: FlashFundingPlan },
+  input: ActionInput & {
+    readonly plan: FlashFundingPlan;
+    readonly onSigned?: (signature: string) => Promise<void>;
+  },
 ): Promise<SubmittedTransactionResult> {
   assertInput(input);
   await verifyFlashFundingPlan(input.plan, input.programId);
@@ -190,8 +207,32 @@ export async function submitFlashFunding(
     rpcUrl: input.rpcUrl,
     signer: input.signer,
     unsignedTransaction: input.plan.unsignedTransaction,
+    ...(input.onSigned === undefined ? {} : { onSigned: input.onSigned }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
+}
+
+async function flashFundingRent(
+  state: { readonly createBasket: boolean; readonly createLedger: boolean },
+  input: ActionInput,
+): Promise<bigint> {
+  const sizes = [
+    ...(state.createBasket ? [BASKET_ACCOUNT_SIZE] : []),
+    ...(state.createLedger ? [USER_DEPOSIT_LEDGER_SIZE] : []),
+  ];
+  const rents = await Promise.all(sizes.map((size) =>
+    signedSolanaRpc<number>({
+      method: 'getMinimumBalanceForRentExemption',
+      params: [size, { commitment: 'confirmed' }],
+      rpcUrl: input.rpcUrl,
+      signer: input.signer,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
+  ));
+  return rents.reduce(
+    (total, value) => total + safeInteger(value, 'account rent'),
+    0n,
+  );
 }
 
 async function verifyFlashFundingPlan(
@@ -213,7 +254,7 @@ async function verifyFlashFundingPlan(
   if (
     actual.feePayer?.toBase58() !== plan.owner ||
     actual.recentBlockhash !== plan.recentBlockhash ||
-    !sameInstructions(actual.instructions, expected.instructions) ||
+    !actual.serializeMessage().equals(expected.serializeMessage()) ||
     actual.signatures.some((entry) =>
       entry.signature?.some((byte) => byte !== 0),
     )
@@ -399,22 +440,4 @@ function safeInteger(value: number | null, label: string): bigint {
     throw new FlashFundingError(`Flash ${label} is invalid.`, 'rpc_value_invalid');
   }
   return BigInt(value);
-}
-
-function sameInstructions(
-  actual: readonly TransactionInstruction[],
-  expected: readonly TransactionInstruction[],
-): boolean {
-  return actual.length === expected.length && actual.every((instruction, index) => {
-    const target = expected[index];
-    return target !== undefined &&
-      instruction.programId.equals(target.programId) &&
-      instruction.data.equals(target.data) &&
-      instruction.keys.length === target.keys.length &&
-      instruction.keys.every((key, keyIndex) => {
-        const expectedKey = target.keys[keyIndex];
-        return expectedKey !== undefined && key.pubkey.equals(expectedKey.pubkey) &&
-          key.isSigner === expectedKey.isSigner && key.isWritable === expectedKey.isWritable;
-      });
-  });
 }

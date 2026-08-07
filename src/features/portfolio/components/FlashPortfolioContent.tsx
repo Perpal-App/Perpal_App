@@ -56,7 +56,7 @@ export function FlashPortfolioContent({
           </View>
         )}
         {snapshot.initialized ? (
-          <PrivateWithdrawPanel provider="flash" />
+          <PrivateWithdrawPanel />
         ) : null}
       </View>
     </AppScreen>

@@ -1,9 +1,6 @@
 import { createMMKV, type MMKV } from 'react-native-mmkv';
 
-import type { PerpsProviderId } from '@/config/appConfig';
-
 const ONBOARDING_INTRO_SEEN_KEY = 'onboarding.introSeen.v1';
-const PERPS_PROVIDER_KEY = 'perps.provider.v1';
 
 let preferencesStorage: MMKV | null = null;
 
@@ -27,16 +24,4 @@ export function readOnboardingIntroSeen() {
 
 export function writeOnboardingIntroSeen() {
   getPreferencesStorage().set(ONBOARDING_INTRO_SEEN_KEY, true);
-}
-
-export function readPerpsProvider(): PerpsProviderId {
-  const persisted = getPreferencesStorage().getString(PERPS_PROVIDER_KEY);
-
-  return persisted === 'velocity' || persisted === 'drift'
-    ? 'velocity'
-    : 'flash';
-}
-
-export function writePerpsProvider(provider: PerpsProviderId) {
-  getPreferencesStorage().set(PERPS_PROVIDER_KEY, provider);
 }

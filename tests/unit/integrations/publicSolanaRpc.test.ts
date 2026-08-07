@@ -1,6 +1,6 @@
 import { parsePublicProgramAccount } from '@/integrations/api/publicSolanaRpc';
 
-const OWNER = 'DriftProgram111111111111111111111111111111';
+const OWNER = 'FlashProgram111111111111111111111111111111';
 
 describe('parsePublicProgramAccount', () => {
   it('distinguishes an uninitialized account from an owner mismatch', () => {

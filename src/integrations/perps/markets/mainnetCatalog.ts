@@ -1,65 +1,58 @@
 import { PoolConfig } from '@flash_trade/flash-sdk-v2/dist/PoolConfig';
-import { MainnetPerpMarkets } from '@velocity-exchange/sdk/lib/browser/constants/perpMarkets';
+import poolConfigJson from '@flash_trade/flash-sdk-v2/dist/PoolConfig.json';
 
-import type { PerpsProviderId } from '@/config/appConfig';
-
-const CORE_ASSETS = ['BTC', 'ETH', 'SOL'] as const;
-type CoreAsset = (typeof CORE_ASSETS)[number];
+export type MainnetMarketSymbol = `${string}-PERP`;
 
 export type MainnetMarket = {
-  readonly symbol: `${CoreAsset}-PERP`;
-  readonly baseAsset: CoreAsset;
-  readonly provider: PerpsProviderId;
-  readonly providerLabel: 'Flash Trade v2' | 'Velocity';
-  readonly maxLeverage: number | null;
+  readonly symbol: MainnetMarketSymbol;
+  readonly baseAsset: string;
+  readonly poolName: string;
+  readonly maxLeverage: number;
   readonly venueRef: string;
 };
 
-export function listMainnetMarkets(
-  provider: PerpsProviderId,
-): readonly MainnetMarket[] {
-  return provider === 'flash' ? listFlashMarkets() : listVelocityMarkets();
+const ACTIVE_POOL_NAMES = poolConfigJson.pools
+  .filter((pool) => pool.cluster === 'mainnet-beta' && !pool.isDeprecated)
+  .map((pool) => pool.poolName);
+
+let catalog: readonly MainnetMarket[] | null = null;
+
+export function listFlashPoolNames(): readonly string[] {
+  return ACTIVE_POOL_NAMES;
 }
 
-function listFlashMarkets(): readonly MainnetMarket[] {
-  const pool = PoolConfig.fromIdsByName('Crypto.1', 'mainnet-beta');
-
-  return CORE_ASSETS.map((asset) => {
-    const matches = pool.markets.filter((market) =>
-      market.marketNameUi.startsWith(`${asset} `),
-    );
-
-    if (matches.length === 0) {
-      throw new Error(`Flash Trade v2 does not configure ${asset}-PERP.`);
-    }
-
-    return {
-      symbol: `${asset}-PERP`,
-      baseAsset: asset,
-      provider: 'flash',
-      providerLabel: 'Flash Trade v2',
-      maxLeverage: Math.max(...matches.map((market) => market.maxLev)),
-      venueRef: `Crypto.1:${asset}`,
-    };
-  });
+export function listMainnetMarkets(): readonly MainnetMarket[] {
+  catalog ??= ACTIVE_POOL_NAMES.flatMap((poolName) =>
+    marketsInPool(PoolConfig.fromIdsByName(poolName, 'mainnet-beta')),
+  );
+  return catalog;
 }
 
-function listVelocityMarkets(): readonly MainnetMarket[] {
-  return CORE_ASSETS.map((asset) => {
-    const symbol = `${asset}-PERP` as const;
-    const market = MainnetPerpMarkets.find((entry) => entry.symbol === symbol);
+function marketsInPool(pool: PoolConfig): readonly MainnetMarket[] {
+  const assets = new Map<string, { long: number[]; short: number[] }>();
 
-    if (market === undefined) {
-      throw new Error(`Velocity does not configure ${symbol} on mainnet.`);
+  for (const market of pool.markets) {
+    const match = /^(.+) (Long|Short)$/u.exec(market.marketNameUi);
+    if (match === null || match[1] === undefined || match[2] === undefined) {
+      continue;
     }
 
-    return {
-      symbol,
-      baseAsset: asset,
-      provider: 'velocity',
-      providerLabel: 'Velocity',
-      maxLeverage: null,
-      venueRef: market.marketIndex.toString(),
-    };
+    const directions = assets.get(match[1]) ?? { long: [], short: [] };
+    directions[match[2] === 'Long' ? 'long' : 'short'].push(market.maxLev);
+    assets.set(match[1], directions);
+  }
+
+  return [...assets.entries()].flatMap(([baseAsset, directions]) => {
+    if (directions.long.length === 0 || directions.short.length === 0) {
+      return [];
+    }
+
+    return [{
+      symbol: `${baseAsset}-PERP` as const,
+      baseAsset,
+      poolName: pool.poolName,
+      maxLeverage: Math.max(...directions.long, ...directions.short),
+      venueRef: `${pool.poolName}:${baseAsset}`,
+    }];
   });
 }

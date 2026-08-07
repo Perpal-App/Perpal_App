@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
-import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
+import { readAppConfig } from '@/config/appConfig';
 import {
   amountFromBaseUnits,
   formatAmount,
@@ -33,10 +33,8 @@ import type { PrivateFundingRecord } from '@/integrations/umbra/umbraSecureStora
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 export function PrivateFundingPanel({
-  provider,
   tradingReady,
 }: {
-  readonly provider: PerpsProviderId;
   readonly tradingReady: boolean;
 }) {
   const funding = usePrivateFunding();
@@ -49,7 +47,10 @@ export function PrivateFundingPanel({
   const collateralOptions = useMemo(() => {
     const config = readAppConfig();
     return config.ok
-      ? listTradingCollateralOptions(config.value.perps.flashProgramId)
+      ? listTradingCollateralOptions(
+          config.value.perps.flashProgramId,
+          config.value.perps.usdtMint,
+        )
       : [];
   }, []);
   const [selectedSymbol, setSelectedSymbol] = useState<
@@ -57,7 +58,10 @@ export function PrivateFundingPanel({
   >(() => {
     const config = readAppConfig();
     return config.ok
-      ? listTradingCollateralOptions(config.value.perps.flashProgramId)[0]?.symbol ?? 'USDC'
+      ? listTradingCollateralOptions(
+          config.value.perps.flashProgramId,
+          config.value.perps.usdtMint,
+        )[0]?.symbol ?? 'USDC'
       : 'USDC';
   });
   const collateral =
@@ -108,7 +112,6 @@ export function PrivateFundingPanel({
         feeReserveLamports: parsedFeeReserve.baseUnits,
         hasSubmittedTransaction: false,
         mode: 'start',
-        provider,
         requiredSolLamports: preflight.requiredSolLamports,
         symbol: collateral.symbol,
         temporaryRentLamports: preflight.temporaryRentLamports,
@@ -158,7 +161,6 @@ export function PrivateFundingPanel({
         feeReserveLamports: reserveLamports,
         hasSubmittedTransaction: hasSubmittedTransaction(record),
         mode: 'resume',
-        provider: record.provider,
         requiredSolLamports: preflight.requiredSolLamports,
         symbol: record.symbol,
         temporaryRentLamports: preflight.temporaryRentLamports,
@@ -199,7 +201,6 @@ export function PrivateFundingPanel({
     void funding.start(
       confirmed.amountBaseUnits,
       confirmed.feeReserveLamports,
-      confirmed.provider,
       confirmedCollateral,
     );
   };

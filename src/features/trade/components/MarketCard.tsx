@@ -9,24 +9,19 @@ import {
 import type { FlashMarketSnapshot } from '@/integrations/perps/flash/flashMarketData';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
 import type { PublicMarketPrice } from '@/integrations/perps/markets/publicMarketData';
-import type { VelocityMarketSnapshot } from '@/integrations/perps/velocity/velocityMarketData';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 export function MarketCard({
   market,
   price,
   flashVenue,
-  velocityVenue,
   onTrade,
 }: {
   readonly market: MainnetMarket;
   readonly price: PublicMarketPrice | null;
   readonly flashVenue: FlashMarketSnapshot | null;
-  readonly velocityVenue: VelocityMarketSnapshot | null;
   readonly onTrade?: () => void;
 }) {
-  const headlinePrice = velocityVenue?.markPrice ?? price?.price ?? null;
-
   return (
     <View style={styles.marketCard}>
       <View style={styles.marketHeader}>
@@ -34,12 +29,10 @@ export function MarketCard({
           {market.symbol}
         </Text>
         <Text style={styles.marketPrice}>
-          {headlinePrice === null ? '—' : formatCompactTokenPrice(headlinePrice)}
+          {price === null ? 'Quote on review' : formatCompactTokenPrice(price.price)}
         </Text>
       </View>
-      {velocityVenue !== null ? (
-        <VelocityVenueRows market={market} venue={velocityVenue} />
-      ) : flashVenue !== null ? (
+      {flashVenue !== null ? (
         <FlashVenueRows market={market} venue={flashVenue} />
       ) : (
         <ReferenceRows market={market} />
@@ -64,35 +57,9 @@ function ReferenceRows({
     <>
       <StatusRow
         label="Max leverage"
-        value={
-          market.maxLeverage === null
-            ? 'Loading provider risk'
-            : `Up to ${market.maxLeverage}×`
-        }
+        value={`Up to ${market.maxLeverage}×`}
       />
       <StatusRow label="Provider data" value="Connecting" />
-    </>
-  );
-}
-
-function VelocityVenueRows({
-  market,
-  venue,
-}: {
-  readonly market: MainnetMarket;
-  readonly venue: VelocityMarketSnapshot;
-}) {
-  return (
-    <>
-      <StatusRow
-        label="Funding / hour"
-        value={venue.fundingLabel ?? 'Unavailable'}
-      />
-      <StatusRow label="24h volume" value={formatCompactUsd(venue.volume24h)} />
-      <StatusRow
-        label="Max leverage"
-        value={market.maxLeverage === null ? '—' : `${market.maxLeverage}×`}
-      />
     </>
   );
 }
@@ -112,7 +79,7 @@ function FlashVenueRows({
       />
       <StatusRow
         label="Max leverage"
-        value={market.maxLeverage === null ? '—' : `${market.maxLeverage}×`}
+        value={`${market.maxLeverage}×`}
       />
     </>
   );

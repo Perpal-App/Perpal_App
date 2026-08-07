@@ -72,7 +72,10 @@ export async function signAndSubmitLegacyTransaction(input: {
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
   readonly unsignedTransaction: Uint8Array;
-  readonly onSigned?: (signature: string) => Promise<void>;
+  readonly onSigned?: (
+    signature: string,
+    signedTransactionBase64: string,
+  ) => Promise<void>;
   readonly signal?: AbortSignal;
   readonly tradeTiming?: TradeTimingContext;
 }): Promise<SubmittedTransactionResult> {
@@ -134,7 +137,10 @@ export async function signAndSubmitLegacyTransaction(input: {
 
   transaction.addSignature(owner, Buffer.from(signature));
   const expectedSignature = base58.encode(signature);
-  await input.onSigned?.(expectedSignature);
+  const signedTransactionBase64 = base64.encode(
+    transaction.serialize({ requireAllSignatures: true, verifySignatures: true }),
+  );
+  await input.onSigned?.(expectedSignature, signedTransactionBase64);
   const submissionStartedAtMs = performance.now();
   if (input.tradeTiming !== undefined) {
     logTradeTiming(
@@ -149,12 +155,7 @@ export async function signAndSubmitLegacyTransaction(input: {
     const submittedSignature = await signedSolanaRpc<string>({
       method: 'sendTransaction',
       params: [
-        base64.encode(
-          transaction.serialize({
-            requireAllSignatures: true,
-            verifySignatures: true,
-          }),
-        ),
+        signedTransactionBase64,
         {
           encoding: 'base64',
           maxRetries: 0,
@@ -222,6 +223,79 @@ export async function signAndSubmitLegacyTransaction(input: {
       input.signal,
     ),
   };
+}
+
+export async function submitSignedLegacyTransaction(input: {
+  readonly expectedSignature: string;
+  readonly idempotencyKey: string;
+  readonly owner: string;
+  readonly rpcUrl: string;
+  readonly signedTransactionBase64: string;
+  readonly signer: GatewayRequestSigner;
+}): Promise<SubmittedTransactionResult> {
+  const transaction = Transaction.from(base64.decode(input.signedTransactionBase64));
+  const owner = new PublicKey(input.owner);
+  const ownerSignature = transaction.signatures.find((entry) => entry.publicKey.equals(owner));
+
+  if (
+    !transaction.feePayer?.equals(owner) ||
+    transaction.recentBlockhash === undefined ||
+    transaction.signatures.length !== 1 ||
+    ownerSignature?.signature === null ||
+    ownerSignature?.signature === undefined ||
+    base58.encode(ownerSignature.signature) !== input.expectedSignature ||
+    !new PublicKey(input.signer.publicKey).equals(owner) ||
+    !ed25519.verify(
+      ownerSignature.signature,
+      transaction.serializeMessage(),
+      input.signer.publicKey,
+    )
+  ) {
+    throw new TransactionSigningError(
+      'The stored trade preparation transaction is invalid.',
+      'signature_invalid',
+    );
+  }
+
+  const submitted = await signedSolanaRpc<string>({
+    method: 'sendTransaction',
+    params: [
+      input.signedTransactionBase64,
+      {
+        encoding: 'base64',
+        maxRetries: 0,
+        preflightCommitment: 'confirmed',
+        skipPreflight: false,
+      },
+    ],
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+    idempotencyKey: input.idempotencyKey,
+    timeoutMs: 12_000,
+  });
+
+  return {
+    signature: input.expectedSignature,
+    status: submitted === input.expectedSignature
+      ? await confirmSignature(input.rpcUrl, input.signer, input.expectedSignature)
+      : 'unknown',
+  };
+}
+
+export async function storedLegacyTransactionIsCurrent(input: {
+  readonly rpcUrl: string;
+  readonly signedTransactionBase64: string;
+  readonly signer: GatewayRequestSigner;
+}): Promise<boolean> {
+  const transaction = Transaction.from(base64.decode(input.signedTransactionBase64));
+  if (transaction.recentBlockhash === undefined) return false;
+  const result = await signedSolanaRpc<{ readonly value: boolean }>({
+    method: 'isBlockhashValid',
+    params: [transaction.recentBlockhash, { commitment: 'confirmed' }],
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+  });
+  return result.value;
 }
 
 export async function signAndSubmitMultiSignerLegacyTransaction(input: {

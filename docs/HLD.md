@@ -2,63 +2,58 @@
 
 ## Product flow
 
-1. Privy creates public wallet **M** after sign-in or automatically provisions the same M onto a new device for the same Privy app and authenticated user.
-2. The user activates private trading once. A fixed M signature deterministically creates or recovers private wallet **T**; normal sessions restore T from Android secure storage without an unlock step.
-3. Public market data loads without a wallet signature. The user chooses Flash Trade v2 or Velocity.
-4. Funding is one resumable operation: the user independently selects USDC or USDT, the app automatically performs Umbra's required first-use registration for M, M creates self-burnable notes in Umbra's mixer for the collateral and a user-chosen SOL fee reserve, and Umbra's relayer burns them into T. T is the fixed destination and global private balance; private funding does not initialize or fund a provider.
-5. A trade uses only the required amount from T. If the provider requires the other stablecoin, that amount converts through a verified Jupiter Swap v2 plan with a 0.5% slippage ceiling. Perpal then initializes the provider account when necessary, allocates the required collateral, prepares the live order, and requires explicit confirmation and local T signatures. Provider accounts are temporary protocol execution balances, not user wallets.
-6. Closing a position queues provider settlement immediately. Position proceeds move to T without a separate user action.
-7. **Withdraw privately** first pulls any safe free provider collateral into T, then deposits from T into Umbra and relays the private claim to M or another Solana wallet.
-8. T rotation is allowed only after T, the internal Flash fee signer, both providers, and all resumable operations verify empty.
+1. Privy creates or restores public wallet **M** after sign-in.
+2. The user activates private trading once. A fixed M signature deterministically creates or recovers private wallet **T**; later sessions restore T without an unlock step.
+3. Public Flash Trade v2 market groups and venue state load without a wallet signature. The catalog comes from the installed Flash SDK and exposes every active mainnet market that has both long and short configurations.
+4. Funding is resumable: the user selects USDC or USDT plus a user-funded SOL reserve, M deposits through Umbra, and Umbra's relayer claims into T.
+5. A trade allocates only the required collateral from T. Flash settles in USDC, so an exact USDT shortfall converts through a verified Jupiter plan before Flash setup/deposit. The final Flash quote is decoded, simulated, displayed, and explicitly confirmed before T signs.
+6. Closing a position creates an independent settlement record keyed by Flash pool, market, and side. Proceeds are collected into T without a separate user action.
+7. **Withdraw privately** first collects safe Flash collateral into T, then sends it through Umbra to M or another Solana wallet.
+8. T rotation is allowed only after T, Flash's internal fee signer, Flash positions/orders/collateral, and every resumable operation verify empty.
 
-Provider basket/user accounts are protocol implementation details, not extra wallets or user-facing onboarding steps.
-The UI exposes only funding, trade confirmation, portfolio state, and private withdrawal; note IDs, relayer stages, helper signers, and provider-account transactions remain recovery internals.
-The authenticated Android shell has three destinations: **Markets** for public prices and orders, **Portfolio** for positions and withdrawal, and **Wallet** for one-time private activation, funding, rotation, and sign-out. The app opens on Markets; an empty dashboard is not a separate destination.
+Flash basket and ledger accounts are protocol implementation details, not user wallets or onboarding steps. The UI exposes Markets, Portfolio, and Wallet only.
 
 ## Runtime boundaries
 
-- `src/features/`: screens, confirmations, and progress only.
+- `src/features/`: screens, confirmations, and progress.
 - `src/integrations/privy/`: M provisioning and Privy signing.
 - `src/wallet/trading/`: T derivation, local signing, restore, and rotation.
 - `src/integrations/umbra/`: resumable M-to-T funding and T-to-destination private exit.
-- `src/integrations/perps/flash/`: Flash ER quotes, orders, portfolio, funding, and settlement.
-- `src/integrations/perps/velocity/`: Velocity accounts, isolated orders, portfolio, funding, and settlement.
+- `src/integrations/perps/flash/`: Flash catalog, ER state, orders, portfolio, funding, and settlement.
 - `workers/gateway/`: authenticated bounded Solana RPC, stablecoin swap-build proxy, and public market-data routes.
 
-The deployed Worker exposes HTTP JSON-RPC, not Solana WebSocket subscriptions. Umbra MPC completion therefore uses the SDK's polling computation monitor through the authenticated RPC adapter, including only the account, slot, and callback-signature reads the monitor requires.
+The deployed Worker exposes HTTP JSON-RPC, not Solana WebSocket subscriptions. Umbra MPC completion uses the SDK's polling monitor through the authenticated RPC adapter.
+
+## Market data and execution
+
+- The installed Flash SDK is the routing catalog. Markets are grouped by active mainnet pool; incomplete one-sided entries are not advertised as tradeable.
+- Flash ER account snapshots supply live venue availability and open interest. Requests are bounded to 24 accounts and batched per selected market group.
+- Pyth Hermes currently supplies streaming reference prices for BTC, ETH, and SOL. Other Flash markets display provider state and receive an authoritative price in the required Flash order review.
+- A stale or missing reference never silently replaces the Flash quote. The quote is bound to pool, market, side, size, collateral, leverage, fees, expiry, and signer.
 
 ## Position isolation
 
-Velocity entry orders transfer only that market's required margin and fee into its isolated balance. A close creates a settlement record keyed by market index. Flash settlement records are keyed by market and side. Recovery processes records independently and polls pending confirmations in the background, so a failed or slow settlement does not block another position or trade.
+Flash settlement records are independent per pool, market, and side. Recovery processes records independently, so a slow close or withdrawal does not block another open position.
 
 ## Fees
 
 Perpal has no paymaster and sponsors no transaction fee.
 
 - M pays Umbra deposit transactions.
-- Umbra's public relayer pays claim transaction fees and deducts its declared fee from the note.
-- T receives the user-selected SOL reserve privately and pays provider/trade transactions.
-- T pays any trade-time USDC/USDT conversion and provider-allocation transaction. Unallocated collateral remains in T.
-- Flash requires a fee payer distinct from T for withdrawal actions. Perpal deterministically derives an internal signer **S** from T, funds S from T on demand using current network fee and rent requirements, and keeps unused/refunded rent under the user's local signer. There is no fixed 0.05 SOL cap.
+- Umbra's relayer pays claim transaction fees and deducts its declared fee from the note.
+- T receives the user-selected SOL reserve and pays conversion, Flash setup, collateral allocation, and trade transactions.
+- Flash withdrawal actions use a deterministic internal signer **S**. T funds S on demand from the user's reserve; there is no fixed 0.05 SOL cap.
 
-With no sponsor, the final native SOL in T cannot privately deposit itself while also paying that deposit transaction's fee. The Android MVP therefore keeps unused SOL as the user's reusable trading-fee reserve and blocks rotation until T and S are empty; it does not pretend an exact private SOL sweep exists.
+Without a sponsor, the final SOL in T cannot privately deposit itself while also paying that deposit fee. The MVP retains unused SOL as the user's reusable fee reserve and blocks rotation until T and S are empty.
 
 ## Privacy boundary
 
-Umbra breaks the direct public M-to-T transfer link under Umbra's prover, indexer, relayer, and anonymity-set assumptions. Once funded, T's Solana and provider activity is publicly observable and linkable to T. Flash's helper signer S is publicly linkable to T but not directly to M. Provider choice, positions, orders, and timing are not hidden from the selected protocol.
+Umbra breaks the direct public M-to-T transfer link under Umbra's prover, indexer, relayer, and anonymity-set assumptions. T's later Solana and Flash activity is public and linkable to T. Flash's signer S is linkable to T but not directly to M. Positions, orders, and timing are not hidden from Flash.
 
-## Decisions resolving earlier document conflicts
+## Decision record: sole Flash provider
 
-- Mainnet-only replaces all devnet flows and labels.
-- Flash Trade v2 and Velocity are selectable providers; neither is presented as a separate wallet.
-- USDC and USDT selection is independent from provider selection. Flash currently settles internally in USDC and Velocity in USDT, so only the amount required by a trade converts inside T instead of moving the user's full private balance.
-- T is the global private wallet shown to the user. Provider-owned collateral accounts cannot be removed because each protocol enforces them on-chain; they are created and funded just in time and are not separate onboarding steps.
-- Market data is public and unsigned; only financial transactions require confirmation and a local T signature.
-- “Unlock wallet” is removed. Secure restore is automatic after the one-time activation.
-- Privy Solana wallet creation uses `all-users` with Privy recovery. Reinstalling or changing devices restores M after the same user signs in; it does not import a wallet belonging to another Privy app, another Privy user, or an arbitrary external seed.
-- Device attestation is a pre-publication hardening item, not an Android prototype blocker.
-- The user requested automatic settlement, so provider withdrawal is part of the background close/private-exit orchestration rather than a separate screen.
+On 2026-08-07 the product scope changed from selectable Flash/Velocity venues to Flash Trade v2 only. Velocity added duplicate account, collateral, portfolio, recovery, UI, configuration, and dependency paths without improving the intended private-wallet UX. The Velocity adapter and dependency were removed. USDC and USDT remain user-selectable funding assets; only the required USDT amount converts to Flash's USDC collateral inside T.
 
 ## Release gate
 
-TypeScript success proves only static integration. MVP completion still requires a release-like build on a physical Android device using small mainnet amounts to validate Privy activation, Umbra native proving/relay, both provider open and close transactions, automatic settlement, private withdrawal, interruption recovery, and rotation rejection/success paths.
+TypeScript success proves static integration only. MVP completion requires a release-like physical Android run with small mainnet amounts covering Privy activation, Umbra funding, Flash setup/open/close, automatic settlement, private withdrawal, interruption recovery, and rotation rejection/success. Intent-to-submission and ER acknowledgement must be measured separately.

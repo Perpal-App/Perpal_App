@@ -13,10 +13,11 @@ import {
   decodeFlashBasket,
   decodeFlashUserDepositLedger,
 } from '@/integrations/perps/flash/flashAccountCoder';
-import { flashPool } from '@/integrations/perps/flash/flashMarketData';
+import { flashPools } from '@/integrations/perps/flash/flashMarketData';
 
 export type FlashPortfolioPosition = {
   readonly marketAddress: string;
+  readonly poolName: string;
   readonly symbol: string;
   readonly side: 'Long' | 'Short';
   readonly size: string;
@@ -44,7 +45,7 @@ export async function fetchFlashPortfolio(
   walletAddress: string,
   signal: AbortSignal,
 ): Promise<FlashPortfolioSnapshot> {
-  const pool = flashPool(programId);
+  const pools = flashPools(programId);
   const owner = new PublicKey(walletAddress);
   const [basketAddress] = PublicKey.findProgramAddressSync(
     [Buffer.from('basket'), owner.toBuffer()],
@@ -78,13 +79,14 @@ export async function fetchFlashPortfolio(
   const positions = basket.positions
     .filter(({ position }) => position.isActive && !position.sizeAmount.isZero())
     .map(({ market, position }) => {
-      const config = pool.markets.find((candidate) =>
-        candidate.marketAccount.equals(market),
-      );
+      const resolved = pools.flatMap((pool) =>
+        pool.markets.map((config) => ({ config, pool })),
+      ).find(({ config }) => config.marketAccount.equals(market));
 
-      if (config === undefined) {
+      if (resolved === undefined) {
         throw new Error('Flash returned a position outside its current SDK catalog.');
       }
+      const { config, pool } = resolved;
 
       const collateral = pool.tokens.find((token) =>
         token.mintKey.equals(config.collateralMint),
@@ -94,6 +96,7 @@ export async function fetchFlashPortfolio(
 
       return {
         marketAddress: market.toBase58(),
+        poolName: pool.poolName,
         symbol: `${config.marketNameUi.split(' ')[0] ?? 'UNKNOWN'}-PERP`,
         side: 'long' in config.side ? 'Long' : 'Short',
         size: decimalString(
@@ -120,9 +123,9 @@ export async function fetchFlashPortfolio(
       (total, entry) => total + entry.order.activeOrders,
       0,
     ),
-    deposits: ledger === null ? {} : depositMap(ledger.deposits, pool),
+    deposits: ledger === null ? {} : depositMap(ledger.deposits, pools),
     reservedWithdrawals:
-      ledger === null ? {} : depositMap(ledger.reservedWithdrawals, pool),
+      ledger === null ? {} : depositMap(ledger.reservedWithdrawals, pools),
     slot: Math.max(response.slot, ledgerResponse.slot),
   };
 }
@@ -144,12 +147,13 @@ function emptySnapshot(
 
 function depositMap(
   entries: readonly { readonly mint: PublicKey; readonly amount: { toString(): string } }[],
-  pool: ReturnType<typeof flashPool>,
+  pools: ReturnType<typeof flashPools>,
 ): Readonly<Record<string, Amount>> {
   return Object.fromEntries(entries
     .filter((entry) => BigInt(entry.amount.toString()) !== 0n)
     .map((entry) => {
-      const token = pool.tokens.find((candidate) => candidate.mintKey.equals(entry.mint));
+      const token = pools.flatMap((pool) => pool.tokens)
+        .find((candidate) => candidate.mintKey.equals(entry.mint));
       if (token === undefined) throw new Error('Flash returned an unknown deposit mint.');
       return [
         token.symbol,

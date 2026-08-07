@@ -2,16 +2,16 @@ import { base58 } from '@scure/base';
 
 import type { PrivyPublicConfig } from '@/config/publicEnv';
 
-export type PerpsProviderId = 'flash' | 'velocity';
+export type PerpsProviderId = 'flash';
 export type SolanaCluster = 'mainnet';
 
 export type AppConfig = {
   readonly cluster: SolanaCluster;
   readonly privy: PrivyPublicConfig;
   readonly perps: {
-    readonly velocityProgramId: string;
     readonly flashProgramId: string;
     readonly flashErRpc: string;
+    readonly usdtMint: string;
   };
   readonly privacy: {
     readonly umbraIndexerUrl: string;
@@ -54,9 +54,9 @@ export type RawAppEnv = {
   readonly marketDataPath: string;
   readonly marketStreamPath: string;
   readonly swapBuildPath: string;
-  readonly velocityProgramId: string;
   readonly flashProgramId: string;
   readonly flashErRpc: string;
+  readonly usdtMint: string;
   readonly umbraIndexerUrl: string;
   readonly umbraRelayerUrl: string;
   readonly umbraZkAssetBaseUrl: string;
@@ -78,11 +78,10 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_MARKET_STREAM_PATH?.trim() ?? '',
     swapBuildPath:
       process.env.EXPO_PUBLIC_SWAP_BUILD_PATH?.trim() ?? '',
-    velocityProgramId:
-      process.env.EXPO_PUBLIC_VELOCITY_PROGRAM_ID?.trim() ?? '',
     flashProgramId:
       process.env.EXPO_PUBLIC_FLASH_PROGRAM_ID?.trim() ?? '',
     flashErRpc: process.env.EXPO_PUBLIC_FLASH_ER_RPC?.trim() ?? '',
+    usdtMint: process.env.EXPO_PUBLIC_USDT_MINT?.trim() ?? '',
     umbraIndexerUrl:
       process.env.EXPO_PUBLIC_UMBRA_INDEXER_URL?.trim() ?? '',
     umbraRelayerUrl:
@@ -149,7 +148,7 @@ function validatePath(
 
 function validateAddress(
   raw: string,
-  variable: 'EXPO_PUBLIC_VELOCITY_PROGRAM_ID' | 'EXPO_PUBLIC_FLASH_PROGRAM_ID',
+  variable: 'EXPO_PUBLIC_FLASH_PROGRAM_ID' | 'EXPO_PUBLIC_USDT_MINT',
   issues: ConfigIssue[],
 ): string {
   try {
@@ -272,14 +271,14 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_SWAP_BUILD_PATH',
     issues,
   );
-  const velocityProgramId = validateAddress(
-    raw.velocityProgramId,
-    'EXPO_PUBLIC_VELOCITY_PROGRAM_ID',
-    issues,
-  );
   const flashProgramId = validateAddress(
     raw.flashProgramId,
     'EXPO_PUBLIC_FLASH_PROGRAM_ID',
+    issues,
+  );
+  const usdtMint = validateAddress(
+    raw.usdtMint,
+    'EXPO_PUBLIC_USDT_MINT',
     issues,
   );
   const flashErRpc = validateFlashErRpc(raw.flashErRpc, issues);
@@ -320,7 +319,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     value: {
       cluster: 'mainnet',
       privy: { appId: raw.privyAppId, clientId: raw.privyClientId },
-      perps: { velocityProgramId, flashProgramId, flashErRpc },
+      perps: { flashProgramId, flashErRpc, usdtMint },
       privacy: {
         umbraIndexerUrl,
         umbraRelayerUrl,

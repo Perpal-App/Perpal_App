@@ -2,7 +2,7 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 import type { FlashOrderSide } from '@/integrations/perps/flash/flashMarketOrder';
-import type { PublicMarketSymbol } from '@/integrations/perps/markets/publicMarketData';
+import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
 
 const PREFIX = 'perpal.flash.settlement.v1.';
 
@@ -12,8 +12,9 @@ export type PendingFlashSettlement = {
   readonly errorCode: string | null;
   readonly feeFundingSignature: string | null;
   readonly owner: string;
+  readonly poolName: string;
   readonly side: FlashOrderSide;
-  readonly symbol: PublicMarketSymbol;
+  readonly symbol: MainnetMarket['symbol'];
   readonly updatedAtMs: number;
   readonly walletBalanceBefore: string | null;
   readonly withdrawalSignature: string | null;
@@ -44,7 +45,9 @@ export async function queueFlashSettlement(record: Omit<
   const records = await readPendingFlashSettlements(record.owner);
   await write(record.owner, [
     ...records.filter((candidate) =>
-      candidate.symbol !== record.symbol || candidate.side !== record.side,
+      candidate.poolName !== record.poolName ||
+      candidate.symbol !== record.symbol ||
+      candidate.side !== record.side,
     ),
     {
       ...record,
@@ -64,7 +67,9 @@ export async function writePendingFlashSettlement(
   const records = await readPendingFlashSettlements(record.owner);
   await write(record.owner, [
     ...records.filter((candidate) =>
-      candidate.symbol !== record.symbol || candidate.side !== record.side,
+      candidate.poolName !== record.poolName ||
+      candidate.symbol !== record.symbol ||
+      candidate.side !== record.side,
     ),
     record,
   ]);
@@ -77,12 +82,13 @@ export async function writePendingFlashSettlement(
 
 export async function removePendingFlashSettlement(
   owner: string,
-  symbol: PublicMarketSymbol,
+  poolName: string,
+  symbol: MainnetMarket['symbol'],
   side: FlashOrderSide,
 ): Promise<void> {
   const records = await readPendingFlashSettlements(owner);
   await write(owner, records.filter((record) =>
-    record.symbol !== symbol || record.side !== side,
+    record.poolName !== poolName || record.symbol !== symbol || record.side !== side,
   ));
   logCheckpoint('complete');
 }
@@ -111,7 +117,8 @@ function valid(value: unknown, owner: string): value is PendingFlashSettlement {
     (record.errorCode === null || typeof record.errorCode === 'string') &&
     (record.feeFundingSignature === null || typeof record.feeFundingSignature === 'string') &&
     (record.side === 'long' || record.side === 'short') &&
-    ['BTC-PERP', 'ETH-PERP', 'SOL-PERP'].includes(String(record.symbol)) &&
+    typeof record.poolName === 'string' && record.poolName.length > 0 &&
+    typeof record.symbol === 'string' && /^.+-PERP$/u.test(record.symbol) &&
     Number.isSafeInteger(record.updatedAtMs) &&
     (record.walletBalanceBefore === null ||
       (typeof record.walletBalanceBefore === 'string' && /^\d+$/u.test(record.walletBalanceBefore))) &&

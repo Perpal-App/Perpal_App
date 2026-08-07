@@ -1,7 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 
-import type { PerpsProviderId } from '@/config/appConfig';
 import {
   fetchFlashMarketSnapshots,
   type FlashMarketSnapshot,
@@ -12,7 +11,6 @@ type VenueState = 'idle' | 'loading' | 'ready' | 'error';
 const REFRESH_INTERVAL_MS = 3_000;
 
 export function useFlashVenueMarkets(
-  provider: PerpsProviderId,
   erRpcUrl: string,
   programId: string,
   markets: readonly MainnetMarket[],
@@ -24,12 +22,16 @@ export function useFlashVenueMarkets(
 
   useFocusEffect(
     useCallback(() => {
-      if (provider !== 'flash' || erRpcUrl.length === 0 || programId.length === 0) {
+      if (erRpcUrl.length === 0 || programId.length === 0 || markets.length === 0) {
         hasSnapshotsRef.current = false;
         setSnapshots([]);
         setStatus('idle');
         return undefined;
       }
+
+      hasSnapshotsRef.current = false;
+      setSnapshots([]);
+      setStatus('loading');
 
       let active = true;
       let controller: AbortController | null = null;
@@ -89,7 +91,7 @@ export function useFlashVenueMarkets(
           clearTimeout(timer);
         }
       };
-    }, [erRpcUrl, markets, programId, provider]),
+    }, [erRpcUrl, markets, programId]),
   );
 
   return { snapshots, status };

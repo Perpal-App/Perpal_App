@@ -89,6 +89,7 @@ export async function prepareStablecoinSwap(input: {
   readonly outputMint: string;
   readonly owner: string;
   readonly rpcUrl: string;
+  readonly signal?: AbortSignal;
   readonly signer: GatewayRequestSigner;
   readonly swapBuildUrl: string;
 }): Promise<StablecoinSwapPlan> {
@@ -114,6 +115,7 @@ export async function prepareStablecoinSwap(input: {
     signer: input.signer,
     timeoutMs: 10_000,
     url: input.swapBuildUrl,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const decoded = decodeBuildResponse(response, input, owner);
   const simulationTransaction = buildTransaction(
@@ -140,6 +142,7 @@ export async function prepareStablecoinSwap(input: {
     rpcUrl: input.rpcUrl,
     signer: input.signer,
     timeoutMs: 12_000,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 
   if (

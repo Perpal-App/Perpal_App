@@ -1,7 +1,6 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
-import type { PerpsProviderId } from '@/config/appConfig';
 import {
   amountFromBaseUnits,
   formatAmount,
@@ -17,7 +16,6 @@ export type PrivateFundingConfirmation = {
   readonly feeReserveLamports: bigint;
   readonly hasSubmittedTransaction: boolean;
   readonly mode: 'start' | 'resume';
-  readonly provider: PerpsProviderId;
   readonly requiredSolLamports: bigint;
   readonly symbol: 'USDC' | 'USDT';
   readonly temporaryRentLamports: bigint;

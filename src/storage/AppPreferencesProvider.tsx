@@ -9,19 +9,14 @@ import {
 } from 'react';
 
 import {
-  readPerpsProvider,
   readOnboardingIntroSeen,
-  writePerpsProvider,
   writeOnboardingIntroSeen,
 } from '@/storage/appPreferences';
-import type { PerpsProviderId } from '@/config/appConfig';
 
 type AppPreferences = {
   hasSeenOnboardingIntro: boolean;
-  selectedPerpsProvider: PerpsProviderId;
   isReady: boolean;
   markOnboardingIntroSeen: () => void;
-  selectPerpsProvider: (provider: PerpsProviderId) => void;
 };
 
 const AppPreferencesContext = createContext<AppPreferences | null>(null);
@@ -38,19 +33,14 @@ export function AppPreferencesProvider({
   children,
 }: AppPreferencesProviderProps) {
   const [hasSeenOnboardingIntro, setHasSeenOnboardingIntro] = useState(false);
-  const [selectedPerpsProvider, setSelectedPerpsProvider] =
-    useState<PerpsProviderId>('flash');
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     let active = true;
     const hasSeenIntro = readOnboardingIntroSeen();
-    const perpsProvider = readPerpsProvider();
-
     queueMicrotask(() => {
       if (active) {
         setHasSeenOnboardingIntro(hasSeenIntro);
-        setSelectedPerpsProvider(perpsProvider);
         setIsReady(true);
       }
     });
@@ -65,25 +55,16 @@ export function AppPreferencesProvider({
     setHasSeenOnboardingIntro(true);
   }, []);
 
-  const selectPerpsProvider = useCallback((provider: PerpsProviderId) => {
-    writePerpsProvider(provider);
-    setSelectedPerpsProvider(provider);
-  }, []);
-
   const value = useMemo(
     () => ({
       hasSeenOnboardingIntro,
-      selectedPerpsProvider,
       isReady,
       markOnboardingIntroSeen,
-      selectPerpsProvider,
     }),
     [
       hasSeenOnboardingIntro,
       isReady,
       markOnboardingIntroSeen,
-      selectedPerpsProvider,
-      selectPerpsProvider,
     ],
   );
 

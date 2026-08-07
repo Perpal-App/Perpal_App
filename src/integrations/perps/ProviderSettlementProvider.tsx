@@ -4,8 +4,6 @@ import { AppState } from 'react-native';
 import { readAppConfig } from '@/config/appConfig';
 import { resumeFlashSettlements } from '@/integrations/perps/flash/flashSettlement';
 import { readPendingFlashSettlements } from '@/integrations/perps/flash/flashSettlementStorage';
-import { resumeVelocitySettlements } from '@/integrations/perps/velocity/velocitySettlement';
-import { readPendingVelocitySettlements } from '@/integrations/perps/velocity/velocitySettlementStorage';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 export function ProviderSettlementProvider({
@@ -30,45 +28,28 @@ export function ProviderSettlementProvider({
 
     runningRef.current = true;
     try {
-      const [velocityPending, flashPending] = await Promise.all([
-        readPendingVelocitySettlements(session.address),
-        readPendingFlashSettlements(session.address),
-      ]);
-      if (velocityPending.length + flashPending.length === 0) return;
+      const flashPending = await readPendingFlashSettlements(session.address);
+      if (flashPending.length === 0) return;
       console.info('[Perpal recovery]', JSON.stringify({
         event: 'auto_resume',
         flashPending: flashPending.length,
         operation: 'provider_settlement',
-        velocityPending: velocityPending.length,
       }));
-      await Promise.all([
-        ...(velocityPending.length === 0 ? [] : [resumeVelocitySettlements({
-          owner: session.address,
-          marketDataUrl: config.value.api.marketDataUrl,
-          programId: config.value.perps.velocityProgramId,
-          rpcUrl: config.value.api.rpcUrl,
-          signer: session.signer,
-        })]),
-        ...(session.flashFeeSigner === null || flashPending.length === 0
-          ? []
-          : [resumeFlashSettlements({
+      if (session.flashFeeSigner !== null) {
+        await resumeFlashSettlements({
           erRpcUrl: config.value.perps.flashErRpc,
           feeSigner: session.flashFeeSigner,
           owner: session.address,
           programId: config.value.perps.flashProgramId,
           rpcUrl: config.value.api.rpcUrl,
           signer: session.signer,
-        })]),
-      ]);
-      const [velocityRemaining, flashRemaining] = await Promise.all([
-        readPendingVelocitySettlements(session.address),
-        readPendingFlashSettlements(session.address),
-      ]);
+        });
+      }
+      const flashRemaining = await readPendingFlashSettlements(session.address);
       console.info('[Perpal recovery]', JSON.stringify({
         event: 'resume_complete',
         flashPending: flashRemaining.length,
         operation: 'provider_settlement',
-        velocityPending: velocityRemaining.length,
       }));
     } catch (cause) {
       if (__DEV__) {

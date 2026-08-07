@@ -10,15 +10,12 @@ import {
   type ReactNode,
 } from 'react';
 
-import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
-import { providerCollateral } from '@/integrations/perps/providerCollateral';
+import { readAppConfig } from '@/config/appConfig';
+import { flashCollateral } from '@/integrations/perps/providerCollateral';
 import {
   ensureFlashCollateralInWallet,
   resumeFlashSettlements,
 } from '@/integrations/perps/flash/flashSettlement';
-import { resumeVelocitySettlements } from '@/integrations/perps/velocity/velocitySettlement';
-import { readPendingVelocitySettlements } from '@/integrations/perps/velocity/velocitySettlementStorage';
-import { ensureVelocityCollateralInWallet } from '@/integrations/perps/velocity/velocityCollateralWithdrawal';
 import {
   beginPrivateExit,
   resumePrivateExit,
@@ -37,7 +34,6 @@ type State = {
   readonly start: (
     amountBaseUnits: bigint,
     destinationAddress: string,
-    provider: PerpsProviderId,
   ) => Promise<void>;
   readonly resume: () => Promise<void>;
 };
@@ -108,44 +104,23 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
   const start = useCallback(async (
     amountBaseUnits: bigint,
     destinationAddress: string,
-    provider: PerpsProviderId,
   ) => {
     await run(async () => {
       const input = operationInput();
-      if (provider === 'velocity') {
-        await resumeVelocitySettlements({
-          marketDataUrl: input.config.api.marketDataUrl,
-          owner: input.sourceWalletAddress,
-          programId: input.config.perps.velocityProgramId,
-          rpcUrl: input.config.api.rpcUrl,
-          signer: input.gatewaySigner,
-        });
-        if ((await readPendingVelocitySettlements(input.sourceWalletAddress)).length > 0) {
-          throw new Error('A closed Velocity position is still settling into T.');
-        }
-        await ensureVelocityCollateralInWallet({
-          amountBaseUnits,
-          owner: input.sourceWalletAddress,
-          programId: input.config.perps.velocityProgramId,
-          rpcUrl: input.config.api.rpcUrl,
-          signer: input.gatewaySigner,
-        });
-      } else {
-        if (session.flashFeeSigner === null) {
-          throw new Error('Flash private fee signer is unavailable.');
-        }
-        const flashInput = {
-          erRpcUrl: input.config.perps.flashErRpc,
-          feeSigner: session.flashFeeSigner,
-          owner: input.sourceWalletAddress,
-          programId: input.config.perps.flashProgramId,
-          rpcUrl: input.config.api.rpcUrl,
-          signer: input.gatewaySigner,
-        };
-        await resumeFlashSettlements(flashInput);
-        await ensureFlashCollateralInWallet(amountBaseUnits, flashInput);
+      if (session.flashFeeSigner === null) {
+        throw new Error('Flash private fee signer is unavailable.');
       }
-      const collateral = providerCollateral(provider, input.config.perps.flashProgramId);
+      const flashInput = {
+        erRpcUrl: input.config.perps.flashErRpc,
+        feeSigner: session.flashFeeSigner,
+        owner: input.sourceWalletAddress,
+        programId: input.config.perps.flashProgramId,
+        rpcUrl: input.config.api.rpcUrl,
+        signer: input.gatewaySigner,
+      };
+      await resumeFlashSettlements(flashInput);
+      await ensureFlashCollateralInWallet(amountBaseUnits, flashInput);
+      const collateral = flashCollateral(input.config.perps.flashProgramId);
       return beginPrivateExit(
         {
           ...input,

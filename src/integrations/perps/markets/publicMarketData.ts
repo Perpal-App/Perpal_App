@@ -11,7 +11,7 @@ const MAX_PRICE_AGE_MS = 5_000;
 const MAX_FUTURE_SKEW_MS = 10_000;
 const STREAM_IDLE_TIMEOUT_MS = 10_000;
 
-export type PublicMarketSymbol = (typeof EXPECTED_SYMBOLS)[number];
+export type PublicMarketSymbol = `${string}-PERP`;
 
 export type PublicMarketPrice = {
   readonly symbol: PublicMarketSymbol;
@@ -198,8 +198,10 @@ function oracleAmount(value: bigint, exponent: number): Amount {
   );
 }
 
-function isMarketSymbol(value: unknown): value is PublicMarketSymbol {
-  return EXPECTED_SYMBOLS.includes(value as PublicMarketSymbol);
+function isMarketSymbol(
+  value: unknown,
+): value is (typeof EXPECTED_SYMBOLS)[number] {
+  return EXPECTED_SYMBOLS.includes(value as (typeof EXPECTED_SYMBOLS)[number]);
 }
 
 function record(value: unknown): Record<string, unknown> {

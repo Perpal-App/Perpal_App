@@ -4,17 +4,13 @@ import { PublicKey } from '@solana/web3.js';
 
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
-import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
+import { readAppConfig } from '@/config/appConfig';
 import { parseAmount } from '@/domain/money/amount';
-import { providerCollateral } from '@/integrations/perps/providerCollateral';
+import { flashCollateral } from '@/integrations/perps/providerCollateral';
 import { usePrivateExit } from '@/integrations/umbra/PrivateExitProvider';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
-export function PrivateWithdrawPanel({
-  provider,
-}: {
-  readonly provider: PerpsProviderId;
-}) {
+export function PrivateWithdrawPanel() {
   const privateExit = usePrivateExit();
   const [amount, setAmount] = useState('');
   const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>('privy');
@@ -23,9 +19,9 @@ export function PrivateWithdrawPanel({
   const collateral = useMemo(() => {
     const config = readAppConfig();
     return config.ok
-      ? providerCollateral(provider, config.value.perps.flashProgramId)
+      ? flashCollateral(config.value.perps.flashProgramId)
       : null;
-  }, [provider]);
+  }, []);
   const pending = privateExit.record !== null && privateExit.record.phase !== 'complete';
 
   const confirm = () => {
@@ -48,7 +44,7 @@ export function PrivateWithdrawPanel({
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Withdraw',
-            onPress: () => void privateExit.start(parsed.baseUnits, validated, provider),
+            onPress: () => void privateExit.start(parsed.baseUnits, validated),
           },
         ],
       );

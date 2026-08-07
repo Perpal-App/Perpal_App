@@ -5,6 +5,8 @@ import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
+import { TradeCollateralStepView } from '@/features/trade/components/TradeCollateralStepView';
+import { useTradeActionRecovery } from '@/features/trade/hooks/useTradeActionRecovery';
 import {
   FlashMarketOrderError,
   prepareFlashMarketOrder,
@@ -16,6 +18,12 @@ import {
 import { queueFlashSettlement } from '@/integrations/perps/flash/flashSettlementStorage';
 import { resumeFlashSettlements } from '@/integrations/perps/flash/flashSettlement';
 import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
+import { logTradeError } from '@/integrations/observability/tradeError';
+import {
+  prepareFlashTradeCollateral,
+  submitTradeCollateralStep,
+  type TradeCollateralStep,
+} from '@/integrations/perps/tradeCollateral';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
@@ -27,12 +35,16 @@ export function FlashOrderTicket({
   market,
   programId,
   rpcUrl,
+  swapBuildUrl,
+  usdtMint,
 }: {
   readonly baseRpcUrl: string;
   readonly erRpcUrl: string;
   readonly market: MainnetMarket;
   readonly programId: string;
   readonly rpcUrl: string;
+  readonly swapBuildUrl: string;
+  readonly usdtMint: string;
 }) {
   const router = useRouter();
   const session = useTradingSession();
@@ -42,13 +54,21 @@ export function FlashOrderTicket({
   const [leverage, setLeverage] = useState('5');
   const [phase, setPhase] = useState<Phase>('idle');
   const [plan, setPlan] = useState<FlashMarketOrderPlan | null>(null);
+  const [preparation, setPreparation] = useState<TradeCollateralStep | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const recovery = useTradeActionRecovery({
+    owner: session.address,
+    provider: 'flash',
+    rpcUrl,
+    signer: session.signer,
+  });
 
   const reset = () => {
     controller.current?.abort();
     setPlan(null);
+    setPreparation(null);
     setSignature(null);
     setError(null);
     setPhase('idle');
@@ -58,7 +78,7 @@ export function FlashOrderTicket({
     reset();
     setCollateral('');
     return () => controller.current?.abort();
-  }, [market.symbol, session.address]);
+  }, [market.venueRef, session.address]);
 
   const prepare = async () => {
     if (session.address === null || session.signer === null) {
@@ -69,19 +89,48 @@ export function FlashOrderTicket({
     controller.current?.abort();
     controller.current = abort;
     setPhase('preparing');
+    setPlan(null);
+    setPreparation(null);
     setError(null);
     try {
+      const recoveryStatus = await recovery.reconcile(abort.signal);
+      if (recoveryStatus === 'pending') {
+        setError('A previous Flash preparation is still confirming. It will resume automatically.');
+        setPhase('idle');
+        return;
+      }
+      const collateralBaseUnits = action === 'open'
+        ? parseAmount(collateral, 6).baseUnits
+        : 0n;
+      if (action === 'open') {
+        const nextPreparation = await prepareFlashTradeCollateral({
+          flashProgramId: programId,
+          owner: session.address,
+          portfolioRpcUrl: baseRpcUrl,
+          requiredBaseUnits: collateralBaseUnits,
+          rpcUrl,
+          signal: abort.signal,
+          signer: session.signer,
+          swapBuildUrl,
+          usdtMint,
+        });
+        if (nextPreparation !== null) {
+          setPreparation(nextPreparation);
+          setPhase('prepared');
+          return;
+        }
+      }
       const next = await prepareFlashMarketOrder({
         action,
         baseRpcUrl,
-        collateralInputBaseUnits: action === 'open' ? parseAmount(collateral, 6).baseUnits : 0n,
+        collateralInputBaseUnits: collateralBaseUnits,
         erRpcUrl,
         leverage: action === 'open' ? Number(leverage) : 1,
+        market,
         owner: session.address,
         programId,
         side,
         signer: session.signer,
-        symbol: market.symbol,
         signal: abort.signal,
       });
       if (!abort.signal.aborted) {
@@ -90,8 +139,48 @@ export function FlashOrderTicket({
       }
     } catch (cause) {
       if (!abort.signal.aborted) {
+        logTradeError('flash', 'preparation', cause);
         setError(cause instanceof Error ? cause.message : 'Flash order preview failed.');
         setPhase('idle');
+      }
+    }
+  };
+
+  const submitPreparation = async () => {
+    if (preparation === null || session.address === null || session.signer === null) return;
+    const abort = new AbortController();
+    controller.current = abort;
+    setPhase('submitting');
+    setError(null);
+    try {
+      const result = await submitTradeCollateralStep({
+        flashProgramId: programId,
+        owner: session.address,
+        programId,
+        rpcUrl,
+        signal: abort.signal,
+        signer: session.signer,
+        step: preparation,
+      });
+      if (result.status !== 'confirmed') {
+        recovery.setPending(true);
+        setPreparation(null);
+        setError('Trade preparation was signed and is still confirming. Do not submit it again.');
+        setPhase('idle');
+        return;
+      }
+      recovery.setPending(false);
+      setPreparation(null);
+      setPhase('idle');
+      await prepare();
+    } catch (cause) {
+      if (!abort.signal.aborted) {
+        logTradeError('flash', 'submission', cause);
+        setError(cause instanceof Error ? cause.message : 'Flash trade preparation failed.');
+        setPhase('idle');
+        void recovery.reconcile().then((status) => {
+          if (status === 'pending') setPreparation(null);
+        }).catch(() => undefined);
       }
     }
   };
@@ -107,19 +196,20 @@ export function FlashOrderTicket({
         collateralInputBaseUnits: confirmed.collateralInputBaseUnits,
         erRpcUrl,
         leverage: Number(confirmed.leverageHundredths) / 100,
+        market,
         intentStartedAtMs,
         owner: session.address,
         plan: confirmed,
         programId,
         side: confirmed.side,
         signer: session.signer,
-        symbol: confirmed.symbol,
         ...(confirmed.action === 'close'
           ? {
               onSigned: (closeSignature: string) => queueFlashSettlement({
                 amountBaseUnits: (confirmed.receiveAmountBaseUnits ?? 0n).toString(),
                 closeSignature,
                 owner: session.address!,
+                poolName: confirmed.poolName,
                 side: confirmed.side,
                 symbol: confirmed.symbol,
               }),
@@ -139,6 +229,7 @@ export function FlashOrderTicket({
         });
       }
     } catch (cause) {
+      logTradeError('flash', 'submission', cause);
       setError(cause instanceof FlashMarketOrderError || cause instanceof Error
         ? cause.message
         : 'Flash order submission failed.');
@@ -183,7 +274,13 @@ export function FlashOrderTicket({
           <TextInput accessibilityLabel="Leverage" inputMode="numeric" onChangeText={(value) => { setLeverage(value); reset(); }} placeholder="5×" placeholderTextColor={colors.textMuted} style={[styles.input, styles.leverage]} value={leverage} />
         </View>
       ) : null}
-      {plan ? (
+      {preparation ? (
+        <TradeCollateralStepView
+          loading={phase === 'submitting'}
+          onConfirm={() => void submitPreparation()}
+          step={preparation}
+        />
+      ) : plan ? (
         <View style={styles.summary}>
           <StatusRow label="Action" value={`${plan.action} ${plan.side}`} />
           <StatusRow
@@ -199,11 +296,12 @@ export function FlashOrderTicket({
         </View>
       ) : null}
       {signature ? <StatusRow label="Signature" selectable value={signature} /> : null}
-      {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-      {plan ? (
+      {recovery.pending ? <Text style={styles.message}>Previous trade preparation is still confirming.</Text> : null}
+      {error || recovery.error ? <Text accessibilityRole="alert" style={styles.error}>{error ?? recovery.error}</Text> : null}
+      {preparation ? null : plan ? (
         <Button label="Review order" loading={phase === 'submitting'} onPress={confirm} />
       ) : signature === null ? (
-        <Button label="Prepare order" loading={phase === 'preparing'} onPress={() => void prepare()} variant="secondary" />
+        <Button label={recovery.pending ? 'Check preparation' : 'Prepare order'} loading={phase === 'preparing'} onPress={() => void prepare()} variant="secondary" />
       ) : null}
       <Text style={styles.message}>Signed locally after confirmation. Other open positions remain unchanged.</Text>
     </View>

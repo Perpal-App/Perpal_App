@@ -6,10 +6,6 @@ import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import { fetchFlashPortfolio } from '@/integrations/perps/flash/flashPortfolio';
 import { readPendingFlashSettlements } from '@/integrations/perps/flash/flashSettlementStorage';
-import { listMainnetMarkets } from '@/integrations/perps/markets/mainnetCatalog';
-import { fetchPublicMarketPrices } from '@/integrations/perps/markets/publicMarketData';
-import { fetchVelocityPortfolio } from '@/integrations/perps/velocity/velocityPortfolio';
-import { readPendingVelocitySettlements } from '@/integrations/perps/velocity/velocitySettlementStorage';
 import { readPrivateExitRecord } from '@/integrations/umbra/privateExitStorage';
 import { readPrivateFundingRecord } from '@/integrations/umbra/umbraSecureStorage';
 
@@ -27,7 +23,6 @@ export async function assertTradingWalletRotationSafe(input: {
   readonly signer: GatewayRequestSigner;
   readonly tradingWalletAddress: string;
 }): Promise<void> {
-  const controller = new AbortController();
   const [
     nativeBalance,
     feeSignerBalance,
@@ -35,9 +30,7 @@ export async function assertTradingWalletRotationSafe(input: {
     token2022Balance,
     funding,
     exit,
-    velocityPending,
     flashPending,
-    prices,
     flash,
   ] = await Promise.all([
     solBalance(input.tradingWalletAddress, input),
@@ -46,24 +39,14 @@ export async function assertTradingWalletRotationSafe(input: {
     totalTokenBalance(TOKEN_2022_PROGRAM_ID.toBase58(), input),
     readPrivateFundingRecord(input.mainWalletAddress),
     readPrivateExitRecord(input.tradingWalletAddress),
-    readPendingVelocitySettlements(input.tradingWalletAddress),
     readPendingFlashSettlements(input.tradingWalletAddress),
-    fetchPublicMarketPrices(input.config.api.marketDataUrl, controller.signal),
     fetchFlashPortfolio(
       input.config.perps.flashErRpc,
       input.config.perps.flashProgramId,
       input.tradingWalletAddress,
-      controller.signal,
+      new AbortController().signal,
     ),
   ]);
-  const velocity = await fetchVelocityPortfolio(
-    input.config.api.publicRpcUrl,
-    input.config.perps.velocityProgramId,
-    input.tradingWalletAddress,
-    listMainnetMarkets('velocity'),
-    prices,
-    controller.signal,
-  );
 
   if (nativeBalance !== 0n || feeSignerBalance !== 0n) {
     throw new TradingWalletRotationError('Withdraw the remaining private SOL fee reserve first.');
@@ -77,7 +60,7 @@ export async function assertTradingWalletRotationSafe(input: {
   if (exit !== null && exit.phase !== 'complete') {
     throw new TradingWalletRotationError('A private withdrawal is still pending.');
   }
-  if (velocityPending.length > 0 || flashPending.length > 0) {
+  if (flashPending.length > 0) {
     throw new TradingWalletRotationError('A provider settlement is still pending.');
   }
   if (
@@ -87,16 +70,6 @@ export async function assertTradingWalletRotationSafe(input: {
     Object.values(flash.reservedWithdrawals).some((amount) => amount.baseUnits !== 0n)
   ) {
     throw new TradingWalletRotationError('Flash still holds positions, orders, or collateral.');
-  }
-  if (
-    velocity.positions.length > 0 ||
-    velocity.openOrders > 0 ||
-    velocity.nonCorePositionCount > 0 ||
-    velocity.unsupportedSpotPositionCount > 0 ||
-    (velocity.initialized &&
-      (velocity.margin === null || velocity.margin.totalCollateral.baseUnits !== 0n))
-  ) {
-    throw new TradingWalletRotationError('Velocity still holds positions, orders, or collateral.');
   }
 }
 
