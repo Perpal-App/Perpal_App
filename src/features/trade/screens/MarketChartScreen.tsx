@@ -5,41 +5,36 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { readAppConfig } from '@/config/appConfig';
-import { addAmounts, formatCompactTokenPrice, formatCompactUsd } from '@/domain/money/amount';
+import { formatCompactTokenPrice, formatCompactUsd } from '@/domain/money/amount';
 import { ChartToolIcon } from '@/features/trade/components/ChartToolIcon';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { useChartOrientation } from '@/features/trade/hooks/useChartOrientation';
-import { useFlashVenueMarkets } from '@/features/trade/hooks/useFlashVenueMarkets';
-import { usePythMarketHistory } from '@/features/trade/hooks/usePythMarketHistory';
-import type { MarketTimeframe } from '@/integrations/perps/markets/pythHistory';
-import { listMainnetMarkets } from '@/integrations/perps/markets/mainnetCatalog';
+import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
+import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
+import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 export function MarketChartScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ venueRef?: string | string[] }>();
   const rawVenueRef = Array.isArray(params.venueRef) ? params.venueRef[0] : params.venueRef;
-  const market = useMemo(
-    () => listMainnetMarkets().find((candidate) => candidate.venueRef === rawVenueRef),
-    [rawVenueRef],
-  );
-  const selectedMarkets = useMemo(() => market === undefined ? [] : [market], [market]);
-  const [timeframe, setTimeframe] = useState<MarketTimeframe>('15');
+  const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
   const orientation = useChartOrientation();
   const isLandscape = orientation.landscape;
   const config = readAppConfig();
   const perps = config.ok ? config.value.perps : null;
-  const venue = useFlashVenueMarkets(
-    perps?.flashErRpc ?? '',
-    perps?.flashProgramId ?? '',
-    perps?.flashDataOrigin ?? '',
-    perps?.flashStatsOrigin ?? '',
-    selectedMarkets,
+  const venue = usePacificaMarkets(
+    perps?.pacificaApiOrigin ?? '',
+    perps?.pacificaWsOrigin ?? '',
   );
-  const history = usePythMarketHistory(
-    perps?.pythBenchmarksOrigin ?? '',
-    market?.oracleSymbol ?? '',
+  const market = useMemo(
+    () => venue.markets.find((candidate) => candidate.venueRef === rawVenueRef),
+    [rawVenueRef, venue.markets],
+  );
+  const history = usePacificaMarketHistory(
+    perps?.pacificaApiOrigin ?? '',
+    market?.venueRef ?? '',
     timeframe,
   );
 
@@ -48,18 +43,16 @@ export function MarketChartScreen() {
       <AppScreen contentContainerStyle={styles.centered}>
         <EmptyState
           action={{ label: 'Back', onPress: () => router.back() }}
-          message="This Flash market is not present in the active mainnet catalog."
+          message="This Pacifica market is not present in the current public catalog."
           title="Chart unavailable"
         />
       </AppScreen>
     );
   }
 
-  const snapshot = venue.snapshots[0] ?? null;
+  const snapshot = venue.snapshots.find((candidate) => candidate.venueRef === market.venueRef) ?? null;
   const price = snapshot !== null && !snapshot.priceStale ? snapshot.price : null;
-  const openInterest = snapshot === null
-    ? null
-    : addAmounts(snapshot.longOpenInterest, snapshot.shortOpenInterest);
+  const openInterest = snapshot?.openInterest ?? null;
 
   return (
     <AppScreen scroll={false}>
@@ -82,7 +75,7 @@ export function MarketChartScreen() {
                 <Text style={styles.leverage}>{market.maxLeverage}×</Text>
               </View>
             </View>
-            <Text style={styles.source}>Flash Trade · Pyth</Text>
+            <Text style={styles.source}>Pacifica mark candles</Text>
           </View>
           <Metric
             label="Price / 24h"
@@ -110,7 +103,7 @@ export function MarketChartScreen() {
             <>
               <Metric label="24h volume" value={snapshot?.volume24h == null ? 'Unavailable' : formatCompactUsd(snapshot.volume24h)} />
               <Metric label="Open interest" value={openInterest === null ? 'Unavailable' : formatCompactUsd(openInterest)} />
-              <Metric label="24h high / low" value={snapshot?.high24h == null || snapshot.low24h == null ? 'Unavailable' : `${formatCompactTokenPrice(snapshot.high24h)} / ${formatCompactTokenPrice(snapshot.low24h)}`} />
+              <Metric label="Oracle" value={snapshot === null ? 'Unavailable' : formatCompactTokenPrice(snapshot.oraclePrice)} />
             </>
           ) : null}
         </View>
@@ -123,8 +116,8 @@ export function MarketChartScreen() {
           >
             <Metric label="24h volume" value={snapshot?.volume24h == null ? 'Unavailable' : formatCompactUsd(snapshot.volume24h)} />
             <Metric label="Open interest" value={openInterest === null ? 'Unavailable' : formatCompactUsd(openInterest)} />
-            <Metric label="24h high" value={snapshot?.high24h == null ? 'Unavailable' : formatCompactTokenPrice(snapshot.high24h)} />
-            <Metric label="24h low" value={snapshot?.low24h == null ? 'Unavailable' : formatCompactTokenPrice(snapshot.low24h)} />
+            <Metric label="Oracle" value={snapshot === null ? 'Unavailable' : formatCompactTokenPrice(snapshot.oraclePrice)} />
+            <Metric label="Funding" value={snapshot === null ? 'Unavailable' : `${(Number(snapshot.fundingRate) * 100).toFixed(4)}%`} />
           </ScrollView>
         ) : null}
 

@@ -23,7 +23,6 @@ import {
 import {
   DERIVATION_MESSAGE,
   checkTradingWalletIdentity,
-  deriveFlashFeeWallet,
   deriveRotatedTradingWallet,
   deriveTradingWallet,
   verifyDerivationSignature,
@@ -47,7 +46,6 @@ type TradingSession = {
   readonly status: TradingSessionStatus;
   readonly address: string | null;
   readonly signer: GatewayRequestSigner | null;
-  readonly flashFeeSigner: GatewayRequestSigner | null;
   readonly generation: number;
   readonly recovery: TradingSessionRecovery | null;
   readonly error: string | null;
@@ -292,27 +290,6 @@ export function TradingSessionProvider({
     };
   }, [address, status]);
 
-  const flashFeeSigner = useMemo<GatewayRequestSigner | null>(() => {
-    const seed = seedRef.current;
-    if (status !== 'ready' || address === null || seed === null) return null;
-    const derived = deriveFlashFeeWallet(seed, address);
-    const publicKey = base58.decode(derived.address);
-    zeroize(derived.secretKey);
-    return {
-      publicKey,
-      sign: async (message) => {
-        const activeSeed = seedRef.current;
-        if (activeSeed === null) throw new Error('Private trading wallet is unavailable.');
-        const feeWallet = deriveFlashFeeWallet(activeSeed, address);
-        try {
-          return ed25519.sign(message, feeWallet.secretKey);
-        } finally {
-          zeroize(feeWallet.secretKey);
-        }
-      },
-    };
-  }, [address, status]);
-
   const rotate = useCallback(async () => {
     const config = readAppConfig();
     const rootSeed = rootSeedRef.current;
@@ -322,7 +299,6 @@ export function TradingSessionProvider({
       mainWalletAddress === null ||
       address === null ||
       signer === null ||
-      flashFeeSigner === null ||
       rootSeed === null
     ) return;
     setStatus('rotating');
@@ -331,7 +307,6 @@ export function TradingSessionProvider({
     try {
       await assertTradingWalletRotationSafe({
         config: config.value,
-        feeSigner: flashFeeSigner,
         mainWalletAddress,
         signer,
         tradingWalletAddress: address,
@@ -348,14 +323,13 @@ export function TradingSessionProvider({
       setError(cause instanceof Error ? cause.message : 'Rotation safety could not be verified.');
       setStatus('ready');
     }
-  }, [address, flashFeeSigner, generation, mainWalletAddress, signer, status]);
+  }, [address, generation, mainWalletAddress, signer, status]);
 
   const value = useMemo(
     () => ({
       activate,
       address,
       error,
-      flashFeeSigner,
       generation,
       recovery,
       rotate,
@@ -363,7 +337,7 @@ export function TradingSessionProvider({
       signer,
       status,
     }),
-    [activate, address, error, flashFeeSigner, generation, recovery, rotate, signer, status],
+    [activate, address, error, generation, recovery, rotate, signer, status],
   );
 
   return (

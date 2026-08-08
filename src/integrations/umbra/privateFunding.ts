@@ -75,7 +75,7 @@ export async function beginPrivateFunding(
   }
 
   const collateral = listTradingCollateralOptions(
-    input.config.perps.flashProgramId,
+    input.config.perps.usdcMint,
     input.config.perps.usdtMint,
   ).find(
     (option) =>
@@ -95,7 +95,7 @@ export async function beginPrivateFunding(
     id: Crypto.randomUUID(),
     mainWalletAddress: input.mainWalletAddress,
     tradingWalletAddress: input.tradingWalletAddress,
-    provider: 'flash',
+    provider: 'pacifica',
     mint: collateral.mint,
     symbol: collateral.symbol,
     amountBaseUnits: input.amountBaseUnits.toString(),

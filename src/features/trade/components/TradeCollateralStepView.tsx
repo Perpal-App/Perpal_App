@@ -55,19 +55,17 @@ function summary(step: TradeCollateralStep): readonly (readonly [string, string]
     ];
   }
   return [
-    ['Action', 'Allocate collateral to Flash'],
+    ['Action', 'Deposit collateral to Pacifica'],
     ['Collateral', token(step.plan.amountBaseUnits, 'USDC')],
     ['Network fee', sol(step.plan.feeLamports)],
-    ['First-use account rent', sol(step.plan.rentLamports)],
-    ['Total SOL required', sol(step.plan.requiredSolLamports)],
     ['T wallet SOL', sol(step.plan.solBalanceLamports)],
   ];
 }
 
 function blockedMessage(step: TradeCollateralStep): string {
-  if (step.kind === 'flash-collateral') {
+  if (step.kind === 'pacifica-deposit') {
     if (step.plan.simulation === 'insufficient-token') return 'T needs more USDC for this trade.';
-    return `T needs ${sol(step.plan.requiredSolLamports - step.plan.solBalanceLamports)} more for setup and fees.`;
+    return `T needs ${sol(step.plan.feeLamports - step.plan.solBalanceLamports)} more for the Solana network fee.`;
   }
   return `T needs more ${step.input.symbol} for this conversion.`;
 }

@@ -11,11 +11,8 @@ import {
 } from 'react';
 
 import { readAppConfig } from '@/config/appConfig';
-import { flashCollateral } from '@/integrations/perps/providerCollateral';
-import {
-  ensureFlashCollateralInWallet,
-  resumeFlashSettlements,
-} from '@/integrations/perps/flash/flashSettlement';
+import { pacificaCollateral } from '@/integrations/perps/providerCollateral';
+import { ensurePacificaCollateralInWallet } from '@/integrations/perps/pacifica/pacificaWithdrawal';
 import {
   beginPrivateExit,
   resumePrivateExit,
@@ -107,20 +104,15 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
   ) => {
     await run(async () => {
       const input = operationInput();
-      if (session.flashFeeSigner === null) {
-        throw new Error('Flash private fee signer is unavailable.');
-      }
-      const flashInput = {
-        erRpcUrl: input.config.perps.flashErRpc,
-        feeSigner: session.flashFeeSigner,
-        owner: input.sourceWalletAddress,
-        programId: input.config.perps.flashProgramId,
+      await ensurePacificaCollateralInWallet(amountBaseUnits, {
+        account: input.sourceWalletAddress,
+        apiOrigin: input.config.perps.pacificaApiOrigin,
+        mint: input.config.perps.usdcMint,
         rpcUrl: input.config.api.rpcUrl,
         signer: input.gatewaySigner,
-      };
-      await resumeFlashSettlements(flashInput);
-      await ensureFlashCollateralInWallet(amountBaseUnits, flashInput);
-      const collateral = flashCollateral(input.config.perps.flashProgramId);
+        withdrawalFeeBaseUnits: input.config.perps.pacificaWithdrawalFeeBaseUnits,
+      });
+      const collateral = pacificaCollateral(input.config.perps.usdcMint);
       return beginPrivateExit(
         {
           ...input,
@@ -132,7 +124,7 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
         setRecord,
       );
     });
-  }, [operationInput, run, session.flashFeeSigner]);
+  }, [operationInput, run]);
 
   const resume = useCallback(async () => {
     if (record === null || record.phase === 'complete') return;

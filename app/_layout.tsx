@@ -10,7 +10,6 @@ import { readAppConfig } from '@/config/appConfig';
 import { ConfigErrorScreen } from '@/features/diagnostics/screens/ConfigErrorScreen';
 import { PrivyBoundary } from '@/integrations/privy/PrivyBoundary';
 import { WalletProvisioningProvider } from '@/integrations/privy/useWalletProvisioning';
-import { ProviderSettlementProvider } from '@/integrations/perps/ProviderSettlementProvider';
 import { PrivateFundingProvider } from '@/integrations/umbra/PrivateFundingProvider';
 import { PrivateExitProvider } from '@/integrations/umbra/PrivateExitProvider';
 import { AuthNavigationGate } from '@/navigation/AuthNavigationGate';
@@ -37,15 +36,13 @@ export default function RootLayout() {
           <PrivyBoundary>
             <WalletProvisioningProvider>
               <TradingSessionProvider>
-                <ProviderSettlementProvider>
-                  <PrivateFundingProvider>
-                    <PrivateExitProvider>
-                      <AppPreferencesProvider>
-                        <AuthNavigationGate />
-                      </AppPreferencesProvider>
-                    </PrivateExitProvider>
-                  </PrivateFundingProvider>
-                </ProviderSettlementProvider>
+                <PrivateFundingProvider>
+                  <PrivateExitProvider>
+                    <AppPreferencesProvider>
+                      <AuthNavigationGate />
+                    </AppPreferencesProvider>
+                  </PrivateExitProvider>
+                </PrivateFundingProvider>
               </TradingSessionProvider>
             </WalletProvisioningProvider>
           </PrivyBoundary>

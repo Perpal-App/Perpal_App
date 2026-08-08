@@ -14,9 +14,8 @@ export const MARKET_LOGO_SIZE = 26;
 /**
  * Round venue icon for one market.
  *
- * The URL travels with the rest of the market's metadata in the Flash pool
- * config, so this component never invents an image origin. Flash publishes both
- * raster and SVG marks; each uses the renderer already present in the app.
+ * The URL travels with provider metadata, so this component never invents an
+ * image origin. Raster and SVG marks use renderers already present in the app.
  *
  * A missing or unreachable icon falls back to the symbol's initial. The mark
  * occupies the same box either way, so a row never reflows on a failed load.

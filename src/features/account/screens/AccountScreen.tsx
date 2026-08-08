@@ -276,7 +276,7 @@ function tradingSessionMessage(status: TradingSessionStatus): string {
 function privateFundingLocation(record: PrivateFundingRecord | null): string {
   if (record === null) return 'No private transfer';
   if (record.providerDepositSignature !== null) {
-    return 'Flash execution account';
+    return 'Legacy provider allocation — manual recovery required';
   }
   if (record.claimSignature !== null) return 'Private wallet T';
   if (record.depositSignature !== null) return 'Umbra pool';

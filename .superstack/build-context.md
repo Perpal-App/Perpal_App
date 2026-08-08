@@ -6,6 +6,8 @@ mobile:
   wallet_method: embedded
   scaffold_repo: perpal
   physical_device_tested: partial
+  perps_provider: pacifica
+  provider_integration_status: implemented_locally_device_confirmation_pending
 debug:
   issues_resolved:
     - error: funding rejected before blockchain submission
@@ -29,14 +31,5 @@ debug:
     - error: Umbra anonymous registration failed to establish a WebSocket computation subscription
       cause: the configured authenticated Worker is an HTTP JSON-RPC endpoint and does not expose Solana WebSocket subscriptions
       fix: inject Umbra's documented HTTP polling computation monitor through the signed RPC adapter and allowlist its required callback-signature read
-    - error: Flash collateral allocation failed before submission
-      cause: T held 5408608 lamports while Flash user-deposit ledger initialization required 5735040 lamports; the broader flow also incorrectly coupled private funding to the selected venue
-      fix: complete Umbra funding in global private wallet T, expose real M and T balances, and defer protocol collateral allocation to the confirmed trade path
-    - error: T custody did not yet lead to an executable provider order
-      cause: the trade tickets assumed provider collateral and first-use state already existed
-      fix: prepare only the selected trade's collateral shortfall, convert USDC or USDT on demand, show exact fee and rent before signing, persist the signed preparation, then rebuild a fresh final order quote
-    - error: Flash setup preparation rejected its own valid unsigned transaction
-      cause: legacy transaction deserialization elevates repeated writable account flags, so comparing raw instruction flags rejected a canonically identical compiled message
-      fix: verify the complete serialized legacy message bytes and retain redacted release diagnostics for preparation and submission failures
   last_debug_session: 2026-08-07T15:00:00+05:30
 ```

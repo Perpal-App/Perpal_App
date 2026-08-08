@@ -2,18 +2,20 @@ import { base58 } from '@scure/base';
 
 import type { PrivyPublicConfig } from '@/config/publicEnv';
 
-export type PerpsProviderId = 'flash';
+export type PerpsProviderId = 'pacifica';
 export type SolanaCluster = 'mainnet';
 
 export type AppConfig = {
   readonly cluster: SolanaCluster;
   readonly privy: PrivyPublicConfig;
   readonly perps: {
-    readonly flashProgramId: string;
-    readonly flashErRpc: string;
-    readonly flashDataOrigin: string;
-    readonly flashStatsOrigin: string;
-    readonly pythBenchmarksOrigin: string;
+    readonly pacificaApiOrigin: string;
+    readonly pacificaWsOrigin: string;
+    readonly pacificaProgramId: string;
+    readonly pacificaCentralState: string;
+    readonly pacificaVault: string;
+    readonly pacificaWithdrawalFeeBaseUnits: bigint;
+    readonly usdcMint: string;
     readonly usdtMint: string;
   };
   readonly privacy: {
@@ -57,11 +59,13 @@ export type RawAppEnv = {
   readonly marketDataPath: string;
   readonly marketStreamPath: string;
   readonly swapBuildPath: string;
-  readonly flashProgramId: string;
-  readonly flashErRpc: string;
-  readonly flashDataOrigin: string;
-  readonly flashStatsOrigin: string;
-  readonly pythBenchmarksOrigin: string;
+  readonly pacificaApiOrigin: string;
+  readonly pacificaWsOrigin: string;
+  readonly pacificaProgramId: string;
+  readonly pacificaCentralState: string;
+  readonly pacificaVault: string;
+  readonly pacificaWithdrawalFeeUsdc: string;
+  readonly usdcMint: string;
   readonly usdtMint: string;
   readonly umbraIndexerUrl: string;
   readonly umbraRelayerUrl: string;
@@ -84,15 +88,19 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_MARKET_STREAM_PATH?.trim() ?? '',
     swapBuildPath:
       process.env.EXPO_PUBLIC_SWAP_BUILD_PATH?.trim() ?? '',
-    flashProgramId:
-      process.env.EXPO_PUBLIC_FLASH_PROGRAM_ID?.trim() ?? '',
-    flashErRpc: process.env.EXPO_PUBLIC_FLASH_ER_RPC?.trim() ?? '',
-    flashDataOrigin:
-      process.env.EXPO_PUBLIC_FLASH_DATA_ORIGIN?.trim() ?? '',
-    flashStatsOrigin:
-      process.env.EXPO_PUBLIC_FLASH_STATS_ORIGIN?.trim() ?? '',
-    pythBenchmarksOrigin:
-      process.env.EXPO_PUBLIC_PYTH_BENCHMARKS_ORIGIN?.trim() ?? '',
+    pacificaApiOrigin:
+      process.env.EXPO_PUBLIC_PACIFICA_API_ORIGIN?.trim() ?? '',
+    pacificaWsOrigin:
+      process.env.EXPO_PUBLIC_PACIFICA_WS_ORIGIN?.trim() ?? '',
+    pacificaProgramId:
+      process.env.EXPO_PUBLIC_PACIFICA_PROGRAM_ID?.trim() ?? '',
+    pacificaCentralState:
+      process.env.EXPO_PUBLIC_PACIFICA_CENTRAL_STATE?.trim() ?? '',
+    pacificaVault:
+      process.env.EXPO_PUBLIC_PACIFICA_VAULT?.trim() ?? '',
+    pacificaWithdrawalFeeUsdc:
+      process.env.EXPO_PUBLIC_PACIFICA_WITHDRAWAL_FEE_USDC?.trim() ?? '',
+    usdcMint: process.env.EXPO_PUBLIC_USDC_MINT?.trim() ?? '',
     usdtMint: process.env.EXPO_PUBLIC_USDT_MINT?.trim() ?? '',
     umbraIndexerUrl:
       process.env.EXPO_PUBLIC_UMBRA_INDEXER_URL?.trim() ?? '',
@@ -160,7 +168,12 @@ function validatePath(
 
 function validateAddress(
   raw: string,
-  variable: 'EXPO_PUBLIC_FLASH_PROGRAM_ID' | 'EXPO_PUBLIC_USDT_MINT',
+  variable:
+    | 'EXPO_PUBLIC_PACIFICA_PROGRAM_ID'
+    | 'EXPO_PUBLIC_PACIFICA_CENTRAL_STATE'
+    | 'EXPO_PUBLIC_PACIFICA_VAULT'
+    | 'EXPO_PUBLIC_USDC_MINT'
+    | 'EXPO_PUBLIC_USDT_MINT',
   issues: ConfigIssue[],
 ): string {
   try {
@@ -175,12 +188,12 @@ function validateAddress(
   return raw;
 }
 
-function validateFlashErRpc(raw: string, issues: ConfigIssue[]): string {
+function validateWebSocketOrigin(raw: string, issues: ConfigIssue[]): string {
   try {
     const parsed = new URL(raw);
 
     if (
-      parsed.protocol !== 'https:' ||
+      parsed.protocol !== 'wss:' ||
       parsed.username.length > 0 ||
       parsed.password.length > 0 ||
       parsed.search.length > 0 ||
@@ -188,12 +201,12 @@ function validateFlashErRpc(raw: string, issues: ConfigIssue[]): string {
       parsed.pathname !== '/' ||
       raw.endsWith('/')
     ) {
-      throw new Error('invalid Flash ER RPC');
+      throw new Error('invalid WebSocket origin');
     }
   } catch {
     issues.push({
-      variable: 'EXPO_PUBLIC_FLASH_ER_RPC',
-      problem: 'must be an HTTPS origin without credentials or a trailing slash',
+      variable: 'EXPO_PUBLIC_PACIFICA_WS_ORIGIN',
+      problem: 'must be a WSS origin without credentials or a trailing slash',
     });
     return '';
   }
@@ -204,9 +217,7 @@ function validateFlashErRpc(raw: string, issues: ConfigIssue[]): string {
 function validatePublicServiceOrigin(
   raw: string,
   variable:
-    | 'EXPO_PUBLIC_FLASH_DATA_ORIGIN'
-    | 'EXPO_PUBLIC_FLASH_STATS_ORIGIN'
-    | 'EXPO_PUBLIC_PYTH_BENCHMARKS_ORIGIN'
+    | 'EXPO_PUBLIC_PACIFICA_API_ORIGIN'
     | 'EXPO_PUBLIC_UMBRA_INDEXER_URL'
     | 'EXPO_PUBLIC_UMBRA_RELAYER_URL'
     | 'EXPO_PUBLIC_UMBRA_ZK_ASSET_BASE_URL',
@@ -234,6 +245,18 @@ function validatePublicServiceOrigin(
   }
 
   return raw;
+}
+
+function validateUsdcFee(raw: string, issues: ConfigIssue[]): bigint {
+  if (!/^\d+(?:\.\d{1,6})?$/u.test(raw)) {
+    issues.push({
+      variable: 'EXPO_PUBLIC_PACIFICA_WITHDRAWAL_FEE_USDC',
+      problem: 'must be a non-negative USDC amount with at most 6 decimals',
+    });
+    return 0n;
+  }
+  const [whole = '0', fraction = ''] = raw.split('.');
+  return BigInt(`${whole}${fraction.padEnd(6, '0')}`);
 }
 
 function validateSampleRate(raw: string, issues: ConfigIssue[]): number {
@@ -286,30 +309,35 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_SWAP_BUILD_PATH',
     issues,
   );
-  const flashProgramId = validateAddress(
-    raw.flashProgramId,
-    'EXPO_PUBLIC_FLASH_PROGRAM_ID',
+  const pacificaProgramId = validateAddress(
+    raw.pacificaProgramId,
+    'EXPO_PUBLIC_PACIFICA_PROGRAM_ID',
     issues,
   );
+  const pacificaCentralState = validateAddress(
+    raw.pacificaCentralState,
+    'EXPO_PUBLIC_PACIFICA_CENTRAL_STATE',
+    issues,
+  );
+  const pacificaVault = validateAddress(
+    raw.pacificaVault,
+    'EXPO_PUBLIC_PACIFICA_VAULT',
+    issues,
+  );
+  const usdcMint = validateAddress(raw.usdcMint, 'EXPO_PUBLIC_USDC_MINT', issues);
   const usdtMint = validateAddress(
     raw.usdtMint,
     'EXPO_PUBLIC_USDT_MINT',
     issues,
   );
-  const flashErRpc = validateFlashErRpc(raw.flashErRpc, issues);
-  const flashDataOrigin = validatePublicServiceOrigin(
-    raw.flashDataOrigin,
-    'EXPO_PUBLIC_FLASH_DATA_ORIGIN',
+  const pacificaApiOrigin = validatePublicServiceOrigin(
+    raw.pacificaApiOrigin,
+    'EXPO_PUBLIC_PACIFICA_API_ORIGIN',
     issues,
   );
-  const flashStatsOrigin = validatePublicServiceOrigin(
-    raw.flashStatsOrigin,
-    'EXPO_PUBLIC_FLASH_STATS_ORIGIN',
-    issues,
-  );
-  const pythBenchmarksOrigin = validatePublicServiceOrigin(
-    raw.pythBenchmarksOrigin,
-    'EXPO_PUBLIC_PYTH_BENCHMARKS_ORIGIN',
+  const pacificaWsOrigin = validateWebSocketOrigin(raw.pacificaWsOrigin, issues);
+  const pacificaWithdrawalFeeBaseUnits = validateUsdcFee(
+    raw.pacificaWithdrawalFeeUsdc,
     issues,
   );
   const umbraIndexerUrl = validatePublicServiceOrigin(
@@ -350,11 +378,13 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
       cluster: 'mainnet',
       privy: { appId: raw.privyAppId, clientId: raw.privyClientId },
       perps: {
-        flashProgramId,
-        flashErRpc,
-        flashDataOrigin,
-        flashStatsOrigin,
-        pythBenchmarksOrigin,
+        pacificaApiOrigin,
+        pacificaWsOrigin,
+        pacificaProgramId,
+        pacificaCentralState,
+        pacificaVault,
+        pacificaWithdrawalFeeBaseUnits,
+        usdcMint,
         usdtMint,
       },
       privacy: {

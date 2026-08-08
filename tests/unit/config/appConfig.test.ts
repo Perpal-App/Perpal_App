@@ -8,11 +8,13 @@ const VALID: RawAppEnv = {
   marketDataPath: '/v1/markets',
   marketStreamPath: '/v1/markets/stream',
   swapBuildPath: '/v1/swap/build',
-  flashProgramId: '11111111111111111111111111111111',
-  flashErRpc: 'https://flash.magicblock.xyz',
-  flashDataOrigin: 'https://flashapi.trade',
-  flashStatsOrigin: 'https://api.prod.flash.trade',
-  pythBenchmarksOrigin: 'https://benchmarks.pyth.network',
+  pacificaApiOrigin: 'https://api.pacifica.fi',
+  pacificaWsOrigin: 'wss://ws.pacifica.fi',
+  pacificaProgramId: '11111111111111111111111111111111',
+  pacificaCentralState: '11111111111111111111111111111111',
+  pacificaVault: '11111111111111111111111111111111',
+  pacificaWithdrawalFeeUsdc: '1',
+  usdcMint: '11111111111111111111111111111111',
   usdtMint: '11111111111111111111111111111111',
   umbraIndexerUrl: 'https://utxo-indexer.api.umbraprivacy.com',
   umbraRelayerUrl: 'https://relayer.api.umbraprivacy.com',
@@ -33,7 +35,7 @@ function issueVariables(overrides: Partial<RawAppEnv>): readonly string[] {
 }
 
 describe('parseAppConfig', () => {
-  it('accepts the Flash mainnet configuration', () => {
+  it('accepts the Pacifica mainnet configuration', () => {
     const result = parseAppConfig(VALID);
 
     expect(result.ok).toBe(true);
@@ -50,12 +52,8 @@ describe('parseAppConfig', () => {
       expect(result.value.api.marketStreamUrl).toBe(
         'https://gateway.example/v1/markets/stream',
       );
-      expect(result.value.perps.flashDataOrigin).toBe(
-        'https://flashapi.trade',
-      );
-      expect(result.value.perps.pythBenchmarksOrigin).toBe(
-        'https://benchmarks.pyth.network',
-      );
+      expect(result.value.perps.pacificaApiOrigin).toBe('https://api.pacifica.fi');
+      expect(result.value.perps.pacificaWithdrawalFeeBaseUnits).toBe(1_000_000n);
       expect(result.value.privacy.umbraRelayerUrl).toBe(
         'https://relayer.api.umbraprivacy.com',
       );
@@ -70,20 +68,22 @@ describe('parseAppConfig', () => {
 
   it('rejects missing provider addresses and malformed paths', () => {
     const variables = issueVariables({
-      flashProgramId: 'invalid',
-      flashErRpc: 'http://flash.magicblock.xyz',
-      flashDataOrigin: 'http://flashapi.trade',
-      pythBenchmarksOrigin: 'http://benchmarks.pyth.network',
+      pacificaProgramId: 'invalid',
+      pacificaCentralState: 'invalid',
+      pacificaApiOrigin: 'http://api.pacifica.fi',
+      pacificaWsOrigin: 'https://ws.pacifica.fi',
+      usdcMint: '',
       usdtMint: '',
       marketDataPath: 'v1/markets',
     });
 
     expect(variables).toEqual(
       expect.arrayContaining([
-        'EXPO_PUBLIC_FLASH_PROGRAM_ID',
-        'EXPO_PUBLIC_FLASH_ER_RPC',
-        'EXPO_PUBLIC_FLASH_DATA_ORIGIN',
-        'EXPO_PUBLIC_PYTH_BENCHMARKS_ORIGIN',
+        'EXPO_PUBLIC_PACIFICA_PROGRAM_ID',
+        'EXPO_PUBLIC_PACIFICA_CENTRAL_STATE',
+        'EXPO_PUBLIC_PACIFICA_API_ORIGIN',
+        'EXPO_PUBLIC_PACIFICA_WS_ORIGIN',
+        'EXPO_PUBLIC_USDC_MINT',
         'EXPO_PUBLIC_USDT_MINT',
         'EXPO_PUBLIC_MARKET_DATA_PATH',
       ]),

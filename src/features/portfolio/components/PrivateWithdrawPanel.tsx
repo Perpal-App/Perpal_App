@@ -5,8 +5,8 @@ import { PublicKey } from '@solana/web3.js';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig } from '@/config/appConfig';
-import { parseAmount } from '@/domain/money/amount';
-import { flashCollateral } from '@/integrations/perps/providerCollateral';
+import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
+import { pacificaCollateral } from '@/integrations/perps/providerCollateral';
 import { usePrivateExit } from '@/integrations/umbra/PrivateExitProvider';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
@@ -19,7 +19,7 @@ export function PrivateWithdrawPanel() {
   const collateral = useMemo(() => {
     const config = readAppConfig();
     return config.ok
-      ? flashCollateral(config.value.perps.flashProgramId)
+      ? pacificaCollateral(config.value.perps.usdcMint)
       : null;
   }, []);
   const pending = privateExit.record !== null && privateExit.record.phase !== 'complete';
@@ -39,7 +39,7 @@ export function PrivateWithdrawPanel() {
       setInputError(null);
       Alert.alert(
         'Withdraw privately',
-        `${amount.trim()} ${collateral.symbol} will be withdrawn privately to ${destinationMode === 'privy' ? 'your Privy wallet' : 'the external wallet'}. Perpal handles settlement and delivery automatically.`,
+        `${amount.trim()} ${collateral.symbol} will be withdrawn from Pacifica to T, then privately to ${destinationMode === 'privy' ? 'your Privy wallet' : 'the external wallet'}. Pacifica withdrawal fee: ${feeLabel()}. Umbra relayer fees are deducted from the private transfer.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -132,6 +132,13 @@ export function PrivateWithdrawPanel() {
       )}
     </View>
   );
+}
+
+function feeLabel(): string {
+  const config = readAppConfig();
+  if (!config.ok) return 'unavailable';
+  const units = config.value.perps.pacificaWithdrawalFeeBaseUnits;
+  return `${formatAmount(amountFromBaseUnits(units, 6))} USDC`;
 }
 
 function exitStatus(phase: string): string {

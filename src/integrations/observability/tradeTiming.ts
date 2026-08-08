@@ -1,7 +1,7 @@
 export type TradeTimingContext = {
   readonly action: 'open' | 'reduce' | 'close';
   readonly intentStartedAtMs: number;
-  readonly provider: 'flash';
+  readonly provider: 'pacifica';
 };
 
 export function logTradeTiming(

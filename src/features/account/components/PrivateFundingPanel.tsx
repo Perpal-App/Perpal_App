@@ -47,8 +47,8 @@ export function PrivateFundingPanel({
   const collateralOptions = useMemo(() => {
     const config = readAppConfig();
     return config.ok
-      ? listTradingCollateralOptions(
-          config.value.perps.flashProgramId,
+        ? listTradingCollateralOptions(
+          config.value.perps.usdcMint,
           config.value.perps.usdtMint,
         )
       : [];
@@ -59,7 +59,7 @@ export function PrivateFundingPanel({
     const config = readAppConfig();
     return config.ok
       ? listTradingCollateralOptions(
-          config.value.perps.flashProgramId,
+          config.value.perps.usdcMint,
           config.value.perps.usdtMint,
         )[0]?.symbol ?? 'USDC'
       : 'USDC';

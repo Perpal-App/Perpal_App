@@ -39,7 +39,6 @@
   },
   "dependencies": {
     "@ethersproject/shims": "^5.8.0",
-    "@flash_trade/flash-sdk-v2": "^1.1.1",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
     "@privy-io/expo": "0.70.6",

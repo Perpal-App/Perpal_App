@@ -7,12 +7,12 @@ import {
   type ChartToolName,
 } from '@/features/trade/components/ChartToolIcon';
 import { TRADING_VIEW_CHART_HTML } from '@/features/trade/generated/tradingViewChartHtml';
-import type { MarketHistoryStatus } from '@/features/trade/hooks/usePythMarketHistory';
+import type { MarketHistoryStatus } from '@/features/trade/hooks/usePacificaMarketHistory';
 import {
   MARKET_TIMEFRAMES,
   type MarketCandle,
   type MarketTimeframe,
-} from '@/integrations/perps/markets/pythHistory';
+} from '@/integrations/perps/pacifica/pacificaHistory';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 type ChartStyle = 'candles' | 'line';

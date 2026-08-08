@@ -107,11 +107,6 @@ export function privateFundingUserMessage(code: string): string {
     return 'The stablecoin conversion could not be verified. Resume funding to prepare a fresh route.';
   }
 
-  if (code === 'flash_deposit_simulation_failed') {
-    return 'Flash rejected the collateral deposit preview. Resume funding after checking the detailed error.';
-  }
-
-
   if (code.endsWith('_account_fetch') || code.endsWith('_mint_fetch')) {
     return 'Umbra could not read the required on-chain accounts. Your funds were not submitted.';
   }

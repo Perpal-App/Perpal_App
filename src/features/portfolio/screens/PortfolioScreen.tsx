@@ -5,8 +5,8 @@ import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { readAppConfig } from '@/config/appConfig';
-import { FlashPortfolioContent } from '@/features/portfolio/components/FlashPortfolioContent';
-import { useFlashPortfolio } from '@/features/portfolio/hooks/useFlashPortfolio';
+import { PacificaPortfolioContent } from '@/features/portfolio/components/PacificaPortfolioContent';
+import { usePacificaPortfolio } from '@/features/portfolio/hooks/usePacificaPortfolio';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
@@ -14,14 +14,13 @@ export function PortfolioScreen() {
   const router = useRouter();
   const config = readAppConfig();
   const session = useTradingSession();
-  const portfolio = useFlashPortfolio(
-    config.ok ? config.value.perps.flashErRpc : '',
-    config.ok ? config.value.perps.flashProgramId : '',
+  const portfolio = usePacificaPortfolio(
+    config.ok ? config.value.perps.pacificaApiOrigin : '',
     session.status === 'ready' ? session.address : null,
   );
 
   if (!config.ok) {
-    return <PortfolioState title="Configuration required" message="The mainnet gateway or Flash configuration is invalid." />;
+    return <PortfolioState title="Configuration required" message="The mainnet gateway or Pacifica configuration is invalid." />;
   }
 
   if (session.status === 'waiting-for-wallet') {
@@ -58,14 +57,14 @@ export function PortfolioScreen() {
   }
 
   if (portfolio.status === 'error') {
-    return <PortfolioState title="Flash portfolio unavailable" message="The Flash portfolio could not be read. The app will retry while this tab remains open." />;
+    return <PortfolioState title="Pacifica portfolio unavailable" message="The Pacifica account could not be read. The app will retry while this tab remains open." />;
   }
 
   if (portfolio.status === 'loading' || portfolio.snapshot === null) {
-    return <LoadingState label="Loading Flash portfolio" />;
+    return <LoadingState label="Loading Pacifica portfolio" />;
   }
 
-  return <FlashPortfolioContent snapshot={portfolio.snapshot} />;
+  return <PacificaPortfolioContent snapshot={portfolio.snapshot} />;
 }
 
 function PortfolioState({

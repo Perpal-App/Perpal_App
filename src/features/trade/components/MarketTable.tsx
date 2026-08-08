@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 
 import {
-  addAmounts,
   formatCompactTokenPrice,
   formatCompactUsd,
 } from '@/domain/money/amount';
@@ -17,8 +16,10 @@ import {
   MARKET_LOGO_SIZE,
   MarketLogo,
 } from '@/features/trade/components/MarketLogo';
-import type { FlashMarketSnapshot } from '@/integrations/perps/flash/flashMarketData';
-import type { MainnetMarket } from '@/integrations/perps/markets/mainnetCatalog';
+import type {
+  PacificaMarket,
+  PacificaMarketSnapshot,
+} from '@/integrations/perps/pacifica/pacificaMarketData';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 /**
@@ -56,8 +57,8 @@ const COLUMN_FLEX = { market: 1.85, price: 1.35, volume: 1.15 } as const;
 const MAX_TEXT_SCALE = 1.15;
 
 export type MarketTableEntry = {
-  readonly market: MainnetMarket;
-  readonly venue: FlashMarketSnapshot | null;
+  readonly market: PacificaMarket;
+  readonly venue: PacificaMarketSnapshot | null;
 };
 
 /**
@@ -112,9 +113,7 @@ export function MarketTableRow({
   const price = venue !== null && !venue.priceStale ? venue.price : null;
   const change = price === null ? null : venue?.change24hBps ?? null;
   const volume = venue === null ? null : venue.volume24h;
-  const openInterest = venue === null
-    ? null
-    : addAmounts(venue.longOpenInterest, venue.shortOpenInterest);
+  const openInterest = venue?.openInterest ?? null;
 
   const priceText = price === null ? UNAVAILABLE : formatCompactTokenPrice(price);
   const changeText = change === null ? UNAVAILABLE : formatChange(change);

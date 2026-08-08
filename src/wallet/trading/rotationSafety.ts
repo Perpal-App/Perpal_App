@@ -1,11 +1,10 @@
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { base58 } from '@scure/base';
 
 import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
-import { fetchFlashPortfolio } from '@/integrations/perps/flash/flashPortfolio';
-import { readPendingFlashSettlements } from '@/integrations/perps/flash/flashSettlementStorage';
+import { fetchPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import { hasPendingPacificaWithdrawal } from '@/integrations/perps/pacifica/pacificaWithdrawal';
 import { readPrivateExitRecord } from '@/integrations/umbra/privateExitStorage';
 import { readPrivateFundingRecord } from '@/integrations/umbra/umbraSecureStorage';
 
@@ -18,37 +17,32 @@ export class TradingWalletRotationError extends Error {
 
 export async function assertTradingWalletRotationSafe(input: {
   readonly config: AppConfig;
-  readonly feeSigner: GatewayRequestSigner;
   readonly mainWalletAddress: string;
   readonly signer: GatewayRequestSigner;
   readonly tradingWalletAddress: string;
 }): Promise<void> {
   const [
     nativeBalance,
-    feeSignerBalance,
     tokenBalance,
     token2022Balance,
     funding,
     exit,
-    flashPending,
-    flash,
+    pacificaWithdrawal,
+    pacifica,
   ] = await Promise.all([
     solBalance(input.tradingWalletAddress, input),
-    solBalance(base58.encode(input.feeSigner.publicKey), input),
     totalTokenBalance(TOKEN_PROGRAM_ID.toBase58(), input),
     totalTokenBalance(TOKEN_2022_PROGRAM_ID.toBase58(), input),
     readPrivateFundingRecord(input.mainWalletAddress),
     readPrivateExitRecord(input.tradingWalletAddress),
-    readPendingFlashSettlements(input.tradingWalletAddress),
-    fetchFlashPortfolio(
-      input.config.perps.flashErRpc,
-      input.config.perps.flashProgramId,
+    hasPendingPacificaWithdrawal(input.tradingWalletAddress),
+    fetchPacificaPortfolio(
+      input.config.perps.pacificaApiOrigin,
       input.tradingWalletAddress,
-      new AbortController().signal,
     ),
   ]);
 
-  if (nativeBalance !== 0n || feeSignerBalance !== 0n) {
+  if (nativeBalance !== 0n) {
     throw new TradingWalletRotationError('Withdraw the remaining private SOL fee reserve first.');
   }
   if (tokenBalance !== 0n || token2022Balance !== 0n) {
@@ -60,17 +54,21 @@ export async function assertTradingWalletRotationSafe(input: {
   if (exit !== null && exit.phase !== 'complete') {
     throw new TradingWalletRotationError('A private withdrawal is still pending.');
   }
-  if (flashPending.length > 0) {
-    throw new TradingWalletRotationError('A provider settlement is still pending.');
+  if (pacificaWithdrawal) {
+    throw new TradingWalletRotationError('A Pacifica withdrawal is still pending.');
   }
   if (
-    flash.positions.length > 0 ||
-    flash.openOrders > 0 ||
-    Object.values(flash.deposits).some((amount) => amount.baseUnits !== 0n) ||
-    Object.values(flash.reservedWithdrawals).some((amount) => amount.baseUnits !== 0n)
+    pacifica.positions.length > 0 ||
+    pacifica.orders.length > 0 ||
+    nonZero(pacifica.balance) ||
+    nonZero(pacifica.pendingBalance)
   ) {
-    throw new TradingWalletRotationError('Flash still holds positions, orders, or collateral.');
+    throw new TradingWalletRotationError('Pacifica still holds positions, orders, collateral, or a pending balance.');
   }
+}
+
+function nonZero(value: string): boolean {
+  return !/^0+(?:\.0+)?$/u.test(value);
 }
 
 async function solBalance(

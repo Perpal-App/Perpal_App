@@ -180,7 +180,7 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       typeof record.id !== 'string' ||
       !isAddress(record.mainWalletAddress) ||
       !isAddress(record.tradingWalletAddress) ||
-      record.provider !== 'flash' ||
+      (record.provider !== 'pacifica' && record.provider !== 'flash') ||
       !isAddress(record.mint) ||
       (record.symbol !== 'USDC' && record.symbol !== 'USDT') ||
       typeof record.amountBaseUnits !== 'string' ||
@@ -226,6 +226,10 @@ function parseRecord(value: string): PrivateFundingRecord | null {
 
     return {
       ...record,
+      // Preserve resumable Umbra state created before the venue migration. The
+      // old provider field never controlled custody or signing; completed funds
+      // are already in T, so normalize the record without replaying a transfer.
+      provider: 'pacifica',
       noteAmountBaseUnits,
       relayerFixedFeeLamports,
       scanStartLeafCounts,

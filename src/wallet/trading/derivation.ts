@@ -36,7 +36,6 @@ export const DERIVATION_MESSAGE =
 
 const HKDF_INFO = 'perpal/trading-wallet/v2/ed25519';
 const ROTATION_HKDF_INFO = 'perpal/trading-wallet/v2/rotation';
-const FLASH_FEE_HKDF_INFO = 'perpal/trading-wallet/v2/flash-fee-payer';
 
 /** Ed25519 signatures are deterministic (RFC 8032), which is what makes this work. */
 const EXPECTED_SIGNATURE_BYTES = 64;
@@ -187,29 +186,6 @@ export function deriveRotatedTradingWallet(
   return {
     address: base58.encode(ed25519.getPublicKey(seed)),
     generation,
-    version: DERIVATION_VERSION,
-    secretKey: seed,
-  };
-}
-
-/** Derives Flash's required distinct fee payer from T without another wallet. */
-export function deriveFlashFeeWallet(
-  tradingSeed: Uint8Array,
-  tradingAddress: string,
-): DerivedTradingWallet {
-  if (tradingSeed.length !== 32 || tradingAddress.trim().length === 0) {
-    throw new DerivationError('Private trading wallet is unavailable.');
-  }
-  const seed = hkdf(
-    sha512,
-    tradingSeed,
-    utf8ToBytes(tradingAddress),
-    utf8ToBytes(FLASH_FEE_HKDF_INFO),
-    32,
-  );
-  return {
-    address: base58.encode(ed25519.getPublicKey(seed)),
-    generation: 0,
     version: DERIVATION_VERSION,
     secretKey: seed,
   };
