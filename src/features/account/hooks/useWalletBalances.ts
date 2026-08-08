@@ -7,13 +7,13 @@ import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import { listTradingCollateralOptions } from '@/integrations/perps/providerCollateral';
 import { readTokenBalance } from '@/integrations/solana/stablecoinSwap';
 
-type WalletBalance = {
+export type WalletBalance = {
   readonly solLamports: bigint;
   readonly usdcBaseUnits: bigint;
   readonly usdtBaseUnits: bigint;
 };
 
-type WalletBalances = {
+export type WalletBalances = {
   readonly publicWallet: WalletBalance;
   readonly privateWallet: WalletBalance;
 };
