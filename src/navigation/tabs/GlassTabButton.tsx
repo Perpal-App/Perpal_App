@@ -1,10 +1,9 @@
 import type { TabTriggerSlotProps } from 'expo-router/ui';
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
-  interpolateColor,
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
@@ -13,6 +12,8 @@ import Animated, {
 
 import { TabBarIcon } from '@/assets/svg/TabBarIcon';
 import {
+  BAR_MARGIN,
+  EXPANDED_HEIGHT,
   HIGHLIGHT_EXPANDED,
   HIGHLIGHT_MINIMIZED,
   ICON_SIZE,
@@ -20,6 +21,8 @@ import {
   ITEM_PAD_V,
   LABEL_HEIGHT,
   SLIDE_SPRING,
+  barHeightAt,
+  sideInsetAt,
   useBarContext,
   type GlassTabItem,
 } from '@/navigation/tabs/barGeometry';
@@ -42,6 +45,7 @@ export function GlassTabButton({
 }) {
   const minimized = useMinimizeState();
   const progress = minimized.progress;
+  const { width: windowWidth } = useWindowDimensions();
   const bar = useBarContext();
   const slideIndex = bar?.slideIndex;
   const pressedIndex = bar?.pressedIndex;
@@ -75,44 +79,48 @@ export function GlassTabButton({
     bar.slideIndex.set(withSpring(index, SLIDE_SPRING));
   }, [bar, index, isFocused]);
 
-  // Tint follows the highlight rather than navigation focus: whatever the pill sits
+  // Selection follows the highlight rather than navigation focus: whatever the pill sits
   // over lights up, live while scrubbing and travelling on a tap.
-  const activeGlyphStyle = useAnimatedStyle(() => ({
+  //
+  // One value drives both the solid glyph and the bold label, because they are two halves
+  // of the same statement and reading one settle behind the other would look like a
+  // rendering fault. Neither a glyph's weight nor a font family can be interpolated, so
+  // each is a second layer crossfading over the resting one.
+  const selectedStyle = useAnimatedStyle(() => ({
     opacity: slideIndex === undefined
       ? (isFocused ? 1 : 0)
       : 1 - Math.min(Math.abs(slideIndex.value - index), 1),
   }));
 
+  // Only the labels fold away as the bar minimizes; the icons stay.
   const labelStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.4], [1, 0], Extrapolation.CLAMP),
-    color: slideIndex === undefined
-      ? (isFocused ? colors.textPrimary : colors.textMuted)
-      : interpolateColor(
-        Math.min(Math.abs(slideIndex.value - index), 1),
-        [0, 1],
-        [colors.textPrimary, colors.textMuted],
-      ),
   }));
 
-  // Height is animated explicitly rather than derived from the children, so the icon
-  // stays exactly centred on every frame: layout-driven sizing lags a frame behind a
-  // UI-thread animation.
-  const boxStyle = useAnimatedStyle(() => ({
-    height: interpolate(
-      progress.value,
-      [0, 1],
-      [HIGHLIGHT_EXPANDED, HIGHLIGHT_MINIMIZED],
-      Extrapolation.CLAMP,
-    ),
-  }));
+  // The parent surface scales to the original minimized dimensions. Counter-scaling
+  // keeps glyph and text sizes unchanged, while the vertical shift reproduces the
+  // original icon centring after the label folds away. No layout is invalidated.
+  const itemStyle = useAnimatedStyle(() => {
+    const fullWidth = Math.max(windowWidth - BAR_MARGIN * 2, 1);
+    const visualWidth = Math.max(
+      fullWidth - sideInsetAt(progress.value) * 2,
+      1,
+    );
+    const barScaleX = visualWidth / fullWidth;
+    const barScaleY = barHeightAt(progress.value) / EXPANDED_HEIGHT;
 
-  // Press feedback: the icon and label dip toward the pill under the finger and spring
-  // back on release. Kept on its own style so it only re-evaluates while a press is in
-  // flight, and transform-only so it never disturbs the animated height above. The
-  // highlight deliberately does not scale — the thing that moves is the thing touched.
-  const pressStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - pressed.value * (1 - motion.pressScale) }],
-  }));
+    return {
+      transform: [
+        {
+          translateY:
+            progress.value * (HIGHLIGHT_EXPANDED - HIGHLIGHT_MINIMIZED) / 2,
+        },
+        { scaleX: 1 / barScaleX },
+        { scaleY: 1 / barScaleY },
+        { scale: 1 - pressed.value * (1 - motion.pressScale) },
+      ],
+    };
+  });
 
   return (
     <Pressable
@@ -127,16 +135,22 @@ export function GlassTabButton({
       }}
       style={styles.trigger}
     >
-      <Animated.View style={[styles.item, boxStyle, pressStyle]}>
+      <Animated.View style={[styles.item, itemStyle]}>
         <View>
           <TabBarIcon color={colors.textMuted} name={item.icon} size={ICON_SIZE} />
-          <Animated.View style={[StyleSheet.absoluteFill, styles.centre, activeGlyphStyle]}>
-            <TabBarIcon color={colors.textPrimary} name={item.icon} size={ICON_SIZE} />
+          <Animated.View style={[StyleSheet.absoluteFill, styles.centre, selectedStyle]}>
+            <TabBarIcon color={colors.glassSelected} filled name={item.icon} size={ICON_SIZE} />
           </Animated.View>
         </View>
-        <Animated.Text numberOfLines={1} style={[styles.label, labelStyle]}>
-          {item.label}
-        </Animated.Text>
+        <Animated.View style={[styles.labelBox, labelStyle]}>
+          <Text numberOfLines={1} style={styles.label}>{item.label}</Text>
+          {/* The bold label is wider than the medium one, so it is centred over it rather
+              than laid out beside it — otherwise selecting a tab would nudge its own
+              label sideways. */}
+          <Animated.View style={[StyleSheet.absoluteFill, styles.centre, selectedStyle]}>
+            <Text numberOfLines={1} style={styles.selectedLabel}>{item.label}</Text>
+          </Animated.View>
+        </Animated.View>
       </Animated.View>
     </Pressable>
   );
@@ -145,16 +159,36 @@ export function GlassTabButton({
 const styles = StyleSheet.create({
   trigger: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   item: {
+    height: HIGHLIGHT_EXPANDED,
     alignSelf: 'stretch',
     alignItems: 'center',
     overflow: 'hidden',
     paddingTop: ITEM_PAD_V,
   },
   centre: { alignItems: 'center', justifyContent: 'center' },
+  labelBox: {
+    alignSelf: 'stretch',
+    height: LABEL_HEIGHT,
+    marginTop: ITEM_GAP,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   label: {
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
     fontSize: 9.5,
     lineHeight: LABEL_HEIGHT,
-    marginTop: ITEM_GAP,
+    color: colors.textMuted,
+  },
+  // Same metrics, heavier face: the box is a fixed height and both layers are centred in
+  // it, so the swap changes weight without moving the baseline.
+  //
+  // `glassSelected`, not `accent`. The saturated violet is darker than the muted grey it
+  // would replace, so selecting a tab would dim its own label; selection has to gain
+  // brightness, so the tint comes from the bright end of the ramp.
+  selectedLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 9.5,
+    lineHeight: LABEL_HEIGHT,
+    color: colors.glassSelected,
   },
 });

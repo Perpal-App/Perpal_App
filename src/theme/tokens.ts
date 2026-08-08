@@ -49,10 +49,24 @@ export const colors = {
    * wash out the icons, `glassRim` is the faint edge that keeps the capsule's
    * shape legible against a dark page, and `glassHighlight` is the sliding pill
    * behind the selected tab.
+   *
+   * The rim and the pill are drawn in the violet ramp rather than in plain white, the
+   * same reasoning as `glassEdge`: a neutral white edge on a violet-cast surface reads
+   * as a hard outline laid over the app, while the ramp defines the same shape as part
+   * of it. The rim carries slightly more alpha than the white it replaced, because a
+   * tinted film reads dimmer than a neutral one at equal opacity.
+   *
+   * `glassHighlight` takes the ramp's deep end and `glassSelected` its bright end, and the
+   * distance between them is the point. A pill tinted the same pale violet as the glyph on
+   * it put both at nearly the same value, and the selected tab read as washed out rather
+   * than lit — the pill has to fall away for the glyph to come forward. `glassSelected` is
+   * brighter than `accentSoft` for the same reason: the pastel accent is the right violet
+   * on a light surface, but selection on dark glass needs to gain luminance, not just hue.
    */
   glassTint: 'rgba(10, 10, 12, 0.55)',
-  glassRim: 'rgba(255, 255, 255, 0.10)',
-  glassHighlight: 'rgba(255, 255, 255, 0.14)',
+  glassRim: 'rgba(196, 181, 253, 0.14)',
+  glassHighlight: 'rgba(75, 47, 168, 0.34)',
+  glassSelected: '#DDCEFF',
 } as const;
 
 export const spacing = {
@@ -183,6 +197,24 @@ export const gradients = {
       'rgba(255, 255, 255, 0)',
     ],
     locations: [0, 0.4, 1],
+  },
+  /**
+   * Scrim under floating chrome, densest at the screen edge the chrome is anchored to
+   * and gone well before the far end of it.
+   *
+   * Built from `scrim` rather than from black. Both are near enough to black to look
+   * identical in isolation, but the app's surfaces carry a violet cast, and a pure-black
+   * ramp over them desaturates as it deepens — the darkest part of the fade drifts off
+   * the palette exactly where it covers the most area.
+   */
+  chromeScrim: {
+    colors: [
+      'rgba(5, 5, 9, 0.7)',
+      'rgba(5, 5, 9, 0.32)',
+      'rgba(5, 5, 9, 0.08)',
+      'rgba(5, 5, 9, 0)',
+    ],
+    locations: [0, 0.42, 0.68, 0.88],
   },
 } as const;
 

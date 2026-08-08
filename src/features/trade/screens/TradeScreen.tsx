@@ -110,7 +110,12 @@ export function TradeScreen() {
         onScroll={onScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-        windowSize={5}
+        // Three viewports of rows kept mounted rather than five. The catalog runs to a
+        // hundred and fifty markets, so the further this was scrolled the more rows were
+        // realized and re-rendered on every price batch. Remounting a row is cheap now
+        // that its logo is decoded once and cached, so holding fewer of them is the
+        // better trade.
+        windowSize={3}
       />
     </AppScreen>
   );

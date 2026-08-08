@@ -23,6 +23,17 @@ const MAX_RECONNECT_MS = 15_000;
  * navigation, short enough that a backgrounded app is not streaming prices.
  */
 const IDLE_GRACE_MS = 20_000;
+/**
+ * How often price updates reach React, however fast the socket delivers them.
+ *
+ * The venue streams each market's price as it moves, and every publish costs a screen
+ * re-render plus, on the markets table, a rebuild and re-sort of the whole catalog. At the
+ * socket's own rate that is the same work dozens of times a second for a table nobody can
+ * read that fast. Batching to four publishes a second collapses it without any perceptible
+ * staleness, and the merge below already resolves several updates to one market by
+ * timestamp, so a batch lands the same values a stream of them would have.
+ */
+const PUBLISH_INTERVAL_MS = 250;
 
 export type PacificaVenueSnapshotState = {
   readonly markets: readonly PacificaMarket[];
@@ -126,6 +137,10 @@ function open(apiOrigin: string, assetOrigin: string, wsOrigin: string): () => v
   let socket: WebSocket | null = null;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let reconnect: ReturnType<typeof setTimeout> | undefined;
+  // Prices that have arrived but not yet been published. Keyed by market so the buffer is
+  // bounded by the catalog rather than by how long the flush is delayed.
+  let buffered: Map<string, PacificaMarketSnapshot> | null = null;
+  let publishAt: ReturnType<typeof setTimeout> | undefined;
 
   // Only announce loading with nothing to show. Once the feed has a catalog the screen is
   // already displaying the venue's last state, and reporting "connecting" over
@@ -138,6 +153,30 @@ function open(apiOrigin: string, assetOrigin: string, wsOrigin: string): () => v
     socket = null;
     if (heartbeat !== undefined) clearInterval(heartbeat);
     heartbeat = undefined;
+    // Buffered prices are dropped rather than flushed: the socket they came from is gone,
+    // and the refetch that follows will supply current ones.
+    if (publishAt !== undefined) clearTimeout(publishAt);
+    publishAt = undefined;
+    buffered = null;
+  };
+
+  const bufferPrices = (next: readonly PacificaMarketSnapshot[]) => {
+    buffered ??= new Map();
+    for (const snapshot of next) {
+      const previous = buffered.get(snapshot.venueRef);
+      if (previous === undefined || snapshot.pricePublishedAtMs >= previous.pricePublishedAtMs) {
+        buffered.set(snapshot.venueRef, snapshot);
+      }
+    }
+
+    if (publishAt !== undefined) return;
+    publishAt = setTimeout(() => {
+      publishAt = undefined;
+      const batch = buffered;
+      buffered = null;
+      if (batch === null || !active) return;
+      publish({ snapshots: mergeSnapshots(state.snapshots, [...batch.values()]) });
+    }, PUBLISH_INTERVAL_MS);
   };
 
   const scheduleReconnect = () => {
@@ -170,9 +209,7 @@ function open(apiOrigin: string, assetOrigin: string, wsOrigin: string): () => v
       socket.onmessage = (event) => {
         try {
           const next = parsePacificaPriceMessage(JSON.parse(String(event.data)) as unknown);
-          if (next !== null && active) {
-            publish({ snapshots: mergeSnapshots(state.snapshots, next) });
-          }
+          if (next !== null && active) bufferPrices(next);
         } catch (cause) {
           logOnce(cause);
         }

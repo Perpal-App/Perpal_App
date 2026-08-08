@@ -101,6 +101,10 @@ export function GlassTabBar({
   const dismissal = useSharedValue(dismissed ? 1 : 0);
   const tabCount = Math.max(Children.count(children), 1);
   const bottomOffset = Math.max(insets.bottom - 16, BAR_MARGIN);
+  const expandedItemWidth = Math.max(
+    (windowWidth - BAR_MARGIN * 2 - ROW_PAD_H * 2) / tabCount,
+    1,
+  );
 
   const tick = useCallback(() => {
     if (haptics && Platform.OS === 'ios') void Haptics.selectionAsync();
@@ -115,9 +119,9 @@ export function GlassTabBar({
   }, [dismissal, dismissed]);
 
   const gesture = useMemo(() => {
-    const indexAtX = (x: number, minimizedValue: number) => {
+    const indexAtX = (x: number) => {
       'worklet';
-      const barWidth = windowWidth - BAR_MARGIN * 2 - sideInsetAt(minimizedValue) * 2;
+      const barWidth = windowWidth - BAR_MARGIN * 2;
       const itemWidth = (barWidth - ROW_PAD_H * 2) / tabCount;
       const raw = (x - ROW_PAD_H) / itemWidth - 0.5;
       return Math.min(Math.max(raw, 0), tabCount - 1);
@@ -133,7 +137,7 @@ export function GlassTabBar({
         setMinimized(minimized, 0);
       })
       .onUpdate((event) => {
-        const index = indexAtX(event.x, progress.value);
+        const index = indexAtX(event.x);
         slideIndex.set(index);
         const rounded = Math.round(index);
         if (rounded !== lastTicked.value) {
@@ -161,11 +165,11 @@ export function GlassTabBar({
       // decision, not follow it — waiting for the tap to be recognised would put the
       // response a whole gesture behind the finger.
       .onBegin((event) => {
-        pressedIndex.set(Math.round(indexAtX(event.x, progress.value)));
+        pressedIndex.set(Math.round(indexAtX(event.x)));
       })
       .onEnd((event, success) => {
         if (!success) return;
-        const index = Math.round(indexAtX(event.x, progress.value));
+        const index = Math.round(indexAtX(event.x));
         // Claim the target before navigating, so the focus effect that fires a few
         // frames later recognises this spring as its own and leaves it running.
         targetIndex.set(index);
@@ -207,17 +211,23 @@ export function GlassTabBar({
     transform: [{ translateY: dismissal.value * (bottomOffset + EXPANDED_HEIGHT) }],
   }));
 
-  const barStyle = useAnimatedStyle(() => ({
-    height: barHeightAt(progress.value),
-    // The pill shrinks in both dimensions, not just height.
-    marginHorizontal: sideInsetAt(progress.value),
-  }));
+  // Keep the native blur at one fixed layout size and composite the same final
+  // geometry with transforms. Resizing the Android blur every animation frame was
+  // forcing a full list re-layout and blur pass while Markets was scrolling.
+  const barStyle = useAnimatedStyle(() => {
+    const fullWidth = Math.max(windowWidth - BAR_MARGIN * 2, 1);
+    const visualWidth = Math.max(
+      fullWidth - sideInsetAt(progress.value) * 2,
+      1,
+    );
 
-  // The capsule shape lives on the surface itself rather than on a clipping parent:
-  // masking a blur view breaks its edge rendering.
-  const shapeStyle = useAnimatedStyle(() => ({
-    borderRadius: barHeightAt(progress.value) / 2,
-  }));
+    return {
+      transform: [
+        { scaleX: visualWidth / fullWidth },
+        { scaleY: barHeightAt(progress.value) / EXPANDED_HEIGHT },
+      ],
+    };
+  });
 
   // One shared highlight that slides between tabs, transform-only so it stays on the
   // GPU. All of its geometry comes from shared values.
@@ -229,15 +239,13 @@ export function GlassTabBar({
       [HIGHLIGHT_EXPANDED, HIGHLIGHT_MINIMIZED],
       Extrapolation.CLAMP,
     );
-    const barWidth = windowWidth - BAR_MARGIN * 2 - sideInsetAt(progress.value) * 2;
-    const itemWidth = (barWidth - ROW_PAD_H * 2) / tabCount;
+    const barScaleY = bar / EXPANDED_HEIGHT;
 
     return {
-      height,
-      width: itemWidth,
-      borderRadius: height / 2,
-      top: (bar - height) / 2,
-      transform: [{ translateX: ROW_PAD_H + itemWidth * slideIndex.value }],
+      transform: [
+        { translateX: ROW_PAD_H + expandedItemWidth * slideIndex.value },
+        { scaleY: height / (HIGHLIGHT_EXPANDED * barScaleY) },
+      ],
     };
   });
 
@@ -267,7 +275,10 @@ export function GlassTabBar({
         style={{ marginHorizontal: BAR_MARGIN, marginBottom: bottomOffset }}
       >
         <GestureDetector gesture={gesture}>
-          <Animated.View style={barStyle}>
+          <Animated.View
+            renderToHardwareTextureAndroid
+            style={[styles.bar, barStyle]}
+          >
             <AnimatedBlurView
               // Android blurs a target view rather than whatever happens to be behind
               // it, so the layout hands us the screen container to sample. Without a
@@ -276,10 +287,12 @@ export function GlassTabBar({
               blurMethod="dimezisBlurViewSdk31Plus"
               blurTarget={blurTarget}
               intensity={28}
-              style={[StyleSheet.absoluteFill, styles.capsule, shapeStyle]}
+              style={[StyleSheet.absoluteFill, styles.capsule]}
               tint="systemThickMaterialDark"
             />
-            <Animated.View style={[styles.highlight, highlightStyle]} />
+            <Animated.View
+              style={[styles.highlight, { width: expandedItemWidth }, highlightStyle]}
+            />
             <View style={styles.row}>
               <BarContext.Provider value={barContext}>{children}</BarContext.Provider>
             </View>
@@ -295,9 +308,11 @@ const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 const styles = StyleSheet.create({
   root: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   blur: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+  bar: { height: EXPANDED_HEIGHT },
   capsule: {
     overflow: 'hidden',
     borderCurve: 'continuous',
+    borderRadius: EXPANDED_HEIGHT / 2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glassRim,
     backgroundColor: colors.glassTint,
@@ -305,6 +320,9 @@ const styles = StyleSheet.create({
   highlight: {
     position: 'absolute',
     left: 0,
+    top: (EXPANDED_HEIGHT - HIGHLIGHT_EXPANDED) / 2,
+    height: HIGHLIGHT_EXPANDED,
+    borderRadius: HIGHLIGHT_EXPANDED / 2,
     borderCurve: 'continuous',
     backgroundColor: colors.glassHighlight,
   },
