@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { useState, useSyncExternalStore } from 'react';
 import {
   Modal,
@@ -10,14 +11,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { IconButton } from '@/components/ui/IconButton';
+import { PressableScale } from '@/components/ui/PressableScale';
 import type { MarketNewsArticle } from '@/integrations/market-data/marketBriefing';
 import {
   readInAppNotifications,
   subscribeInAppNotifications,
   type InAppNotification,
 } from '@/storage/inAppNotifications';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
 
 export function NotificationsPanel({
   latestNews,
@@ -37,15 +38,34 @@ export function NotificationsPanel({
 
   return (
     <>
-      <View style={styles.trigger}>
-        <IconButton
+      {/* The badge has to escape the disc, and the disc has to clip its own material, so the
+          two cannot be the same view: the wrapper stays unclipped and holds both. */}
+      <View style={styles.triggerWrapper}>
+        <PressableScale
           accessibilityHint="Opens trade, funding, withdrawal, and wallet events"
           accessibilityLabel={`Notifications, ${activity.length} events`}
+          accessibilityRole="button"
+          hitSlop={8}
           onPress={() => setVisible(true)}
-          size={44}
+          style={styles.trigger}
         >
-          <BellIcon />
-        </IconButton>
+          {/* Built from the same layers as the avatar across the header from it, down to the
+              rim, so the two read as a matched pair bracketing the greeting. This used to be a
+              hairline ring on a flat fill, which put a drawn-on outline next to a solid
+              object. */}
+          <LinearGradient
+            colors={gradients.cardSheen.colors}
+            locations={gradients.cardSheen.locations}
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            pointerEvents="none"
+          >
+            <BellIcon />
+          </View>
+        </PressableScale>
         {activity.length > 0 ? (
           <View accessibilityElementsHidden pointerEvents="none" style={styles.badge}>
             <Text style={styles.badgeText}>
@@ -127,13 +147,19 @@ export function NotificationsPanel({
   );
 }
 
+/**
+ * Drawn in `textSecondary` rather than `textPrimary`. This sits across the header from the
+ * avatar, which now carries a full-colour portrait, and the two discs are otherwise identical —
+ * so the glyph is the only thing holding them apart. A pure-white bell would make the control
+ * the louder of the pair, and it is the identity that should lead.
+ */
 function BellIcon() {
   return (
     <Svg height={22} viewBox="0 0 24 24" width={22}>
       <Path
         d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 8h18c0-1-3-1-3-8ZM10 21h4"
         fill="none"
-        stroke={colors.textPrimary}
+        stroke={colors.textSecondary}
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={1.9}
@@ -186,7 +212,20 @@ function formatTime(timeMs: number): string {
 }
 
 const styles = StyleSheet.create({
-  trigger: { position: 'relative' },
+  triggerWrapper: { position: 'relative' },
+  // Glass over the home screen's gradient, matching the avatar across the header from it. An
+  // opaque disc on a gradient reads as a hole; this one lets the ramp through.
+  trigger: {
+    width: layout.minTouchTarget,
+    height: layout.minTouchTarget,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassEdge,
+    backgroundColor: colors.glassTint,
+  },
   badge: {
     position: 'absolute',
     top: -3,

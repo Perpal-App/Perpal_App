@@ -16,8 +16,8 @@ const TAB_HIT_SLOP = { top: spacing.xs, bottom: spacing.xs, left: 0, right: 0 };
 /** Thickness of the active tab's rule. Reads clearly over a hairline divider. */
 const ACTIVE_RULE = 2;
 
-export type UnderlineTabOption = {
-  readonly id: string;
+export type UnderlineTabOption<Id extends string = string> = {
+  readonly id: Id;
   readonly label: string;
 };
 
@@ -28,17 +28,22 @@ export type UnderlineTabOption = {
  * the rule lands on that line and ties the two together. Callers pass their own
  * `contentStyle` for the gutter, which lets the strip span the full screen while
  * its first tab still lines up with the content beside it.
+ *
+ * Generic over the id so a caller filtering by a union — a news category, a sort
+ * direction — gets that union back in `onSelect` instead of a bare `string` it has
+ * to widen a `useState` to accept or cast on the way in. It defaults to `string`,
+ * so a caller with plain ids needs no type argument.
  */
-export function UnderlineTabs({
+export function UnderlineTabs<Id extends string = string>({
   contentStyle,
   onSelect,
   options,
   selectedId,
 }: {
   readonly contentStyle?: StyleProp<ViewStyle>;
-  readonly onSelect: (id: string) => void;
-  readonly options: readonly UnderlineTabOption[];
-  readonly selectedId: string;
+  readonly onSelect: (id: Id) => void;
+  readonly options: readonly UnderlineTabOption<Id>[];
+  readonly selectedId: Id;
 }) {
   return (
     <View accessibilityRole="tablist">
@@ -80,7 +85,12 @@ export function UnderlineTabs({
 }
 
 const styles = StyleSheet.create({
-  strip: { alignItems: 'flex-end', gap: spacing.md },
+  // One flex `gap` sets every space in the strip, so the rhythm is even by construction — no
+  // tab carries padding of its own that could widen the space on one side of it. It also keeps
+  // each tab's box the width of its own label, which is what the active rule measures itself
+  // against: give the tabs horizontal padding instead and the underline grows wider than the
+  // word it belongs to.
+  strip: { alignItems: 'flex-end', gap: spacing.lg },
   tab: {
     paddingTop: spacing.xs,
     paddingBottom: spacing.xs,

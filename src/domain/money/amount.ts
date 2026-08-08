@@ -241,6 +241,24 @@ export function isNegativeAmount(amount: Amount): boolean {
 }
 
 /**
+ * Renders a signed basis-point move as a percentage: `+1.24%`, `-0.30%`, `+0.00%`.
+ *
+ * Integer arithmetic throughout — the whole part is a division and the fraction is the
+ * remainder — so a move never picks up float error between the venue and the screen.
+ *
+ * The sign is always printed, zero included. These are read down a column where the
+ * direction is the whole point, and printing it means the value carries its own meaning
+ * without depending on the colour behind it.
+ */
+export function formatSignedBpsPercent(basisPoints: number): string {
+  const whole = Math.trunc(basisPoints);
+  const magnitude = Math.abs(whole);
+  const fraction = (magnitude % 100).toString().padStart(2, '0');
+
+  return `${whole < 0 ? '-' : '+'}${Math.floor(magnitude / 100)}.${fraction}%`;
+}
+
+/**
  * Scales an amount by a basis-point rate (10_000 bps = 100%), used for fees and
  * asset weights. Truncates toward zero, which is the conservative direction for a
  * fee estimate, and is stated here so callers never assume rounding.

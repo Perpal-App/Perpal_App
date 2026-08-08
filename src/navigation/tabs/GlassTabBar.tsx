@@ -32,8 +32,26 @@ import { colors } from '@/theme/tokens';
 
 export { TAB_BAR_CLEARANCE, type GlassTabItem } from '@/navigation/tabs/barGeometry';
 
-/** How far the bottom progressive blur bleeds above the pill. */
-const BLUR_BLEED = 44;
+/**
+ * How far the bottom progressive blur bleeds above the pill.
+ *
+ * Doubled from the 44 it started at, because the height of this band is the length of the
+ * falloff: the same ramp spread over more distance changes more gently per pixel, which is what
+ * stops the top of the blur reading as an edge drawn across the page. It also means content
+ * approaching the bar is already softening well before it reaches it, rather than passing
+ * through a sharp boundary a few points above the capsule.
+ */
+const BLUR_BLEED = 88;
+
+/**
+ * Blur behind the capsule itself.
+ *
+ * Well up from the 28 it was. The capsule sits over live content — a scrolling markets list, a
+ * news headline — and at the old radius the text behind it stayed legible enough to compete with
+ * the labels on top of it. Past roughly this point the backdrop reads as material rather than as
+ * content that has been softened, which is the whole point of the glass.
+ */
+const CAPSULE_BLUR_INTENSITY = 56;
 /** Gesture tolerances: past this much horizontal travel the pan takes over. */
 const PAN_ACTIVATE_X = 6;
 const PAN_FAIL_Y = 14;
@@ -286,7 +304,7 @@ export function GlassTabBar({
               // tint below has to stand on its own.
               blurMethod="dimezisBlurViewSdk31Plus"
               blurTarget={blurTarget}
-              intensity={28}
+              intensity={CAPSULE_BLUR_INTENSITY}
               style={[StyleSheet.absoluteFill, styles.capsule]}
               tint="systemThickMaterialDark"
             />

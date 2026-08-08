@@ -44,27 +44,40 @@ const BANDS = [
 const FACE_SIZE = 18;
 
 /**
- * How strongly the band's colour washes the card. Held here rather than in the colour tokens
- * because the colour itself is the reading's, which no token can know in advance — only its
- * strength is fixed. Low, because it covers the whole card: enough that the surface is
- * unmistakably tinted, not enough to compete with the badge or the gauge for the eye.
+ * Badge corner, matched to the card's by eye rather than by construction.
+ *
+ * The concentric rule — inner radius equals outer radius less the gap between them — was tried
+ * first and is wrong here. It holds when the gap is small next to the outer radius; this gap is
+ * a body padding of 12 against a card radius of 16, which leaves 4, and 4 on a chip this size
+ * reads as a square with clipped corners rather than as the card's rounding continued inward.
+ *
+ * `sm` is a third of the badge's height: clearly rounded, clearly not a capsule, and close
+ * enough in character to the card's `md` that the two read as the same family. Small shapes need
+ * proportionally more radius than large ones to look equally rounded, which is the thing the
+ * concentric rule does not account for.
  */
-const WASH_OPACITY = 0.07;
+const BADGE_RADIUS = radii.sm;
+/** What the badge measures once it has content: its tallest child plus its own padding. */
+const BADGE_PAD_V = spacing.xxs;
+const BADGE_HEIGHT = Math.max(FACE_SIZE, typography.label.lineHeight) + BADGE_PAD_V * 2;
+
+
 
 /**
  * Today's Fear and Greed reading.
  *
- * The band's colour is the card's only accent and it is stated three times over — as a wash
- * across the whole surface, as the badge's tint, and as the filled part of the gauge. Nothing
- * else is coloured, so the card has one thing to say and says it in one hue. That is also why
- * the gauge is a single colour rather than a red-to-green ramp: a ramp shows all five bands at
- * full strength and leaves the reader to work out which is current, while one colour filled to
+ * A block on the screen's gradient rather than a card on it, matching the balance above: neither
+ * has a container, and the spacing between them is what separates them.
+ *
+ * The reading's colour appears in three places, all of which are about the reading itself — the
+ * face, the word beside it, and the filled part of the gauge. Nothing structural is tinted. That
+ * is also why the gauge is one colour rather than a red-to-green ramp: a ramp shows all five bands
+ * at full strength and leaves the reader to work out which is current, while one colour filled to
  * the reading states it.
  *
- * The surface is built from a raise gradient, the wash, and a light edge along the top, in that
- * order. Three near-invisible layers rather than one flat fill, because a card this size reads
- * as a printed panel when its surface is perfectly even — the gradient is what makes it sit
- * under the light the rest of the app is lit by.
+ * The scale's ends are unlabelled. The word in the badge names the band, the figure is out of a
+ * stated hundred, and two more lines of type to say a gauge fills rightward was more than the
+ * block could carry.
  */
 export function FearGreedCard({ data, status }: FearGreedState) {
   // Derived from the reading rather than matched against the venue's label text, so a wording
@@ -75,85 +88,65 @@ export function FearGreedCard({ data, status }: FearGreedState) {
   const tone = band?.tone ?? colors.textMuted;
 
   return (
-    <View style={styles.card}>
-      <LinearGradient
-        colors={gradients.surfaceRaise.colors}
-        locations={gradients.surfaceRaise.locations}
-        style={StyleSheet.absoluteFill}
-      />
-      {/* The band's colour over the whole surface, evenly. A directional falloff was tried
-          and read as a highlight on one corner rather than as the card taking the reading's
-          colour — the tint has to be a property of the surface, not a light shining on part
-          of it. The raise gradient underneath is what keeps the surface from going flat. */}
-      <View style={[StyleSheet.absoluteFill, styles.wash, { backgroundColor: tone }]} />
-      <LinearGradient
-        colors={gradients.cardSheen.colors}
-        locations={gradients.cardSheen.locations}
-        style={StyleSheet.absoluteFill}
-      />
+    <View style={styles.body}>
+      <View style={styles.header}>
+        <Text accessibilityRole="header" style={styles.title}>Fear &amp; Greed</Text>
 
-      <View style={styles.body}>
-        <View style={styles.header}>
-          <Text accessibilityRole="header" style={styles.title}>Fear &amp; Greed</Text>
-
-          {data === null || band === null ? (
-            status === 'loading'
-              // Sized to the badge it stands in for: the face plus its padding, not the
-              // taller pill the badge used to be.
-              ? <Skeleton height={FACE_SIZE + spacing.xs} radius={radii.pill} width={112} />
-              : <Text style={styles.unavailable}>Unavailable</Text>
-          ) : (
-            <View style={styles.badge}>
-              {/* One solid colour drives the fill, the face and the label, so the three cannot
-                  fall out of step. The fill is that colour turned down rather than a second
-                  token per band — but it has to be turned down, or the face and the label are
-                  painted in the colour they are sitting on. */}
-              <View
-                style={[StyleSheet.absoluteFill, styles.badgeFill, { backgroundColor: tone }]}
-              />
-              <FacePop mood={band.mood} tone={tone} value={data.value} />
-              <Text style={[styles.badgeLabel, { color: tone }]}>{data.classification}</Text>
-            </View>
-          )}
-        </View>
-
-        {data === null ? (
-          status === 'loading' ? (
-            <View style={styles.pending}>
-              {/* `heading`, matching the reading's role, so the number lands on the line its
-                  placeholder held rather than a taller one. */}
-              <SkeletonText role="heading" width={72} />
-              <Skeleton height={GAUGE_HEIGHT} radius={TICK_RADIUS} />
-            </View>
-          ) : null
+        {/* Glass, not a coloured chip. The surface is the app's own glass recipe — a translucent
+            tint, a light edge, a highlight down the top — and carries no hue of its own, so the
+            reading's colour is left to the two things that are actually about the reading: the
+            face and the word. A tinted fill behind them made the badge itself the loudest object
+            on the block. */}
+        {data === null || band === null ? (
+          status === 'loading'
+            // Sized and cornered to the badge it stands in for, so the badge does not change
+            // shape as it resolves. Derived from the label rather than the face because the
+            // label's line is the taller of the two and therefore what sets the height.
+            ? <Skeleton height={BADGE_HEIGHT} radius={BADGE_RADIUS} width={112} />
+            : <Text style={styles.unavailable}>Unavailable</Text>
         ) : (
-          <>
-            <View style={styles.readingRow}>
-              <Text style={styles.reading}>{data.value}</Text>
-              <Text style={styles.scale}>/ 100</Text>
-            </View>
-
-            <View
-              accessibilityLabel={`Fear and Greed index ${data.value} out of 100, ${data.classification}`}
-              accessibilityRole="progressbar"
-              accessibilityValue={{
-                min: 0,
-                max: 100,
-                now: data.value,
-                text: data.classification,
-              }}
-            >
-              <SentimentGauge tone={tone} value={data.value} />
-            </View>
-
-            {/* The gauge is one colour, so nothing in it says which end is which. These do. */}
-            <View style={styles.legend}>
-              <Text style={styles.legendLabel}>Extreme fear</Text>
-              <Text style={styles.legendLabel}>Extreme greed</Text>
-            </View>
-          </>
+          <View style={styles.badge}>
+            <LinearGradient
+              colors={gradients.cardSheen.colors}
+              locations={gradients.cardSheen.locations}
+              style={[StyleSheet.absoluteFill, styles.badgeSheen]}
+            />
+            <FacePop mood={band.mood} tone={tone} value={data.value} />
+            <Text style={[styles.badgeLabel, { color: tone }]}>{data.classification}</Text>
+          </View>
         )}
       </View>
+
+      {data === null ? (
+        status === 'loading' ? (
+          <View style={styles.pending}>
+            {/* `heading`, matching the reading's role, so the number lands on the line its
+                placeholder held rather than a taller one. */}
+            <SkeletonText role="heading" width={72} />
+            <Skeleton height={GAUGE_HEIGHT} radius={TICK_RADIUS} />
+          </View>
+        ) : null
+      ) : (
+        <>
+          <View style={styles.readingRow}>
+            <Text style={styles.reading}>{data.value}</Text>
+            <Text style={styles.scale}>/ 100</Text>
+          </View>
+
+          <View
+            accessibilityLabel={`Fear and Greed index ${data.value} out of 100, ${data.classification}`}
+            accessibilityRole="progressbar"
+            accessibilityValue={{
+              min: 0,
+              max: 100,
+              now: data.value,
+              text: data.classification,
+            }}
+          >
+            <SentimentGauge tone={tone} value={data.value} />
+          </View>
+        </>
+      )}
     </View>
   );
 }
@@ -201,18 +194,10 @@ function FacePop({
 }
 
 const styles = StyleSheet.create({
-  // Clipped, so all three surface layers take the card's rounding.
-  card: {
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    // Stepped down with the padding: `lg` was cut for a card half again as tall, and a radius
-    // that large on a compact card starts curving the whole edge instead of its corners.
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-  },
-  wash: { opacity: WASH_OPACITY },
-  body: { gap: spacing.sm, padding: spacing.sm },
+  // No border, no fill, no padding of its own: the screen's gradient is this block's surface, and
+  // the balance above it sits on the same one. A panel here would have put a frame around the
+  // second-most-important thing on the screen while the most important had none.
+  body: { gap: spacing.sm },
   // Centred, not top-aligned: with the source line gone the title is a single line and the
   // badge is the taller of the two, so aligning their tops would hang the title off it.
   header: {
@@ -223,16 +208,32 @@ const styles = StyleSheet.create({
   },
   // Takes the leftover width so a long classification never squeezes the title.
   title: { ...typography.label, flex: 1, minWidth: 0, color: colors.textPrimary },
+  // Clipped, so the three material layers take the badge's corners and none of them needs to
+  // repeat the radius. Padding is symmetric: a capsule needed more room on its flat side than
+  // its curved one, but a rounded box has two flat sides, and the optical difference between a
+  // round glyph and text at this size is under a point.
   badge: {
     flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xxs,
-    paddingLeft: spacing.xs,
-    paddingRight: spacing.sm,
-    paddingVertical: spacing.xxs,
+    overflow: 'hidden',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: BADGE_PAD_V,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassEdge,
+    borderRadius: BADGE_RADIUS,
+    // Continuous curvature, as on the tab bar's capsule. A circular corner meets the straight
+    // edge at an abrupt change in curvature, which at a hairline weight is what reads as the
+    // edge being slightly wrong; a continuous corner eases into it.
+    borderCurve: 'continuous',
+    backgroundColor: colors.glassTint,
   },
-  badgeFill: { opacity: 0.18, borderRadius: radii.pill },
+  // The highlight carries the corner as well, rather than trusting the parent's `overflow` alone.
+  // An absolutely positioned child of a rounded, clipped View is the case Android is least
+  // reliable about clipping, and when it fails the layer paints square over the corners — which
+  // looks exactly like a radius that was never applied.
+  badgeSheen: { borderRadius: BADGE_RADIUS },
   badgeLabel: { ...typography.label },
   unavailable: { ...typography.caption, color: colors.textMuted },
   pending: { gap: spacing.sm },
@@ -248,9 +249,4 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   scale: { ...typography.caption, color: colors.textMuted },
-  legend: { flexDirection: 'row', justifyContent: 'space-between' },
-  // `caption`, not `label`: these name the ends of a scale nobody needs to read twice, and
-  // `label`'s semibold 14 gave them the same weight as the data. Caption is Poppins Medium at
-  // 12, so they sit back — smaller, lighter, and quieter against the muted grey.
-  legendLabel: { ...typography.caption, color: colors.textMuted },
 });

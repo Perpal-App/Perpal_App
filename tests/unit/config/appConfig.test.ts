@@ -9,6 +9,7 @@ const VALID: RawAppEnv = {
   marketStreamPath: '/v1/markets/stream',
   fearGreedPath: '/v1/sentiment/fear-greed',
   marketBriefingPath: '/v1/market-briefing',
+  tokenPricesPath: '/v1/token-prices',
   swapBuildPath: '/v1/swap/build',
   pacificaApiOrigin: 'https://api.pacifica.fi',
   pacificaAssetOrigin: 'https://app.pacifica.fi',

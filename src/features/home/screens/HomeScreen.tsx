@@ -1,45 +1,70 @@
 import * as Clipboard from 'expo-clipboard';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useMemo } from 'react';
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
-import { SkeletonText } from '@/components/feedback/Skeleton';
+import { avatarForAddress } from '@/assets/svg/avatars';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { RiseInView } from '@/components/motion/RiseInView';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { readAppConfig } from '@/config/appConfig';
-import { formatCompactTokenPrice } from '@/domain/money/amount';
+import { formatSignedBpsPercent } from '@/domain/money/amount';
 import { useWalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { AccountOverviewCard } from '@/features/home/components/AccountOverviewCard';
 import { FearGreedCard } from '@/features/home/components/FearGreedCard';
-import { MajorEventsTimeline } from '@/features/home/components/MajorEventsTimeline';
+import { HomeBackdrop } from '@/features/home/components/HomeBackdrop';
+import {
+  MarketMoversSection,
+  type MoverEntry,
+} from '@/features/home/components/MarketMoversSection';
 import { MarketNewsSection } from '@/features/home/components/MarketNewsSection';
 import { NotificationsPanel } from '@/features/home/components/NotificationsPanel';
 import { useFearGreed } from '@/features/home/hooks/useFearGreed';
 import { useMarketBriefing } from '@/features/home/hooks/useMarketBriefing';
 import { usePacificaPortfolio } from '@/features/portfolio/hooks/usePacificaPortfolio';
-import { MarketLogo } from '@/features/trade/components/MarketLogo';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
-import { colors, layout, motion, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, layout, motion, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
-/** How many movers the two lists show. Enough to scan, short enough to stay above the fold. */
-const MOVER_COUNT = 4;
+/**
+ * The disc, and the drawing inside it — one value, because the figures are composed to fill their
+ * box and be clipped to a circle, so anything less than the full disc crops the shoulders.
+ *
+ * Sized to the greeting-and-address stack beside it, not to the notification disc across the
+ * header. The two-line block is a few points taller than the bell's touch target, so an avatar
+ * matched to the bell read as the smaller of the two things the greeting sits between; matched to
+ * the block instead, its top lands with the greeting and its base with the address.
+ */
+const AVATAR_SIZE = 52;
+const COPY_ICON_SIZE = 16;
+/** How long the tick holds before the copy glyph returns. */
+const COPIED_HOLD_MS = 1_600;
+/** Scale the tick springs up from, so the confirmation lands rather than blinks into place. */
+const COPIED_FROM_SCALE = 0.4;
 
 /**
- * Landing screen: what the venue is doing right now, and the two ways into it.
+ * Landing screen: what the venue is doing right now, and the ways into it.
  *
- * It answers one question — where is there movement — with the biggest gainers and
- * losers by 24h change, and leaves depth to the markets tab. Everything here is
- * derived from the same venue feed the markets table uses, so opening the app costs
- * no additional request.
+ * It answers one question — where is there movement — through a single filtered list of
+ * movers, either end of the 24h ranking or the reader's own bookmarks, and leaves depth to
+ * the markets tab. Everything here is derived from the same venue feed the markets table
+ * uses, so opening the app costs no additional request.
  */
 export function HomeScreen() {
   const router = useRouter();
   const config = readAppConfig();
   const publicWallet = useWalletProvisioning();
+  const Avatar = avatarForAddress(publicWallet.embeddedWalletAddress);
   const tradingSession = useTradingSession();
   const venue = usePacificaMarkets(
     config.ok ? config.value.perps.pacificaApiOrigin : '',
@@ -63,7 +88,7 @@ export function HomeScreen() {
   // Indexed, not scanned. Every price message hands back a new snapshot array, so this
   // runs at socket tick rate — and a `find` per market made that a full pass over the
   // catalog for every market in it. One Map turns the whole join linear.
-  const ranked = useMemo(() => {
+  const ranked = useMemo<readonly MoverEntry[]>(() => {
     const byRef = new Map(venue.snapshots.map((snapshot) => [snapshot.venueRef, snapshot]));
 
     return venue.markets
@@ -74,50 +99,42 @@ export function HomeScreen() {
       .sort((left, right) => right.snapshot.change24hBps - left.snapshot.change24hBps);
   }, [venue.markets, venue.snapshots]);
 
-  // Both ends of the same sorted list. Memoized because they are read as props by child
-  // lists: a fresh array on every render re-renders both lists even when the ranking has
-  // not moved, and this screen re-renders for reasons that have nothing to do with prices.
-  const gainers = useMemo(() => ranked.slice(0, MOVER_COUNT), [ranked]);
-  const losers = useMemo(
-    () => ranked.slice(-MOVER_COUNT).reverse(),
-    [ranked],
-  );
+  // The two ends of the ranking, for the notification summaries only — the movers section
+  // slices its own lists. Guarded on length, because with a single market in the catalog the
+  // best and worst performer are the same row and reporting it twice would be a lie.
+  const best = ranked[0];
+  const worst = ranked.length > 1 ? ranked[ranked.length - 1] : undefined;
   const pending = ranked.length === 0;
-  const copyPublicWallet = () => {
-    const address = publicWallet.embeddedWalletAddress;
-    if (address === null) return;
-    void Clipboard.setStringAsync(address).then(
-      () => AccessibilityInfo.announceForAccessibility('Public wallet address copied.'),
-      () => AccessibilityInfo.announceForAccessibility('Public wallet address could not be copied.'),
-    );
-  };
+
+  // Stable, so the movers rows are not handed a new callback on every price batch.
+  const openMarket = useCallback(
+    (venueRef: string) => router.push({
+      pathname: '/(tabs)/trade/[venueRef]',
+      params: { venueRef },
+    }),
+    [router],
+  );
 
   return (
-    <AppScreen contentContainerStyle={styles.content}>
+    <AppScreen background={<HomeBackdrop />} contentContainerStyle={styles.content}>
       <RiseInView style={styles.header}>
         <View style={styles.identity}>
+          {/* Assigned from the wallet address, so a given wallet always wears the same face.
+              The disc is made of the app's own card material — raise, brand wash, lit top edge
+              — rather than the flat light fill it started as: a white circle on a near-black
+              page read as a hole punched in the screen. The figures are pastel over navy, so
+              they still carry against it. */}
           <View accessibilityElementsHidden style={styles.avatar}>
-            <ProfileIcon />
+            <LinearGradient
+              colors={gradients.cardSheen.colors}
+              locations={gradients.cardSheen.locations}
+              style={StyleSheet.absoluteFill}
+            />
+            <Avatar size={AVATAR_SIZE} />
           </View>
           <View style={styles.headingCopy}>
             <Text accessibilityRole="header" style={styles.greeting}>{greeting()}</Text>
-            <View style={styles.walletLine}>
-              <Text numberOfLines={1} selectable style={styles.walletAddress}>
-                {shortAddress(publicWallet.embeddedWalletAddress)}
-              </Text>
-              <Pressable
-                accessibilityHint="Copies the full Privy public wallet address"
-                accessibilityLabel="Copy public wallet address"
-                accessibilityRole="button"
-                accessibilityState={{ disabled: publicWallet.embeddedWalletAddress === null }}
-                disabled={publicWallet.embeddedWalletAddress === null}
-                hitSlop={8}
-                onPress={copyPublicWallet}
-                style={({ pressed }) => [styles.copyButton, pressed && styles.pressed]}
-              >
-                <CopyIcon />
-              </Pressable>
-            </View>
+            <WalletAddress address={publicWallet.embeddedWalletAddress} />
           </View>
         </View>
         <NotificationsPanel
@@ -125,12 +142,12 @@ export function HomeScreen() {
             article.category === 'perps' || article.category === 'crypto')
             ?? briefing.data?.news[0]
             ?? null}
-          topGainer={gainers[0] === undefined
+          topGainer={best === undefined
             ? null
-            : `${gainers[0].market.baseAsset} ${formatChange(gainers[0].snapshot.change24hBps)}`}
-          topLoser={losers[0] === undefined
+            : `${best.market.baseAsset} ${formatSignedBpsPercent(best.snapshot.change24hBps)}`}
+          topLoser={worst === undefined
             ? null
-            : `${losers[0].market.baseAsset} ${formatChange(losers[0].snapshot.change24hBps)}`}
+            : `${worst.market.baseAsset} ${formatSignedBpsPercent(worst.snapshot.change24hBps)}`}
         />
       </RiseInView>
 
@@ -143,101 +160,24 @@ export function HomeScreen() {
         />
       </RiseInView>
 
-      <RiseInView delay={motion.rise.stagger * 2}>
+      {/* Extra air either side of the sentiment block. With neither it nor the balance above in a
+          container, the screen's uniform gap left them reading as one run of text; a few points
+          more is enough to separate them without opening a hole in the column. */}
+      <RiseInView delay={motion.rise.stagger * 2} style={styles.sentiment}>
         <FearGreedCard {...fearGreed} />
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger * 3}>
-        <MoverList
-          markets={gainers}
-          onSelect={(venueRef) => router.push({
-            pathname: '/(tabs)/trade/[venueRef]',
-            params: { venueRef },
-          })}
-          pending={pending}
-          title="Top gainers"
-        />
+        <MarketMoversSection entries={ranked} onSelect={openMarket} pending={pending} />
       </RiseInView>
 
+      {/* The events calendar lives inside this section now, as its "Events" tab — same
+          briefing request, one heading. */}
       <RiseInView delay={motion.rise.stagger * 4}>
-        <MoverList
-          markets={losers}
-          onSelect={(venueRef) => router.push({
-            pathname: '/(tabs)/trade/[venueRef]',
-            params: { venueRef },
-          })}
-          pending={pending}
-          title="Top losers"
-        />
-      </RiseInView>
-
-      <RiseInView delay={motion.rise.stagger * 5}>
-        <MajorEventsTimeline {...briefing} />
-      </RiseInView>
-
-      <RiseInView delay={motion.rise.stagger * 6}>
         <MarketNewsSection {...briefing} />
       </RiseInView>
     </AppScreen>
   );
-}
-
-type Mover = {
-  readonly market: { readonly baseAsset: string; readonly iconUrl: string; readonly venueRef: string };
-  readonly snapshot: { readonly change24hBps: number; readonly price: { readonly baseUnits: bigint; readonly decimals: 0 | 2 | 3 | 5 | 6 | 8 | 9 | 10 } };
-};
-
-function MoverList({
-  markets,
-  onSelect,
-  pending,
-  title,
-}: {
-  readonly markets: readonly Mover[];
-  readonly onSelect: (venueRef: string) => void;
-  readonly pending: boolean;
-  readonly title: string;
-}) {
-  return (
-    <View style={styles.section}>
-      <Text accessibilityRole="header" style={styles.sectionTitle}>{title}</Text>
-      {pending
-        ? Array.from({ length: MOVER_COUNT }, (_unused, index) => (
-          <View key={index} style={styles.mover}>
-            <SkeletonText role="label" width={110} />
-            <SkeletonText align="right" role="label" width={90} />
-          </View>
-        ))
-        : markets.map(({ market, snapshot }) => (
-          <Pressable
-            accessibilityHint="Opens market details"
-            accessibilityRole="button"
-            key={market.venueRef}
-            onPress={() => onSelect(market.venueRef)}
-            style={({ pressed }) => [styles.mover, pressed && styles.pressed]}
-          >
-            <View style={styles.moverIdentity}>
-              <MarketLogo symbol={market.baseAsset} url={market.iconUrl} />
-              <Text style={styles.moverSymbol}>{market.baseAsset}</Text>
-            </View>
-            <View style={styles.moverValues}>
-              <Text style={styles.moverPrice}>{formatCompactTokenPrice(snapshot.price)}</Text>
-              <Text style={[
-                styles.moverChange,
-                snapshot.change24hBps < 0 ? styles.negative : styles.positive,
-              ]}>
-                {formatChange(snapshot.change24hBps)}
-              </Text>
-            </View>
-          </Pressable>
-        ))}
-    </View>
-  );
-}
-
-function formatChange(basisPoints: number): string {
-  const absolute = Math.abs(basisPoints);
-  return `${basisPoints >= 0 ? '+' : '-'}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}%`;
 }
 
 function greeting(): string {
@@ -249,27 +189,93 @@ function shortAddress(address: string | null): string {
   return address === null ? 'Privy wallet unavailable' : `${address.slice(0, 5)}…${address.slice(-4)}`;
 }
 
-function ProfileIcon() {
+/**
+ * The wallet address, and copying it.
+ *
+ * Confirmation is the icon's job alone. Swapping the address for the word "Copied" would move the
+ * only thing on the row anyone came to read, and a toast would put the answer somewhere other than
+ * where the tap happened — the glyph is at the finger, so that is where the acknowledgement goes.
+ *
+ * It reverts on a timer rather than on the next interaction, because there may not be one: copying
+ * an address is usually the last thing done here before leaving for another app.
+ */
+function WalletAddress({ address }: { readonly address: string | null }) {
+  const reduceMotion = useReducedMotion();
+  const [copied, setCopied] = useState(false);
+  const settle = useSharedValue(1);
+
+  useEffect(() => {
+    if (!copied) return undefined;
+
+    const timer = setTimeout(() => setCopied(false), COPIED_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  useEffect(() => {
+    if (!copied || reduceMotion) return;
+
+    // Undersized then sprung, so the tick arrives rather than appears. Only on the way in: the
+    // revert is a state nobody is watching by then.
+    settle.set(COPIED_FROM_SCALE);
+    settle.set(withSpring(1, motion.spring));
+  }, [copied, reduceMotion, settle]);
+
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: settle.value }] }));
+
+  const copy = () => {
+    if (address === null) return;
+
+    void Clipboard.setStringAsync(address).then(
+      () => {
+        setCopied(true);
+        AccessibilityInfo.announceForAccessibility('Public wallet address copied.');
+      },
+      () => AccessibilityInfo.announceForAccessibility('Public wallet address could not be copied.'),
+    );
+  };
+
   return (
-    <Svg height={24} viewBox="0 0 24 24" width={24}>
+    <PressableScale
+      accessibilityHint="Copies the full Privy public wallet address"
+      accessibilityLabel={`Copy public wallet address, ${shortAddress(address)}`}
+      accessibilityRole="button"
+      disabled={address === null}
+      hitSlop={10}
+      onPress={copy}
+      style={styles.walletRow}
+    >
+      <Text numberOfLines={1} style={styles.walletAddress}>{shortAddress(address)}</Text>
+      <Animated.View style={animatedStyle}>
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </Animated.View>
+    </PressableScale>
+  );
+}
+
+/** Confirmation only. Round caps and joins, so a 1.8pt tick does not end in two hard points. */
+function CheckIcon() {
+  return (
+    <Svg height={COPY_ICON_SIZE} viewBox="0 0 24 24" width={COPY_ICON_SIZE}>
       <Path
-        d="M12 11.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM5 20a7 7 0 0 1 14 0"
+        d="M5 12.6 9.7 17.3 19 8"
         fill="none"
-        stroke={colors.accentSoft}
+        stroke={colors.positive}
         strokeLinecap="round"
-        strokeWidth={1.9}
+        strokeLinejoin="round"
+        strokeWidth={2}
       />
     </Svg>
   );
 }
 
+/** Two sheets, the front one offset off the back. Rounded, so it matches the app's chrome. */
 function CopyIcon() {
   return (
-    <Svg height={17} viewBox="0 0 24 24" width={17}>
+    <Svg height={COPY_ICON_SIZE} viewBox="0 0 24 24" width={COPY_ICON_SIZE}>
       <Path
-        d="M9 9h10v10H9zM5 15V5h10"
+        d="M11 9h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2ZM7 15a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2"
         fill="none"
-        stroke={colors.textMuted}
+        stroke={colors.textSecondary}
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={1.8}
@@ -296,39 +302,38 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   identity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // Glass, not an opaque raise: the screen now has a gradient behind it, and a solid grey disc
+  // over a gradient reads as a hole punched through it. `glassTint` lets the ramp show through.
+  // Clipped, so the tint, the sheen and the drawing all take the disc's shape — the figures are
+  // drawn square and rely on the caller to crop them.
   avatar: {
-    width: 48,
-    height: 48,
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.pill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.glassEdge,
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: colors.glassTint,
   },
-  headingCopy: { flex: 1, minWidth: 0, gap: 2 },
-  greeting: { ...typography.label, color: colors.textPrimary },
-  walletLine: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
-  walletAddress: { ...typography.caption, flexShrink: 1, color: colors.textMuted },
-  copyButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  summary: { width: '100%' },
-  section: { gap: spacing.xxs },
-  sectionTitle: { ...typography.label, marginBottom: spacing.xxs, color: colors.textSecondary },
-  mover: {
-    minHeight: 46,
+  headingCopy: { flex: 1, minWidth: 0, gap: spacing.xxs, alignItems: 'flex-start' },
+  // `body`, between the two roles this has been. `heading` made it the loudest thing above the
+  // balance, which is not what a greeting is for; `label` is the same size and weight as the
+  // section titles further down, so it read as one of them. Regular 15 is quieter than both and
+  // shares its weight with neither.
+  greeting: { ...typography.body, color: colors.textPrimary },
+  // No fill and no leading padding: the chip's left inset was holding the address a few points
+  // off the greeting's left edge, so the two lines beside the avatar never lined up. The vertical
+  // padding stays because it is invisible and buys the touch target its height.
+  walletRow: {
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    gap: spacing.xxs,
+    paddingVertical: spacing.xxs,
   },
-  moverIdentity: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  moverSymbol: { ...typography.label, color: colors.textPrimary },
-  moverValues: { alignItems: 'flex-end' },
-  moverPrice: { ...typography.label, color: colors.textPrimary },
-  moverChange: { ...typography.caption },
-  positive: { color: colors.positive },
-  negative: { color: colors.negative },
-  pressed: { opacity: 0.6, borderRadius: radii.xs },
+  walletAddress: { ...typography.caption, flexShrink: 1, color: colors.textPrimary },
+  summary: { width: '100%' },
+  sentiment: { marginTop: spacing.xs, marginBottom: spacing.xs },
 });

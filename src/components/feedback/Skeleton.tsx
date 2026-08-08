@@ -135,7 +135,8 @@ export function SkeletonText({
     | 'body'
     | 'bodyCompact'
     | 'heading'
-    | 'title';
+    | 'title'
+    | 'display';
   readonly width: DimensionValue;
 }) {
   const line = typography[role];

@@ -5,10 +5,17 @@ import type { MarketBriefingState } from '@/features/home/hooks/useMarketBriefin
 import type { MajorFinanceEvent } from '@/integrations/market-data/marketBriefing';
 import { colors, spacing, typography } from '@/theme/tokens';
 
-export function MajorEventsTimeline({ data, status }: MarketBriefingState) {
+/**
+ * The scheduled U.S. releases, as a dated rail.
+ *
+ * Headless: it draws the rail and nothing else, because it is no longer a section of its own.
+ * It renders under the market-news filter's "Events" tab, which supplies the heading — the
+ * calendar and the news are the same briefing request, and giving each its own titled block
+ * spent two screens of height on one payload.
+ */
+export function MajorEventsList({ data, status }: MarketBriefingState) {
   return (
     <View style={styles.section}>
-      <Text accessibilityRole="header" style={styles.title}>Major U.S. events</Text>
       {data === null ? (
         status === 'loading'
           ? Array.from({ length: 3 }, (_unused, index) => (
@@ -64,7 +71,6 @@ function formatEventTime(timeMs: number): string {
 
 const styles = StyleSheet.create({
   section: { gap: spacing.xxs },
-  title: { ...typography.label, marginBottom: spacing.xxs, color: colors.textSecondary },
   pending: { minHeight: 54, justifyContent: 'center' },
   unavailable: { ...typography.bodyCompact, color: colors.textMuted },
   item: { minHeight: 64, flexDirection: 'row', gap: spacing.sm },

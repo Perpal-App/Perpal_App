@@ -80,16 +80,25 @@ export const colors = {
    * tinted film reads dimmer than a neutral one at equal opacity.
    *
    * `glassHighlight` takes the ramp's deep end and `glassSelected` its bright end, and the
-   * distance between them is the point. A pill tinted the same pale violet as the glyph on
-   * it put both at nearly the same value, and the selected tab read as washed out rather
-   * than lit — the pill has to fall away for the glyph to come forward. `glassSelected` is
-   * brighter than `accentSoft` for the same reason: the pastel accent is the right violet
-   * on a light surface, but selection on dark glass needs to gain luminance, not just hue.
+   * distance between them is the point: the pill has to fall away for the glyph to come
+   * forward, so the two can never sit at the same value.
+   *
+   * `glassSelected` is a violet, not an off-white. It went through near-white — `#DDCEFF`, then
+   * `#EFE6FF` — chasing luminance, and both landed on the same problem: at that lightness the
+   * hue is gone, so the selected tab was carried by the pill's shade rather than by the glyph,
+   * and the glyph itself read as plain white. Selection is a statement about colour here, and
+   * this is the palette's pastel violet, held deliberately at the same value as `accentSoft` so
+   * an active tab and an active filter tab agree on what "chosen" looks like. It stays well
+   * clear of the pill beneath it without giving up its hue to do so.
+   *
+   * `glassHighlight` stays translucent. An opaque pill was tried and reverted: it turned
+   * selection into a block of colour competing with the glyph sitting on it, and put a solid
+   * patch in the middle of a bar whose whole purpose is that content reads through it.
    */
   glassTint: 'rgba(10, 10, 12, 0.55)',
   glassRim: 'rgba(196, 181, 253, 0.14)',
   glassHighlight: 'rgba(75, 47, 168, 0.34)',
-  glassSelected: '#DDCEFF',
+  glassSelected: '#C4B5FD',
 } as const;
 
 export const spacing = {
@@ -145,6 +154,20 @@ export const gradients = {
       '#F5EFFA',
     ],
     locations: [0, 0.38, 0.49, 0.6, 0.71, 0.82, 0.92, 1],
+  },
+  /**
+   * Home ambience: a violet rise behind the header that has resolved into the page by the time
+   * the content below it starts.
+   *
+   * The onboarding field could not be reused as-is even though this is the same idea — that ramp
+   * blooms to near-white at the bottom of the screen, which is a hero treatment and would put
+   * the markets list on white. This one runs the other way and stops: brightest at the top where
+   * the greeting and the balance sit, `background` from a little past halfway down, so everything
+   * that scrolls past reads against the same surface it always did.
+   */
+  homeField: {
+    colors: ['#3E2C86', '#261B56', '#120D28', '#07060B'],
+    locations: [0, 0.26, 0.58, 1],
   },
   onboardingCoolEdge: {
     colors: [
@@ -323,6 +346,48 @@ export const motion = {
   gaugeFill: {
     duration: 640,
     overlap: 0.24,
+  },
+  /**
+   * Bookmark toggle: the ribbon reacting to being saved, and to being given up.
+   *
+   * Deliberately asymmetric, because the two taps are not the same statement. Saving overshoots
+   * — the glyph grows past its resting size and springs back, which is the shape of a
+   * confirmation. Unsaving dips under instead and returns, acknowledging the tap without
+   * celebrating it. One control, and the direction of the scale is what tells them apart.
+   *
+   * `popMs` and `dipMs` cover only the outbound leg; the return is `spring` in both cases, so
+   * the settle carries the same elasticity as every other press in the app.
+   *
+   * The fill crossfades in faster than it goes out for the same reason. A saved state should
+   * land with the pop, while a ribbon being emptied reads better draining than blinking off.
+   */
+  bookmarkToggle: {
+    popScale: 1.3,
+    dipScale: 0.84,
+    popMs: 120,
+    dipMs: 110,
+    fillInMs: 140,
+    fillOutMs: 190,
+  },
+  /**
+   * Filter swap: the list under a tab strip being replaced by a different set of rows.
+   *
+   * `resize` animates the container's height, and that is the part that was jarring. Different
+   * filters return different numbers of rows — four gainers, nine bookmarks, one news category —
+   * so the block under the strip used to snap to its new height in a single frame and drag
+   * everything below it up or down with it.
+   *
+   * `fade` brings the incoming rows up, and is deliberately shorter than `resize`. The content is
+   * legible while the height is still settling, which reads as the list growing into place rather
+   * than as two animations running one after the other. Longer than this and the swap starts to
+   * feel like a page load.
+   *
+   * Reanimated's layout animations default to `ReduceMotion.System`, so both are already disabled
+   * for anyone who has asked for less motion; neither needs a manual guard.
+   */
+  filterSwap: {
+    resize: 260,
+    fade: 170,
   },
   /**
    * Skeleton sweep. One pass of the highlight across a placeholder, looped while

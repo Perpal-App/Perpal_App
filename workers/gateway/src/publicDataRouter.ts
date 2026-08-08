@@ -7,6 +7,7 @@ import {
 } from './marketBriefingHandler';
 import { MARKET_DATA_PATH, MARKET_STREAM_PATH } from './marketData';
 import { handlePublicMarketsRequest } from './publicMarketsHandler';
+import { handleTokenPricesRequest, TOKEN_PRICES_PATH } from './tokenPricesHandler';
 
 export type PublicDataResult = {
   readonly operation: string;
@@ -42,6 +43,13 @@ export async function routePublicData(
     return {
       ...await handleMarketBriefingRequest(request, env, context, traceId),
       operation: 'markets.briefing',
+    };
+  }
+
+  if (path === TOKEN_PRICES_PATH) {
+    return {
+      ...await handleTokenPricesRequest(request, env, traceId),
+      operation: 'token_prices.read',
     };
   }
 

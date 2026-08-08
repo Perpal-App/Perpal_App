@@ -92,6 +92,21 @@ export function GlassTabButton({
       : 1 - Math.min(Math.abs(slideIndex.value - index), 1),
   }));
 
+  // The resting layers fade out as the selected ones arrive, so only ever one of the two is
+  // opaque. This is what makes the selected fill read as a solid colour: the muted outline used
+  // to sit at full opacity underneath it, so the bright glyph was composited over a grey one and
+  // picked up a dull fringe wherever the two shapes did not coincide exactly — a solid colour
+  // laid over a darker copy of itself is precisely what looks like a shade.
+  //
+  // The expression is repeated rather than shared through a helper. A function declared in a
+  // component body is a JS-thread closure the UI runtime cannot call, which is the trap
+  // `barGeometry` documents, and three arithmetic operations are cheaper than the workaround.
+  const restingStyle = useAnimatedStyle(() => ({
+    opacity: slideIndex === undefined
+      ? (isFocused ? 0 : 1)
+      : Math.min(Math.abs(slideIndex.value - index), 1),
+  }));
+
   // Only the labels fold away as the bar minimizes; the icons stay.
   const labelStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.4], [1, 0], Extrapolation.CLAMP),
@@ -137,13 +152,18 @@ export function GlassTabButton({
     >
       <Animated.View style={[styles.item, itemStyle]}>
         <View>
-          <TabBarIcon color={colors.textMuted} name={item.icon} size={ICON_SIZE} />
+          {/* Still in flow, so it goes on sizing the box the solid layer fills. */}
+          <Animated.View style={restingStyle}>
+            <TabBarIcon color={colors.textMuted} name={item.icon} size={ICON_SIZE} />
+          </Animated.View>
           <Animated.View style={[StyleSheet.absoluteFill, styles.centre, selectedStyle]}>
             <TabBarIcon color={colors.glassSelected} filled name={item.icon} size={ICON_SIZE} />
           </Animated.View>
         </View>
         <Animated.View style={[styles.labelBox, labelStyle]}>
-          <Text numberOfLines={1} style={styles.label}>{item.label}</Text>
+          <Animated.View style={restingStyle}>
+            <Text numberOfLines={1} style={styles.label}>{item.label}</Text>
+          </Animated.View>
           {/* The bold label is wider than the medium one, so it is centred over it rather
               than laid out beside it — otherwise selecting a tab would nudge its own
               label sideways. */}

@@ -32,6 +32,7 @@ export type AppConfig = {
     readonly marketStreamPath: string;
     readonly fearGreedPath: string;
     readonly marketBriefingPath: string;
+    readonly tokenPricesPath: string;
     readonly swapBuildPath: string;
     readonly rpcUrl: string;
     readonly publicRpcUrl: string;
@@ -39,6 +40,7 @@ export type AppConfig = {
     readonly marketStreamUrl: string;
     readonly fearGreedUrl: string;
     readonly marketBriefingUrl: string;
+    readonly tokenPricesUrl: string;
     readonly swapBuildUrl: string;
   };
   readonly telemetry: {
@@ -65,6 +67,7 @@ export type RawAppEnv = {
   readonly marketStreamPath: string;
   readonly fearGreedPath: string;
   readonly marketBriefingPath: string;
+  readonly tokenPricesPath: string;
   readonly swapBuildPath: string;
   readonly pacificaApiOrigin: string;
   readonly pacificaAssetOrigin: string;
@@ -98,6 +101,8 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_FEAR_GREED_PATH?.trim() ?? '',
     marketBriefingPath:
       process.env.EXPO_PUBLIC_MARKET_BRIEFING_PATH?.trim() ?? '',
+    tokenPricesPath:
+      process.env.EXPO_PUBLIC_TOKEN_PRICES_PATH?.trim() ?? '',
     swapBuildPath:
       process.env.EXPO_PUBLIC_SWAP_BUILD_PATH?.trim() ?? '',
     pacificaApiOrigin:
@@ -168,6 +173,7 @@ function validatePath(
     | 'EXPO_PUBLIC_MARKET_STREAM_PATH'
     | 'EXPO_PUBLIC_FEAR_GREED_PATH'
     | 'EXPO_PUBLIC_MARKET_BRIEFING_PATH'
+    | 'EXPO_PUBLIC_TOKEN_PRICES_PATH'
     | 'EXPO_PUBLIC_SWAP_BUILD_PATH',
   issues: ConfigIssue[],
 ): string {
@@ -331,6 +337,11 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_MARKET_BRIEFING_PATH',
     issues,
   );
+  const tokenPricesPath = validatePath(
+    raw.tokenPricesPath,
+    'EXPO_PUBLIC_TOKEN_PRICES_PATH',
+    issues,
+  );
   const swapBuildPath = validatePath(
     raw.swapBuildPath,
     'EXPO_PUBLIC_SWAP_BUILD_PATH',
@@ -433,6 +444,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
         marketStreamPath,
         fearGreedPath,
         marketBriefingPath,
+        tokenPricesPath,
         swapBuildPath,
         rpcUrl: `${origin}${rpcPath}`,
         publicRpcUrl: `${origin}${publicRpcPath}`,
@@ -440,6 +452,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
         marketStreamUrl: `${origin}${marketStreamPath}`,
         fearGreedUrl: `${origin}${fearGreedPath}`,
         marketBriefingUrl: `${origin}${marketBriefingPath}`,
+        tokenPricesUrl: `${origin}${tokenPricesPath}`,
         swapBuildUrl: `${origin}${swapBuildPath}`,
       },
       telemetry: {
