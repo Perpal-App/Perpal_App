@@ -30,11 +30,15 @@ export type AppConfig = {
     readonly publicRpcPath: string;
     readonly marketDataPath: string;
     readonly marketStreamPath: string;
+    readonly fearGreedPath: string;
+    readonly marketBriefingPath: string;
     readonly swapBuildPath: string;
     readonly rpcUrl: string;
     readonly publicRpcUrl: string;
     readonly marketDataUrl: string;
     readonly marketStreamUrl: string;
+    readonly fearGreedUrl: string;
+    readonly marketBriefingUrl: string;
     readonly swapBuildUrl: string;
   };
   readonly telemetry: {
@@ -59,6 +63,8 @@ export type RawAppEnv = {
   readonly publicRpcPath: string;
   readonly marketDataPath: string;
   readonly marketStreamPath: string;
+  readonly fearGreedPath: string;
+  readonly marketBriefingPath: string;
   readonly swapBuildPath: string;
   readonly pacificaApiOrigin: string;
   readonly pacificaAssetOrigin: string;
@@ -88,6 +94,10 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_MARKET_DATA_PATH?.trim() ?? '',
     marketStreamPath:
       process.env.EXPO_PUBLIC_MARKET_STREAM_PATH?.trim() ?? '',
+    fearGreedPath:
+      process.env.EXPO_PUBLIC_FEAR_GREED_PATH?.trim() ?? '',
+    marketBriefingPath:
+      process.env.EXPO_PUBLIC_MARKET_BRIEFING_PATH?.trim() ?? '',
     swapBuildPath:
       process.env.EXPO_PUBLIC_SWAP_BUILD_PATH?.trim() ?? '',
     pacificaApiOrigin:
@@ -156,6 +166,8 @@ function validatePath(
     | 'EXPO_PUBLIC_PUBLIC_RPC_PATH'
     | 'EXPO_PUBLIC_MARKET_DATA_PATH'
     | 'EXPO_PUBLIC_MARKET_STREAM_PATH'
+    | 'EXPO_PUBLIC_FEAR_GREED_PATH'
+    | 'EXPO_PUBLIC_MARKET_BRIEFING_PATH'
     | 'EXPO_PUBLIC_SWAP_BUILD_PATH',
   issues: ConfigIssue[],
 ): string {
@@ -309,6 +321,16 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_MARKET_STREAM_PATH',
     issues,
   );
+  const fearGreedPath = validatePath(
+    raw.fearGreedPath,
+    'EXPO_PUBLIC_FEAR_GREED_PATH',
+    issues,
+  );
+  const marketBriefingPath = validatePath(
+    raw.marketBriefingPath,
+    'EXPO_PUBLIC_MARKET_BRIEFING_PATH',
+    issues,
+  );
   const swapBuildPath = validatePath(
     raw.swapBuildPath,
     'EXPO_PUBLIC_SWAP_BUILD_PATH',
@@ -409,11 +431,15 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
         publicRpcPath,
         marketDataPath,
         marketStreamPath,
+        fearGreedPath,
+        marketBriefingPath,
         swapBuildPath,
         rpcUrl: `${origin}${rpcPath}`,
         publicRpcUrl: `${origin}${publicRpcPath}`,
         marketDataUrl: `${origin}${marketDataPath}`,
         marketStreamUrl: `${origin}${marketStreamPath}`,
+        fearGreedUrl: `${origin}${fearGreedPath}`,
+        marketBriefingUrl: `${origin}${marketBriefingPath}`,
         swapBuildUrl: `${origin}${swapBuildPath}`,
       },
       telemetry: {

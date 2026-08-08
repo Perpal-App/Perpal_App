@@ -28,6 +28,11 @@ export type WorkerEnv = {
   readonly CORS_ALLOWED_ORIGINS?: string;
   readonly PYTH_HERMES_ORIGIN?: string;
   readonly PYTH_MARKET_FEEDS?: string;
+  readonly CMC_FEAR_GREED_URL?: string;
+  readonly COINDESK_NEWS_FEED_URL?: string;
+  readonly MARKETWATCH_NEWS_FEED_URL?: string;
+  readonly FED_MONETARY_NEWS_FEED_URL?: string;
+  readonly USD_ECONOMIC_CALENDAR_URL?: string;
   readonly JUPITER_API_ORIGIN?: string;
   readonly STABLECOIN_MINTS?: string;
 
@@ -165,6 +170,62 @@ export function resolveMarketDataConfig(env: WorkerEnv): MarketDataConfig {
     feedIds,
     apiKey: env.PYTH_API_KEY?.trim() || null,
   };
+}
+
+export function resolveFearGreedUrl(env: WorkerEnv): string {
+  return parseHttpsUrl(env.CMC_FEAR_GREED_URL, 'CMC_FEAR_GREED_URL');
+}
+
+export type PublicMarketBriefingConfig = {
+  readonly cryptoNewsUrl: string;
+  readonly marketsNewsUrl: string;
+  readonly fedNewsUrl: string;
+  readonly economicCalendarUrl: string;
+};
+
+export function resolvePublicMarketBriefingConfig(
+  env: WorkerEnv,
+): PublicMarketBriefingConfig {
+  return {
+    cryptoNewsUrl: parseHttpsUrl(
+      env.COINDESK_NEWS_FEED_URL,
+      'COINDESK_NEWS_FEED_URL',
+    ),
+    marketsNewsUrl: parseHttpsUrl(
+      env.MARKETWATCH_NEWS_FEED_URL,
+      'MARKETWATCH_NEWS_FEED_URL',
+    ),
+    fedNewsUrl: parseHttpsUrl(
+      env.FED_MONETARY_NEWS_FEED_URL,
+      'FED_MONETARY_NEWS_FEED_URL',
+    ),
+    economicCalendarUrl: parseHttpsUrl(
+      env.USD_ECONOMIC_CALENDAR_URL,
+      'USD_ECONOMIC_CALENDAR_URL',
+    ),
+  };
+}
+
+function parseHttpsUrl(raw: string | undefined, variable: string): string {
+  const value = raw?.trim() ?? '';
+
+  try {
+    const parsed = new URL(value);
+
+    if (
+      parsed.protocol === 'https:' &&
+      parsed.username.length === 0 &&
+      parsed.password.length === 0 &&
+      parsed.search.length === 0 &&
+      parsed.hash.length === 0
+    ) {
+      return value;
+    }
+  } catch {
+    // Report the binding name without exposing its configured value.
+  }
+
+  throw new ConfigurationError([`${variable} (exact HTTPS URL required)`]);
 }
 
 /**

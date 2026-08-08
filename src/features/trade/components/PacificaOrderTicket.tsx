@@ -25,6 +25,7 @@ import {
   type TradeCollateralStep,
 } from '@/integrations/perps/tradeCollateral';
 import { logTradeError } from '@/integrations/observability/tradeError';
+import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
@@ -159,11 +160,23 @@ export function PacificaOrderTicket(props: {
       setPreparation(null);
       setPhase('idle');
       setError('Collateral confirmed. Review the order after Pacifica updates the account balance.');
+      publishInAppNotification({
+        kind: 'funding',
+        outcome: 'success',
+        title: 'Trading collateral confirmed',
+        message: 'Pacifica is updating the available trading balance.',
+      });
     } catch (cause) {
       if (!abort.signal.aborted) {
         logTradeError('pacifica', 'submission', cause);
         setError(cause instanceof Error ? cause.message : 'Trade preparation failed.');
         setPhase('idle');
+        publishInAppNotification({
+          kind: 'funding',
+          outcome: 'error',
+          title: 'Trading collateral not confirmed',
+          message: 'Open the order ticket to review the collateral step.',
+        });
       }
     }
   };
@@ -182,11 +195,23 @@ export function PacificaOrderTicket(props: {
       });
       setOrderId(result.orderId);
       setPhase('complete');
+      publishInAppNotification({
+        kind: 'trade',
+        outcome: 'success',
+        title: `${confirmed.action === 'open' ? 'Open' : 'Close'} order accepted`,
+        message: `${props.market.baseAsset} ${confirmed.side} order was accepted by Pacifica.`,
+      });
     } catch (cause) {
       logTradeError('pacifica', 'submission', cause);
       setError(cause instanceof Error ? cause.message : 'Pacifica order failed.');
       setPlan(null);
       setPhase('idle');
+      publishInAppNotification({
+        kind: 'trade',
+        outcome: 'error',
+        title: 'Order not submitted',
+        message: `${props.market.baseAsset} order needs review.`,
+      });
     }
   };
 

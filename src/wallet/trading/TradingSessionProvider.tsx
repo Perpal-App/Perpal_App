@@ -20,6 +20,7 @@ import {
   writeActivatedTradingWallet,
   writeTradingWalletIdentity,
 } from '@/storage/trading-wallet-identity';
+import { publishInAppNotification } from '@/storage/inAppNotifications';
 import {
   DERIVATION_MESSAGE,
   checkTradingWalletIdentity,
@@ -257,12 +258,24 @@ export function TradingSessionProvider({
       setGeneration(derived.generation);
       setRecovery(null);
       setStatus('ready');
+      publishInAppNotification({
+        kind: 'wallet',
+        outcome: 'success',
+        title: 'Private trading activated',
+        message: 'Private wallet T is ready for funding and trading.',
+      });
     } catch (cause) {
       clearSecret();
       setAddress(null);
       setError('Private trading activation was not completed. Try again.');
       setStatus('inactive');
       logActivationError('activate', cause);
+      publishInAppNotification({
+        kind: 'wallet',
+        outcome: 'error',
+        title: 'Private trading not activated',
+        message: 'Open Wallet and try activation again.',
+      });
     } finally {
       if (derived !== null && seedRef.current !== derived.secretKey) {
         zeroize(derived.secretKey);
@@ -318,10 +331,22 @@ export function TradingSessionProvider({
       setAddress(next.address);
       setGeneration(next.generation);
       setStatus('ready');
+      publishInAppNotification({
+        kind: 'wallet',
+        outcome: 'success',
+        title: 'Private wallet rotated',
+        message: 'The new private wallet T is active.',
+      });
     } catch (cause) {
       if (next !== null && seedRef.current !== next.secretKey) zeroize(next.secretKey);
       setError(cause instanceof Error ? cause.message : 'Rotation safety could not be verified.');
       setStatus('ready');
+      publishInAppNotification({
+        kind: 'wallet',
+        outcome: 'error',
+        title: 'Private wallet not rotated',
+        message: 'Balances or pending activity may still block rotation.',
+      });
     }
   }, [address, generation, mainWalletAddress, signer, status]);
 

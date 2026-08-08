@@ -11,6 +11,7 @@ import type {
   PacificaPortfolioSnapshot,
   PacificaPosition,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
@@ -33,10 +34,25 @@ export function PacificaPortfolioContent({ snapshot }: { readonly snapshot: Paci
             orderId: order.orderId,
             signer: session.signer,
             symbol: order.symbol,
-          }).catch((cause) => Alert.alert(
-            'Cancellation failed',
-            cause instanceof Error ? cause.message : 'Pacifica cancellation failed.',
-          ));
+          }).then(() => {
+            publishInAppNotification({
+              kind: 'trade',
+              outcome: 'success',
+              title: 'Order cancelled',
+              message: `${order.symbol} order was cancelled.`,
+            });
+          }).catch((cause) => {
+            publishInAppNotification({
+              kind: 'trade',
+              outcome: 'error',
+              title: 'Cancellation failed',
+              message: `${order.symbol} order remains open.`,
+            });
+            Alert.alert(
+              'Cancellation failed',
+              cause instanceof Error ? cause.message : 'Pacifica cancellation failed.',
+            );
+          });
         },
       },
     ],

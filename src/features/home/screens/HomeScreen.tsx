@@ -7,6 +7,12 @@ import { AppScreen } from '@/components/layout/AppScreen';
 import { RiseInView } from '@/components/motion/RiseInView';
 import { readAppConfig } from '@/config/appConfig';
 import { formatCompactTokenPrice, formatCompactUsd } from '@/domain/money/amount';
+import { FearGreedCard } from '@/features/home/components/FearGreedCard';
+import { MajorEventsTimeline } from '@/features/home/components/MajorEventsTimeline';
+import { MarketNewsSection } from '@/features/home/components/MarketNewsSection';
+import { NotificationsPanel } from '@/features/home/components/NotificationsPanel';
+import { useFearGreed } from '@/features/home/hooks/useFearGreed';
+import { useMarketBriefing } from '@/features/home/hooks/useMarketBriefing';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
@@ -30,6 +36,10 @@ export function HomeScreen() {
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     config.ok ? config.value.perps.pacificaAssetOrigin : '',
     config.ok ? config.value.perps.pacificaWsOrigin : '',
+  );
+  const fearGreed = useFearGreed(config.ok ? config.value.api.fearGreedUrl : '');
+  const briefing = useMarketBriefing(
+    config.ok ? config.value.api.marketBriefingUrl : '',
   );
 
   // Indexed, not scanned. Every price message hands back a new snapshot array, so this
@@ -65,9 +75,23 @@ export function HomeScreen() {
 
   return (
     <AppScreen contentContainerStyle={styles.content}>
-      <RiseInView>
-        <Text accessibilityRole="header" style={styles.title}>Perpal</Text>
-        <Text style={styles.subtitle}>Pacifica perpetuals</Text>
+      <RiseInView style={styles.header}>
+        <View style={styles.headingCopy}>
+          <Text accessibilityRole="header" style={styles.title}>Perpal</Text>
+          <Text style={styles.subtitle}>Pacifica perpetuals</Text>
+        </View>
+        <NotificationsPanel
+          latestNews={briefing.data?.news.find((article) =>
+            article.category === 'perps' || article.category === 'crypto')
+            ?? briefing.data?.news[0]
+            ?? null}
+          topGainer={gainers[0] === undefined
+            ? null
+            : `${gainers[0].market.baseAsset} ${formatChange(gainers[0].snapshot.change24hBps)}`}
+          topLoser={losers[0] === undefined
+            ? null
+            : `${losers[0].market.baseAsset} ${formatChange(losers[0].snapshot.change24hBps)}`}
+        />
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger} style={styles.summary}>
@@ -86,6 +110,10 @@ export function HomeScreen() {
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger * 2}>
+        <FearGreedCard {...fearGreed} />
+      </RiseInView>
+
+      <RiseInView delay={motion.rise.stagger * 3}>
         <MoverList
           markets={gainers}
           onSelect={(venueRef) => router.push({
@@ -97,7 +125,7 @@ export function HomeScreen() {
         />
       </RiseInView>
 
-      <RiseInView delay={motion.rise.stagger * 3}>
+      <RiseInView delay={motion.rise.stagger * 4}>
         <MoverList
           markets={losers}
           onSelect={(venueRef) => router.push({
@@ -107,6 +135,14 @@ export function HomeScreen() {
           pending={pending}
           title="Top losers"
         />
+      </RiseInView>
+
+      <RiseInView delay={motion.rise.stagger * 5}>
+        <MajorEventsTimeline {...briefing} />
+      </RiseInView>
+
+      <RiseInView delay={motion.rise.stagger * 6}>
+        <MarketNewsSection {...briefing} />
       </RiseInView>
     </AppScreen>
   );
@@ -202,6 +238,13 @@ const styles = StyleSheet.create({
   },
   title: { ...typography.title, color: colors.textPrimary },
   subtitle: { ...typography.caption, color: colors.textMuted },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  headingCopy: { flex: 1 },
   summary: { flexDirection: 'row', gap: spacing.xl },
   figure: { flex: 1 },
   figureLabel: { ...typography.eyebrow, letterSpacing: 0.5, color: colors.textMuted },

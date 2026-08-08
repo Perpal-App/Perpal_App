@@ -25,7 +25,7 @@ export function corsHeaders(request: Request, allowedOrigins: readonly string[])
 
   if (origin !== null && allowedOrigins.includes(origin)) {
     headers['access-control-allow-origin'] = origin;
-    headers['access-control-allow-methods'] = 'POST, OPTIONS';
+    headers['access-control-allow-methods'] = 'GET, POST, OPTIONS';
     headers['access-control-allow-headers'] = ALLOWED_REQUEST_HEADERS;
     headers['access-control-max-age'] = '86400';
   }

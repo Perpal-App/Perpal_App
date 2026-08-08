@@ -35,6 +35,14 @@ Screens render state and collect intent. They do not construct Pacifica signatur
 - `GET /api/v1/kline/mark` supplies chart candles so analysis and executable risk use the same venue mark family.
 - Missing or stale required data is unavailable, never replaced by an estimate. Trading is blocked until the mark is current.
 
+## Market intelligence and notifications
+
+- The public Worker route `GET /v1/market-briefing` normalizes configured CoinDesk, MarketWatch, and Federal Reserve RSS feeds plus FXMacroData's official U.S. economic calendar. These public sources require no Worker secret.
+- News is source-attributed and time-stamped. Perps, U.S. crypto-policy, and Fed labels are derived only from words present in the returned articles.
+- The event timeline includes only upcoming high-impact United States releases from the API's UTC calendar, including Fed events when the provider schedules them. It does not scrape or invent dates.
+- The Home screen refreshes the briefing while focused and keeps the prior successful snapshot during a transient failure. The Worker cache bounds upstream traffic.
+- A bounded, non-sensitive MMKV activity stream records private-wallet activation/rotation, funding, collateral deposit, order, cancellation, and private-withdrawal outcomes. It never stores addresses, transaction identifiers, signatures, amounts, or proofs. Current Pacifica gainers/losers and the latest relevant news are rendered live rather than persisted as repeated notifications.
+
 ## Signing and orders
 
 T signs Pacifica's documented recursively sorted compact JSON with Ed25519. The app verifies the returned signature locally before submission. The signed header binds operation type, timestamp, and a five-second expiry window.

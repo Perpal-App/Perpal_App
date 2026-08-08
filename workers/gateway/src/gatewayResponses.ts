@@ -48,6 +48,12 @@ export async function healthResponse(input: {
     globalRateLimiterConfigured: input.env.GLOBAL_RATE_LIMITER !== undefined,
     telemetryConfigured: input.env.TELEMETRY !== undefined,
     pythApiKeyConfigured: Boolean(input.config.marketData.apiKey),
+    financialNewsConfigured: [
+      input.env.COINDESK_NEWS_FEED_URL,
+      input.env.MARKETWATCH_NEWS_FEED_URL,
+      input.env.FED_MONETARY_NEWS_FEED_URL,
+      input.env.USD_ECONOMIC_CALENDAR_URL,
+    ].every((value) => Boolean(value?.trim())),
     traceId: input.traceId,
   });
 }

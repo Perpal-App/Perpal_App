@@ -28,8 +28,7 @@ import {
   type JsonRpcRequest,
 } from './rpcValidation';
 import { handleTelemetryRequest } from './telemetry';
-import { MARKET_DATA_PATH, MARKET_STREAM_PATH } from './marketData';
-import { handlePublicMarketsRequest } from './publicMarketsHandler';
+import { routePublicData } from './publicDataRouter';
 import {
   handlePublicRpcRequest,
   PUBLIC_RPC_PATH,
@@ -50,7 +49,11 @@ const MAX_TELEMETRY_BODY_BYTES = 16 * 1024;
 const MAX_SWAP_BODY_BYTES = 4 * 1024;
 
 export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: WorkerEnv,
+    context: { readonly waitUntil: (promise: Promise<unknown>) => void },
+  ): Promise<Response> {
     const started = performance.now();
     const traceId = crypto.randomUUID();
     const url = new URL(request.url);
@@ -82,17 +85,16 @@ export default {
       return response;
     };
 
-    if ([MARKET_DATA_PATH, MARKET_STREAM_PATH].includes(url.pathname)) {
-      const result = await handlePublicMarketsRequest(request, env, traceId);
+    const publicData = await routePublicData(request, env, context, traceId);
+
+    if (publicData !== null) {
       return complete(
-        result.response,
-        result.outcome,
-        url.pathname === MARKET_STREAM_PATH ? 'markets.stream' : 'markets.read',
-        {
-        ...(result.upstreamMs === undefined
+        publicData.response,
+        publicData.outcome,
+        publicData.operation,
+        publicData.upstreamMs === undefined
           ? {}
-          : { upstream: result.upstreamMs }),
-        },
+          : { upstream: publicData.upstreamMs },
       );
     }
 

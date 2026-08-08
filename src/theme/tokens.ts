@@ -1,3 +1,11 @@
+/**
+ * Held as constants because the loss and gain hues do double duty: they are the price
+ * colours, and they are also the two ends of the sentiment scale below. Naming them once
+ * keeps a red on a falling price and a red on an extreme-fear reading the same red.
+ */
+const NEGATIVE = '#EF6262';
+const POSITIVE = '#4ADE80';
+
 export const colors = {
   background: '#07060B',
   surface: '#101116',
@@ -10,11 +18,26 @@ export const colors = {
   accent: '#8B5CF6',
   accentPressed: '#7447E8',
   accentSoft: '#C4B5FD',
-  positive: '#4ADE80',
-  negative: '#EF6262',
+  positive: POSITIVE,
+  negative: NEGATIVE,
   /** Rim shades for the order actions, one step under each gradient's base. */
   longEdge: '#178F52',
   shortEdge: '#B03737',
+
+  /**
+   * Fear and Greed bands, extreme fear through extreme greed.
+   *
+   * The ends are the app's own loss and gain hues rather than new reds and greens, so the
+   * scale agrees with every price on the screen and a reader learns one colour language,
+   * not two. Only the three middle steps are new, and they interpolate between those ends
+   * through amber — the route that keeps every step distinguishable at the height of a
+   * meter bar, which a direct red-to-green ramp does not.
+   */
+  sentimentExtremeFear: NEGATIVE,
+  sentimentFear: '#F2935C',
+  sentimentNeutral: '#EBCB65',
+  sentimentGreed: '#A6CF6A',
+  sentimentExtremeGreed: POSITIVE,
 
   onAccent: '#FFFFFF',
   onLight: '#111116',
@@ -186,6 +209,32 @@ export const gradients = {
     locations: [0, 1],
   },
   /**
+   * Light along the top edge of a card. Far weaker than the glass sheen below, and it has
+   * to be: that one sits on a control the size of a thumb, while this crosses a whole card,
+   * and the same strength spread over that area stops reading as a lit edge and starts
+   * reading as a second background.
+   */
+  cardSheen: {
+    colors: ['rgba(255, 255, 255, 0.07)', 'rgba(255, 255, 255, 0)'],
+    locations: [0, 0.55],
+  },
+  /**
+   * Gloss down a meter tick. Strong at the top, almost gone by the middle, so a tick reads
+   * as a rounded bar catching light from above rather than as a flat swatch of colour.
+   *
+   * White rather than a lightened version of each tick, so one gradient serves every colour
+   * the scale can take and the highlight keeps the same strength across all of them instead
+   * of drifting with the hue underneath.
+   */
+  meterGloss: {
+    colors: [
+      'rgba(255, 255, 255, 0.34)',
+      'rgba(255, 255, 255, 0.08)',
+      'rgba(255, 255, 255, 0)',
+    ],
+    locations: [0, 0.45, 1],
+  },
+  /**
    * Specular highlight along the top of the glass. It fades out well before the
    * midpoint, so it reads as a curved surface catching light rather than as a
    * second fill.
@@ -261,6 +310,19 @@ export const motion = {
     duration: 520,
     offsetY: 18,
     stagger: 90,
+  },
+  /**
+   * Gauge fill sweep: colour running across a row of ticks, left to right, once when a
+   * reading arrives.
+   *
+   * `overlap` is the share of the sweep a single tick takes to come up, as a fraction. It
+   * has to be well above one tick's share of the total or the ticks light one at a time and
+   * the run reads as a counter ticking over; at this value each tick is still rising as
+   * several of its neighbours start, so the fill reads as one front moving across.
+   */
+  gaugeFill: {
+    duration: 640,
+    overlap: 0.24,
   },
   /**
    * Skeleton sweep. One pass of the highlight across a placeholder, looped while

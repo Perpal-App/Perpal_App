@@ -21,6 +21,7 @@ import {
   readPrivateExitRecord,
   type PrivateExitRecord,
 } from '@/integrations/umbra/privateExitStorage';
+import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type State = {
@@ -89,9 +90,24 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
     setIsRunning(true);
     setError(null);
     try {
-      setRecord(await action());
+      const next = await action();
+      setRecord(next);
+      if (next.phase === 'complete') {
+        publishInAppNotification({
+          kind: 'withdrawal',
+          outcome: 'success',
+          title: 'Private withdrawal completed',
+          message: 'The destination received the private withdrawal.',
+        });
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Private withdrawal did not complete.');
+      publishInAppNotification({
+        kind: 'withdrawal',
+        outcome: 'error',
+        title: 'Private withdrawal needs attention',
+        message: 'Open Portfolio to review and safely resume the withdrawal.',
+      });
     } finally {
       runningRef.current = false;
       setIsRunning(false);

@@ -7,6 +7,8 @@ const VALID: RawAppEnv = {
   publicRpcPath: '/v1/rpc/public',
   marketDataPath: '/v1/markets',
   marketStreamPath: '/v1/markets/stream',
+  fearGreedPath: '/v1/sentiment/fear-greed',
+  marketBriefingPath: '/v1/market-briefing',
   swapBuildPath: '/v1/swap/build',
   pacificaApiOrigin: 'https://api.pacifica.fi',
   pacificaAssetOrigin: 'https://app.pacifica.fi',
@@ -52,6 +54,12 @@ describe('parseAppConfig', () => {
       );
       expect(result.value.api.marketStreamUrl).toBe(
         'https://gateway.example/v1/markets/stream',
+      );
+      expect(result.value.api.fearGreedUrl).toBe(
+        'https://gateway.example/v1/sentiment/fear-greed',
+      );
+      expect(result.value.api.marketBriefingUrl).toBe(
+        'https://gateway.example/v1/market-briefing',
       );
       expect(result.value.perps.pacificaApiOrigin).toBe('https://api.pacifica.fi');
       expect(result.value.perps.pacificaAssetOrigin).toBe('https://app.pacifica.fi');

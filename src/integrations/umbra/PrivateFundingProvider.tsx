@@ -34,6 +34,7 @@ import {
   type PrivateFundingRecord,
 } from '@/integrations/umbra/umbraSecureStorage';
 import type { ProviderCollateral } from '@/integrations/perps/providerCollateral';
+import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type BalanceCheckInput = Pick<
@@ -237,7 +238,16 @@ export function PrivateFundingProvider({
     setError(null);
 
     try {
-      setRecord(await action());
+      const next = await action();
+      setRecord(next);
+      if (next.phase === 'complete') {
+        publishInAppNotification({
+          kind: 'funding',
+          outcome: 'success',
+          title: 'Private deposit completed',
+          message: 'Funds are available in private wallet T.',
+        });
+      }
     } catch (cause) {
       const errorCode = classifyPrivateFundingFailure(cause);
       console.error('[Perpal private funding]', JSON.stringify({
@@ -250,6 +260,12 @@ export function PrivateFundingProvider({
           ? cause.message
           : privateFundingUserMessage(errorCode)} Error reference: ${errorCode}.`,
       );
+      publishInAppNotification({
+        kind: 'funding',
+        outcome: 'error',
+        title: 'Private deposit needs attention',
+        message: 'Open Wallet to review and safely resume the deposit.',
+      });
     } finally {
       runningRef.current = false;
       setIsRunning(false);
