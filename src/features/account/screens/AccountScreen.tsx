@@ -11,6 +11,7 @@ import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { usePrivateFunding } from '@/integrations/umbra/PrivateFundingProvider';
 import type { PrivateFundingRecord } from '@/integrations/umbra/umbraSecureStorage';
+import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 import {
   useTradingSession,
@@ -302,7 +303,8 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
+    // The floating tab bar draws over this screen, so the last row buys its own room.
+    paddingBottom: TAB_BAR_CLEARANCE,
   },
   header: { paddingVertical: spacing.sm },
   title: { ...typography.title, color: colors.textPrimary },

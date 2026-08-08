@@ -8,7 +8,6 @@ import {
   type ImageSourcePropType,
 } from 'react-native';
 
-import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { Button } from '@/components/ui/Button';
 import { AuthMailIcon } from '@/features/auth/components/AuthMailIcon';
 import {
@@ -120,20 +119,18 @@ export function AuthFlowCard() {
     );
   }
 
+  // Both remaining pre-form states hold the card's height and show nothing else.
+  // The card already reads as part of the screen's entrance, and neither wait is
+  // long enough to be worth announcing: a spinner that appears and disappears
+  // inside a card is noise, not feedback.
   if (!auth.isReady && !keepAuthFlowMounted) {
-    return (
-      <IOSLoader
-        accessibilityLabel="Preparing secure sign in"
-        fill
-        size="large"
-      />
-    );
+    return <View accessibilityLabel="Preparing secure sign in" style={styles.pending} />;
   }
 
   // A restored authenticated `/access` route can survive for one transition
   // frame while the root Stack remounts. Never expose auth UI or logout here.
   if (auth.isAuthenticated && !keepAuthFlowMounted) {
-    return <IOSLoader accessibilityLabel="Opening Home" fill size="large" />;
+    return <View style={styles.pending} />;
   }
 
   const handleSendCode = async () => {
@@ -375,6 +372,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.xs,
   },
+  // Keeps the card at its full height while the form is unavailable, so it does not
+  // collapse and then snap open once Privy is ready.
+  pending: { flex: 1 },
   centeredState: {
     flex: 1,
     alignItems: 'center',

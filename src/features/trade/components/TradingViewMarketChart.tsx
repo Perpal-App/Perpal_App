@@ -6,6 +6,12 @@ import {
   ChartToolIcon,
   type ChartToolName,
 } from '@/features/trade/components/ChartToolIcon';
+import {
+  CHART_TOOL_GROUPS,
+  chartToolGroupId,
+  chartToolLabel,
+  type ChartTool,
+} from '@/features/trade/components/chartTools';
 import { TRADING_VIEW_CHART_HTML } from '@/features/trade/generated/tradingViewChartHtml';
 import type { MarketHistoryStatus } from '@/features/trade/hooks/usePacificaMarketHistory';
 import {
@@ -16,20 +22,6 @@ import {
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 type ChartStyle = 'candles' | 'line';
-
-/** Drawing tools the chart document implements. `none` is the pan/crosshair state. */
-type ChartTool = 'none' | 'trend' | 'horizontal' | 'ruler';
-
-const TOOLS: readonly {
-  readonly tool: ChartTool;
-  readonly icon: ChartToolName;
-  readonly label: string;
-}[] = [
-  { tool: 'none', icon: 'cursor', label: 'Crosshair, pan and zoom' },
-  { tool: 'trend', icon: 'trend', label: 'Trend line' },
-  { tool: 'horizontal', icon: 'horizontal', label: 'Horizontal price line' },
-  { tool: 'ruler', icon: 'ruler', label: 'Measure move and bars' },
-];
 
 export function TradingViewMarketChart({
   candles,
@@ -55,6 +47,8 @@ export function TradingViewMarketChart({
   const [showSma, setShowSma] = useState(false);
   const [showEma, setShowEma] = useState(false);
   const [tool, setTool] = useState<ChartTool>('none');
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [magnet, setMagnet] = useState(false);
   const shouldFit = useRef(true);
   const timeframeLabel = MARKET_TIMEFRAMES.find((item) => item.id === timeframe)?.label ?? timeframe;
   const message = useMemo(() => JSON.stringify({
@@ -86,7 +80,15 @@ export function TradingViewMarketChart({
 
   const selectTool = useCallback((next: ChartTool) => {
     setTool(next);
+    setOpenGroup(null);
     send({ type: 'set_tool', tool: next });
+  }, [send]);
+
+  const toggleMagnet = useCallback(() => {
+    setMagnet((current) => {
+      send({ type: 'set_magnet', magnet: !current });
+      return !current;
+    });
   }, [send]);
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
@@ -159,17 +161,41 @@ export function TradingViewMarketChart({
       </ScrollView>
 
       <View style={[styles.workspace, fill && styles.workspaceFill]}>
-        <View accessibilityRole="toolbar" style={styles.rail}>
-          {TOOLS.map((item) => (
+        <ScrollView
+          accessibilityRole="toolbar"
+          contentContainerStyle={styles.rail}
+          showsVerticalScrollIndicator={false}
+          style={styles.railScroll}
+        >
+          {CHART_TOOL_GROUPS.map((group) => (
             <IconButton
-              icon={item.icon}
-              key={item.tool}
-              label={item.label}
-              onPress={() => selectTool(item.tool)}
-              selected={tool === item.tool}
+              icon={group.icon}
+              key={group.id}
+              label={group.label}
+              onPress={() => {
+                if (group.tools.length === 1 && group.tools[0] !== undefined) {
+                  selectTool(group.tools[0].id);
+                  return;
+                }
+                setOpenGroup((current) => current === group.id ? null : group.id);
+              }}
+              selected={tool === 'none'
+                ? group.id === 'cursor'
+                : chartToolGroupId(tool) === group.id}
             />
           ))}
           <View style={styles.railDivider} />
+          <IconButton
+            icon="magnet"
+            label="Snap drawings to candle highs, lows, opens and closes"
+            onPress={toggleMagnet}
+            selected={magnet}
+          />
+          <IconButton
+            icon="undo"
+            label="Remove the last drawing"
+            onPress={() => send({ type: 'undo_drawing' })}
+          />
           <IconButton
             icon="clear"
             label="Remove all drawings"
@@ -178,7 +204,25 @@ export function TradingViewMarketChart({
               send({ type: 'clear_drawings' });
             }}
           />
-        </View>
+        </ScrollView>
+
+        {openGroup === null ? null : (
+          <View accessibilityRole="menu" style={styles.picker}>
+            {(CHART_TOOL_GROUPS.find((group) => group.id === openGroup)?.tools ?? []).map((item) => (
+              <Pressable
+                accessibilityRole="menuitem"
+                accessibilityState={{ selected: tool === item.id }}
+                key={item.id}
+                onPress={() => selectTool(item.id)}
+                style={({ pressed }) => [styles.pickerItem, pressed && styles.pressed]}
+              >
+                <Text style={[styles.pickerLabel, tool === item.id && styles.pickerLabelActive]}>
+                  {item.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         <View
           accessibilityLabel={`Interactive chart for ${symbol}. Drag to pan, pinch sideways to zoom time, pinch vertically to zoom price.`}
@@ -207,7 +251,7 @@ export function TradingViewMarketChart({
           ) : (
             <View accessibilityLiveRegion="polite" style={styles.placeholder}>
               <Text style={styles.placeholderText}>
-                {status === 'loading' ? 'Loading Pyth candles' : 'Price history unavailable'}
+                {status === 'loading' ? 'Loading Pacifica candles' : 'Price history unavailable'}
               </Text>
             </View>
           )}
@@ -217,8 +261,8 @@ export function TradingViewMarketChart({
 
       <Text style={styles.hint}>
         {tool === 'none'
-          ? 'Drag to pan · pinch across to zoom time · pinch up and down to zoom price'
-          : 'Drag on the chart to place the tool'}
+          ? 'Drag to pan · pinch to zoom · drag either axis to stretch it'
+          : `${chartToolLabel(tool)}: drag to place it${magnet ? ', snapping to candles' : ''}`}
       </Text>
     </View>
   );
@@ -319,15 +363,35 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   workspaceFill: { flex: 1, height: 0, minHeight: 240 },
-  rail: {
+  railScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
     width: RAIL_WIDTH,
-    alignItems: 'center',
-    paddingVertical: spacing.xxs,
-    gap: spacing.xxs,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: colors.border,
     backgroundColor: colors.surface,
   },
+  rail: { alignItems: 'center', paddingVertical: spacing.xxs, gap: spacing.xxs },
+  // Opens beside the rail, inside the chart frame, so a family's members are one
+  // tap away without a modal covering the candles.
+  picker: {
+    position: 'absolute',
+    zIndex: 2,
+    top: spacing.xxs,
+    left: RAIL_WIDTH + spacing.xxs,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceElevated,
+  },
+  pickerItem: {
+    minHeight: 38,
+    paddingHorizontal: spacing.sm,
+    justifyContent: 'center',
+  },
+  pickerLabel: { ...typography.caption, color: colors.textSecondary },
+  pickerLabelActive: { color: colors.accentSoft },
   railDivider: {
     width: 20,
     height: StyleSheet.hairlineWidth,

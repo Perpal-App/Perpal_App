@@ -1,26 +1,34 @@
 import { useRouter } from 'expo-router';
-import { useMemo } from 'react';
-import { FlatList, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { AppScreen } from '@/components/layout/AppScreen';
+import { SearchField } from '@/components/ui/SearchField';
 import { readAppConfig } from '@/config/appConfig';
 import {
   MarketTableHeader,
   MarketTableRow,
+  MarketTableSkeletonRow,
   type MarketTableEntry,
 } from '@/features/trade/components/MarketTable';
 import {
   usePacificaMarkets,
   type PacificaVenueState,
 } from '@/features/trade/hooks/usePacificaMarkets';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
+import { useMinimizeOnScroll } from '@/navigation/tabs/minimizeState';
+import { colors, layout, spacing, typography } from '@/theme/tokens';
 
 export function TradeScreen() {
   const router = useRouter();
   const config = readAppConfig();
+  const [query, setQuery] = useState('');
+  const onScroll = useMinimizeOnScroll();
   const compact = useWindowDimensions().width < layout.compactWidth;
   const venue = usePacificaMarkets(
     config.ok ? config.value.perps.pacificaApiOrigin : '',
+    config.ok ? config.value.perps.pacificaAssetOrigin : '',
     config.ok ? config.value.perps.pacificaWsOrigin : '',
   );
   const snapshots = useMemo(
@@ -29,32 +37,58 @@ export function TradeScreen() {
   );
   const entries = useMemo<readonly MarketTableEntry[]>(
     () => venue.markets
+      .filter((market) => matches(market, query))
       .map((market) => ({ market, venue: snapshots.get(market.venueRef) ?? null }))
       .sort((left, right) => {
         const leftVolume = left.venue?.volume24h.baseUnits ?? -1n;
         const rightVolume = right.venue?.volume24h.baseUnits ?? -1n;
         return leftVolume === rightVolume ? 0 : leftVolume > rightVolume ? -1 : 1;
       }),
-    [snapshots, venue.markets],
+    [query, snapshots, venue.markets],
+  );
+
+  // Both stable, which is what lets `MarketTableRow`'s memo hold: a `renderItem` or an
+  // `onPress` rebuilt inline would hand every row a new prop on every price message and
+  // re-render the whole visible list for one market's tick.
+  const openMarket = useCallback(
+    (venueRef: string) => router.push({
+      pathname: '/(tabs)/trade/[venueRef]',
+      params: { venueRef },
+    }),
+    [router],
+  );
+  const renderRow = useCallback(
+    ({ item }: { readonly item: MarketTableEntry }) => (
+      <MarketTableRow compact={compact} entry={item} onSelect={openMarket} />
+    ),
+    [compact, openMarket],
   );
 
   return (
     <AppScreen scroll={false}>
-      <FlatList
+      <Animated.FlatList
         bounces={false}
         contentContainerStyle={styles.container}
         data={entries}
         initialNumToRender={14}
         keyExtractor={(entry) => entry.market.venueRef}
         ListHeaderComponent={(
+          // Nothing structural in here is gated behind an entrance animation. The
+          // column header was wrapped in one and rendered invisible on device:
+          // between a virtualized list header and an animated transform there are
+          // too many ways for a layer to be clipped, and a column title is not
+          // worth that risk. The rows' shimmer-to-value transition carries the
+          // motion on this screen.
           <View>
             <View style={[styles.header, compact && styles.compactGutter]}>
-              <View>
-                <Text accessibilityRole="header" style={styles.title}>Markets</Text>
-                <Text style={styles.subtitle}>Pacifica perpetuals · public market data</Text>
-              </View>
-              <FeedStatus status={venue.status} />
+              <Text accessibilityRole="header" style={styles.title}>Markets</Text>
             </View>
+            <SearchField
+              compact={compact}
+              onChangeText={setQuery}
+              placeholder="Search markets"
+              value={query}
+            />
             {venue.status === 'error' ? (
               <Text accessibilityRole="alert" style={styles.notice}>
                 Pacifica market data is reconnecting. Trading stays blocked until prices are current.
@@ -63,21 +97,18 @@ export function TradeScreen() {
             <MarketTableHeader compact={compact} />
           </View>
         )}
-        ListEmptyComponent={venue.status === 'loading' ? (
-          <Text accessibilityLiveRegion="polite" style={styles.empty}>Loading Pacifica markets…</Text>
-        ) : null}
-        maxToRenderPerBatch={14}
-        removeClippedSubviews
-        renderItem={({ item }) => (
-          <MarketTableRow
+        ListEmptyComponent={(
+          <MarketListPlaceholder
             compact={compact}
-            entry={item}
-            onPress={() => router.push({
-              pathname: '/(tabs)/trade/[venueRef]',
-              params: { venueRef: item.market.venueRef },
-            })}
+            query={query}
+            status={venue.status}
           />
         )}
+        keyboardShouldPersistTaps="handled"
+        maxToRenderPerBatch={14}
+        renderItem={renderRow}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
         windowSize={5}
       />
@@ -85,25 +116,63 @@ export function TradeScreen() {
   );
 }
 
-function FeedStatus({ status }: { readonly status: PacificaVenueState }) {
-  const label = status === 'ready'
-    ? 'Live'
-    : status === 'error'
-      ? 'Reconnecting'
-      : status === 'loading'
-        ? 'Connecting'
-        : 'Offline';
+/**
+ * Matches a market on its ticker or its full name, so "sol", "SOL" and "solana"
+ * all find the same row. Blank query matches everything.
+ */
+function matches(market: MarketTableEntry['market'], query: string): boolean {
+  const needle = query.trim().toLowerCase();
+
+  if (needle.length === 0) return true;
+
+  return market.baseAsset.toLowerCase().includes(needle) ||
+    market.displayName.toLowerCase().includes(needle);
+}
+
+/** Rows to shimmer before the venue's first answer — roughly a phone's worth. */
+const PLACEHOLDER_ROWS = 9;
+
+/**
+ * What stands in for the table when it has no rows.
+ *
+ * A wait is shown as the table itself, shimmering, rather than as a line of status
+ * text: the shape of what is coming is more informative than a word about it, and
+ * it means the screen never swaps one kind of content for another. Text is reserved
+ * for the two cases where no rows is the answer — a search with no match, and a
+ * venue that returned nothing.
+ */
+function MarketListPlaceholder({
+  compact,
+  query,
+  status,
+}: {
+  readonly compact: boolean;
+  readonly query: string;
+  readonly status: PacificaVenueState;
+}) {
+  const searching = query.trim().length > 0;
+
+  if (searching) {
+    return (
+      <Text accessibilityLiveRegion="polite" style={styles.empty}>
+        {`No market matches “${query.trim()}”.`}
+      </Text>
+    );
+  }
+
+  if (status === 'ready') {
+    return (
+      <Text accessibilityLiveRegion="polite" style={styles.empty}>
+        No markets reported by Pacifica.
+      </Text>
+    );
+  }
+
   return (
-    <View accessible accessibilityLabel={`Pacifica market data: ${label}`} style={styles.feedStatus}>
-      <View style={[
-        styles.feedDot,
-        status === 'ready'
-          ? styles.feedDotLive
-          : status === 'error'
-            ? styles.feedDotError
-            : styles.feedDotIdle,
-      ]} />
-      <Text style={styles.feedLabel}>{label}</Text>
+    <View accessibilityLabel="Loading markets" accessibilityRole="progressbar">
+      {Array.from({ length: PLACEHOLDER_ROWS }, (_unused, index) => (
+        <MarketTableSkeletonRow compact={compact} key={index} />
+      ))}
     </View>
   );
 }
@@ -115,7 +184,8 @@ const styles = StyleSheet.create({
     maxWidth: layout.maxContentWidth,
     alignSelf: 'center',
     paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
+    // The floating tab bar draws over the list, so the last row buys its own room.
+    paddingBottom: TAB_BAR_CLEARANCE,
   },
   compactGutter: { paddingHorizontal: layout.screenPaddingCompact },
   header: {
@@ -127,13 +197,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   title: { ...typography.title, color: colors.textPrimary },
-  subtitle: { ...typography.caption, color: colors.textMuted },
-  feedStatus: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
-  feedDot: { width: 6, height: 6, borderRadius: radii.pill },
-  feedDotLive: { backgroundColor: colors.positive },
-  feedDotError: { backgroundColor: colors.negative },
-  feedDotIdle: { backgroundColor: colors.textMuted },
-  feedLabel: { ...typography.caption, color: colors.textMuted },
+
+
   notice: {
     ...typography.caption,
     paddingVertical: spacing.xs,

@@ -12,6 +12,10 @@ export const colors = {
   accentSoft: '#C4B5FD',
   positive: '#4ADE80',
   negative: '#EF6262',
+  /** Rim shades for the order actions, one step under each gradient's base. */
+  longEdge: '#178F52',
+  shortEdge: '#B03737',
+
   onAccent: '#FFFFFF',
   onLight: '#111116',
   lightAction: '#F5F3FA',
@@ -38,6 +42,17 @@ export const colors = {
    * white, so it defines the rim without drawing a hard outline around it.
    */
   glassEdge: 'rgba(196, 181, 253, 0.32)',
+
+  /**
+   * Floating tab bar. The blur behind it supplies the depth; these only tint it:
+   * `glassTint` darkens the capsule so light content scrolling underneath cannot
+   * wash out the icons, `glassRim` is the faint edge that keeps the capsule's
+   * shape legible against a dark page, and `glassHighlight` is the sliding pill
+   * behind the selected tab.
+   */
+  glassTint: 'rgba(10, 10, 12, 0.55)',
+  glassRim: 'rgba(255, 255, 255, 0.10)',
+  glassHighlight: 'rgba(255, 255, 255, 0.14)',
 } as const;
 
 export const spacing = {
@@ -53,6 +68,12 @@ export const spacing = {
 } as const;
 
 export const radii = {
+  /**
+   * Dense chrome: a search field, a column header, anything that frames data.
+   * Enough to take the hard point off a corner, not enough to read as a pill —
+   * at these heights a larger radius starts to curve the whole edge.
+   */
+  xs: 4,
   sm: 10,
   md: 16,
   lg: 24,
@@ -103,6 +124,43 @@ export const gradients = {
       'rgba(218, 145, 239, 0)',
     ],
     locations: [0, 0.36, 1],
+  },
+  /**
+   * Raised neutral surface: a shallow ramp from a lit top edge to a deeper base,
+   * in the palette's greys. Reserved for chrome that frames data — a search field,
+   * a column header — and deliberately kept off the data itself: run across every
+   * row of a table it stops reading as a surface and starts reading as stripes.
+   */
+  surfaceRaise: {
+    colors: ['#191A22', '#0E0F14'],
+    locations: [0, 1],
+  },
+  /**
+   * Order actions. Each ramp runs from a lit top edge to a deeper base, which is
+   * what gives a small button its dimension: the fill reads as a curved surface
+   * catching light rather than as a flat block of colour. Paired with the edge
+   * colours below, which darken the rim on all four sides.
+   */
+  longAction: {
+    colors: ['#5CE79B', '#22B96C'],
+    locations: [0, 1],
+  },
+  shortAction: {
+    colors: ['#F58585', '#D64545'],
+    locations: [0, 1],
+  },
+  /**
+   * Skeleton sheen. Transparent at both ends so the highlight has no edge, and
+   * light enough that it reads as a reflection travelling over the placeholder
+   * rather than as a second block of colour.
+   */
+  shimmer: {
+    colors: [
+      'rgba(255, 255, 255, 0)',
+      'rgba(255, 255, 255, 0.07)',
+      'rgba(255, 255, 255, 0)',
+    ],
+    locations: [0, 0.5, 1],
   },
   /**
    * Translucent CTA glass. The backdrop reads through the surface, and because
@@ -171,6 +229,36 @@ export const motion = {
     duration: 520,
     offsetY: 18,
     stagger: 90,
+  },
+  /**
+   * Skeleton sweep. One pass of the highlight across a placeholder, looped while
+   * data is pending. Slow enough to read as "working" rather than "spinning",
+   * and every skeleton on screen shares a single clock so the sheen moves as one
+   * front instead of a field of independent flickers.
+   */
+  shimmer: {
+    duration: 1_150,
+  },
+  /**
+   * Tab-to-tab morph: the arriving screen settles the last couple of percent into its
+   * resting size, so a switch reads as the destination arriving rather than sliding in.
+   * `scale` is deliberately tiny — at full-screen size even two percent reads clearly,
+   * while anything larger turns a settle into a zoom.
+   *
+   * Shorter than the app's other reveals on purpose. A tab is a lateral move between
+   * peers, not an arrival somewhere new, and the settle has to be finished before the
+   * user's attention reaches the content — held any longer it stops reading as motion
+   * and starts reading as the screen being slow to respond.
+   *
+   * Above 1 rather than below. A screen scaled under its container shrinks away from
+   * the edges and exposes a band of bare shell, which the tab pill's blur then samples
+   * along the bottom — the switch would flash in the bar. Scaled over its container it
+   * always covers, at the cost of a few composited pixels of overshoot that stay well
+   * inside the safe area at this size.
+   */
+  tabSwitch: {
+    duration: 200,
+    scale: 1.02,
   },
   /**
    * Backdrop slide-up on entry. Ease-out reads as fast-then-smooth: the gradient

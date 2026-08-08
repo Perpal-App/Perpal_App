@@ -1,8 +1,7 @@
-import { useState } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { SvgUri } from 'react-native-svg';
 
-import { colors, radii, typography } from '@/theme/tokens';
+import { radii } from '@/theme/tokens';
 
 /**
  * Fixed so every row's identity block starts at the same x. This is a mark, not
@@ -17,22 +16,17 @@ export const MARKET_LOGO_SIZE = 26;
  * The URL travels with provider metadata, so this component never invents an
  * image origin. Raster and SVG marks use renderers already present in the app.
  *
- * A missing or unreachable icon falls back to the symbol's initial. The mark
- * occupies the same box either way, so a row never reflows on a failed load.
+ * Pacifica's current catalog is verified against its official asset service.
+ * This component deliberately renders no synthetic fallback.
  */
 export function MarketLogo({
   size = MARKET_LOGO_SIZE,
-  symbol,
   url,
 }: {
   readonly size?: number;
   readonly symbol: string;
   readonly url: string;
 }) {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const isSvg = /\.svg(?:[?#]|$)/iu.test(url);
-
   return (
     <View
       // The row composes one accessibility label for all of its content; the
@@ -41,25 +35,11 @@ export function MarketLogo({
       importantForAccessibility="no-hide-descendants"
       style={[styles.mark, { width: size, height: size }]}
     >
-      {!loaded || failed ? (
-        <Text style={styles.monogram}>{symbol.slice(0, 1)}</Text>
-      ) : null}
-      {url.length === 0 || failed ? null : isSvg ? (
+      {url.length === 0 ? null : (
         <SvgUri
           height="100%"
-          onError={() => setFailed(true)}
-          onLoad={() => setLoaded(true)}
           uri={url}
           width="100%"
-        />
-      ) : (
-        <Image
-          fadeDuration={0}
-          onError={() => setFailed(true)}
-          onLoad={() => setLoaded(true)}
-          resizeMode="contain"
-          source={{ cache: 'force-cache', uri: url }}
-          style={styles.image}
         />
       )}
     </View>
@@ -71,20 +51,5 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     overflow: 'hidden',
     borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceElevated,
-  },
-  image: {
-    position: 'absolute',
-    inset: 0,
-    width: '100%',
-    height: '100%',
-  },
-  monogram: {
-    position: 'absolute',
-    ...typography.eyebrow,
-    letterSpacing: 0,
-    color: colors.textSecondary,
   },
 });

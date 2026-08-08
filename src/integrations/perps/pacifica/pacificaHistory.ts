@@ -10,19 +10,39 @@ export type MarketCandle = {
   readonly close: number;
 };
 
-export type MarketTimeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
+export type MarketTimeframe =
+  | '1m'
+  | '3m'
+  | '5m'
+  | '15m'
+  | '30m'
+  | '1h'
+  | '2h'
+  | '4h'
+  | '8h'
+  | '12h'
+  | '1d'
+  | '1w'
+  | '1M';
 
 export const MARKET_TIMEFRAMES: readonly {
   readonly id: MarketTimeframe;
   readonly label: string;
-  readonly lookbackMs: number;
+  readonly intervalMs: number;
 }[] = [
-  { id: '1m', label: '1m', lookbackMs: 4 * 60 * 60 * 1_000 },
-  { id: '5m', label: '5m', lookbackMs: 24 * 60 * 60 * 1_000 },
-  { id: '15m', label: '15m', lookbackMs: 3 * 24 * 60 * 60 * 1_000 },
-  { id: '1h', label: '1h', lookbackMs: 14 * 24 * 60 * 60 * 1_000 },
-  { id: '4h', label: '4h', lookbackMs: 60 * 24 * 60 * 60 * 1_000 },
-  { id: '1d', label: '1D', lookbackMs: 300 * 24 * 60 * 60 * 1_000 },
+  { id: '1m', label: '1m', intervalMs: 60_000 },
+  { id: '3m', label: '3m', intervalMs: 3 * 60_000 },
+  { id: '5m', label: '5m', intervalMs: 5 * 60_000 },
+  { id: '15m', label: '15m', intervalMs: 15 * 60_000 },
+  { id: '30m', label: '30m', intervalMs: 30 * 60_000 },
+  { id: '1h', label: '1h', intervalMs: 60 * 60_000 },
+  { id: '2h', label: '2h', intervalMs: 2 * 60 * 60_000 },
+  { id: '4h', label: '4h', intervalMs: 4 * 60 * 60_000 },
+  { id: '8h', label: '8h', intervalMs: 8 * 60 * 60_000 },
+  { id: '12h', label: '12h', intervalMs: 12 * 60 * 60_000 },
+  { id: '1d', label: '1D', intervalMs: 24 * 60 * 60_000 },
+  { id: '1w', label: '1W', intervalMs: 7 * 24 * 60 * 60_000 },
+  { id: '1M', label: '1M', intervalMs: 30 * 24 * 60 * 60_000 },
 ];
 
 export async function fetchPacificaMarketHistory(
@@ -40,7 +60,7 @@ export async function fetchPacificaMarketHistory(
     query: {
       symbol,
       interval: timeframe,
-      start_time: String(end - definition.lookbackMs),
+      start_time: String(end - definition.intervalMs * MAX_CANDLES),
       end_time: String(end),
       limit: String(MAX_CANDLES),
     },

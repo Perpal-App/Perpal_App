@@ -1,23 +1,28 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { EmptyState } from '@/components/feedback/EmptyState';
+import { Skeleton } from '@/components/feedback/Skeleton';
+import { SkeletonText } from '@/components/feedback/Skeleton';
+import { MarketInfoList } from '@/features/trade/components/MarketInfoList';
 import { AppScreen } from '@/components/layout/AppScreen';
+import { FadeInView } from '@/components/motion/FadeInView';
+import { RiseInView } from '@/components/motion/RiseInView';
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import { readAppConfig } from '@/config/appConfig';
 import {
   formatCompactTokenPrice,
   formatCompactUsd,
 } from '@/domain/money/amount';
-import { PacificaOrderTicket } from '@/features/trade/components/PacificaOrderTicket';
+import { OrderActionBar } from '@/features/trade/components/OrderActionBar';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
-import type { PacificaOrderSide } from '@/integrations/perps/pacifica/pacificaOrder';
+import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, fonts, layout, motion, radii, spacing, typography } from '@/theme/tokens';
 
 /** Placeholder shape shared with the markets table and the order ticket. */
 const UNAVAILABLE = '--.--';
@@ -37,6 +42,7 @@ const SECTIONS: readonly UnderlineTabOption[] = [
  * bottom — nothing on this screen can submit without opening the ticket first.
  */
 export function MarketDetailScreen() {
+  const compact = useWindowDimensions().width < layout.compactWidth;
   const router = useRouter();
   const params = useLocalSearchParams<{ venueRef?: string | string[] }>();
   const rawVenueRef = Array.isArray(params.venueRef)
@@ -46,6 +52,7 @@ export function MarketDetailScreen() {
   const perps = config.ok ? config.value.perps : null;
   const venue = usePacificaMarkets(
     perps?.pacificaApiOrigin ?? '',
+    perps?.pacificaAssetOrigin ?? '',
     perps?.pacificaWsOrigin ?? '',
   );
   const market = useMemo(
@@ -54,19 +61,29 @@ export function MarketDetailScreen() {
   );
   const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
   const [section, setSection] = useState('chart');
-  const [orderSide, setOrderSide] = useState<PacificaOrderSide | null>(null);
+
   const history = usePacificaMarketHistory(
     perps?.pacificaApiOrigin ?? '',
     market?.venueRef ?? '',
     timeframe,
   );
 
+  // An empty catalog is not a missing market. Until the venue has answered we do
+  // not know whether this instrument exists, so the screen waits instead of
+  // claiming it is unavailable — that claim flashing up on every tap was the whole
+  // bug. Only a catalog that arrived and does not contain the market is an error.
+  if (config.ok && market === undefined && venue.status !== 'ready') {
+    return <MarketDetailSkeleton compact={compact} />;
+  }
+
   if (market === undefined || !config.ok) {
     return (
       <AppScreen contentContainerStyle={styles.centered}>
         <EmptyState
           action={{ label: 'Back to markets', onPress: () => router.replace('/(tabs)/trade') }}
-          message="This Pacifica market is not present in the current public catalog."
+          message={config.ok
+            ? 'This Pacifica market is not present in the current public catalog.'
+            : 'Market configuration is unavailable in this build.'}
           title="Market unavailable"
         />
       </AppScreen>
@@ -77,61 +94,103 @@ export function MarketDetailScreen() {
   const price = snapshot !== null && !snapshot.priceStale ? snapshot.price : null;
   const change = snapshot?.change24hBps ?? null;
   const openInterest = snapshot?.openInterest ?? null;
+  // No snapshot yet means the request is still out, which is what shimmers. A
+  // snapshot that omits a value shows the placeholder instead.
+  const pending = snapshot === null;
 
   return (
-    <AppScreen contentContainerStyle={styles.content}>
-      <View style={styles.instrument}>
-        <Pressable
-          accessibilityLabel="Back to markets"
-          accessibilityRole="button"
-          hitSlop={8}
-          onPress={() => router.back()}
-          style={({ pressed }) => [styles.back, pressed && styles.pressed]}
-        >
-          <Text style={styles.backLabel}>‹</Text>
-        </Pressable>
-        <MarketLogo size={34} symbol={market.baseAsset} url={market.iconUrl} />
+    <AppScreen
+      contentContainerStyle={[styles.content, compact && styles.compactGutter]}
+      footer={<OrderActionBar market={market} snapshot={snapshot} />}
+    >
+      {/* Instrument, figures and the section below rise in one cascade, the same
+          reveal the onboarding and sign-in screens use. Each layer already sits in
+          its final slot, so the travel is composited and nothing reflows. */}
+      <RiseInView style={styles.instrument}>
+        <BackButton />
+        <MarketLogo size={30} symbol={market.baseAsset} url={market.iconUrl} />
         <View style={styles.identity}>
-          <View style={styles.symbolLine}>
-            <Text numberOfLines={1} style={styles.symbol}>
-              {market.baseAsset}-USD Perps
-            </Text>
+          {/* The pair owns the first line on its own. With the badge beside it an
+              eight-character ticker ran past the price on anything under 390pt,
+              and truncating the instrument is the one thing this header must not
+              do — so leverage and contract type share the qualifier line below,
+              the same split the markets table uses. */}
+          <Text numberOfLines={1} style={styles.symbol}>
+            {market.baseAsset}-USD
+          </Text>
+          <View style={styles.qualifier}>
             <View style={styles.leverageBadge}>
               <Text style={styles.leverage}>{market.maxLeverage}×</Text>
             </View>
+            <Text numberOfLines={1} style={styles.name}>
+              {market.displayName === market.baseAsset
+                ? 'Perpetual'
+                : `Perpetual · ${market.displayName}`}
+            </Text>
           </View>
-          <Text numberOfLines={1} style={styles.name}>{market.displayName}</Text>
         </View>
         <View style={styles.priceSummary}>
-          <Text numberOfLines={1} selectable style={styles.price}>
-            {price === null ? UNAVAILABLE : formatCompactTokenPrice(price)}
-          </Text>
-          <Text numberOfLines={1} style={[styles.change, toneStyle(change)]}>
-            {formatChange(change)}
-          </Text>
+          {pending ? (
+            <>
+              <SkeletonText align="right" role="heading" width={84} />
+              <SkeletonText align="right" role="caption" width={52} />
+            </>
+          ) : (
+            <>
+              <Text numberOfLines={1} selectable style={styles.price}>
+                {price === null ? UNAVAILABLE : formatCompactTokenPrice(price)}
+              </Text>
+              <Text numberOfLines={1} style={[styles.change, toneStyle(change)]}>
+                {formatChange(change)}
+              </Text>
+            </>
+          )}
         </View>
-      </View>
+      </RiseInView>
 
-      <ScrollView
-        contentContainerStyle={styles.figureStrip}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-      >
-        <Figure label="VENUE" value="Pacifica" />
+      <RiseInView delay={motion.rise.stagger} style={styles.figureGrid}>
         <Figure
           label="24H VOL"
+          pending={pending}
+          pendingWidth={56}
           value={snapshot?.volume24h == null ? UNAVAILABLE : formatCompactUsd(snapshot.volume24h)}
         />
         <Figure
           label="OI"
+          pending={pending}
+          pendingWidth={48}
           value={openInterest === null ? UNAVAILABLE : formatCompactUsd(openInterest)}
         />
-        <Figure label="ORACLE" value={snapshot === null ? UNAVAILABLE : formatCompactTokenPrice(snapshot.oraclePrice)} />
-        <Figure label="FUNDING" value={snapshot === null ? UNAVAILABLE : funding(snapshot.fundingRate)} />
-      </ScrollView>
+        <Figure
+          label="ORACLE"
+          pending={pending}
+          pendingWidth={64}
+          value={snapshot === null ? UNAVAILABLE : formatCompactTokenPrice(snapshot.oraclePrice)}
+        />
+        <Figure
+          label="FUNDING"
+          pending={pending}
+          pendingWidth={55}
+          value={snapshot === null ? UNAVAILABLE : formatPacificaRatePercent(snapshot.fundingRate)}
+        />
+        {/* "NEXT" rather than "NEXT RATE": the longer label was wider than any
+            value in the row, so it — not the data — decided the column's width.
+            The Market info tab spells both funding figures out in full. */}
+        <Figure
+          label="NEXT"
+          pending={pending}
+          pendingWidth={55}
+          value={snapshot === null ? UNAVAILABLE : formatPacificaRatePercent(snapshot.nextFundingRate)}
+        />
+      </RiseInView>
 
-      <UnderlineTabs onSelect={setSection} options={SECTIONS} selectedId={section} />
+      <RiseInView delay={motion.rise.stagger * 2}>
+        <UnderlineTabs onSelect={setSection} options={SECTIONS} selectedId={section} />
+      </RiseInView>
 
+      {/* Keyed on the section so switching tabs remounts the panel and fades the
+          new one in, rather than swapping content in place. */}
+      <FadeInView key={section}>
       {section === 'chart' ? (
         <TradingViewMarketChart
           candles={history.candles}
@@ -145,110 +204,39 @@ export function MarketDetailScreen() {
           timeframe={timeframe}
         />
       ) : (
-        <View style={styles.infoPanel}>
-          <Stat label="Open interest" value={openInterest === null ? UNAVAILABLE : formatCompactUsd(openInterest)} />
-          <Stat label="Funding rate" value={snapshot === null ? UNAVAILABLE : funding(snapshot.fundingRate)} />
-          <Stat label="Next funding" value={snapshot === null ? UNAVAILABLE : funding(snapshot.nextFundingRate)} />
-          <Stat label="Maximum leverage" value={`${market.maxLeverage}×`} />
-          <Stat label="Instrument" value={market.venueRef} />
-          <Stat
-            label="Oracle update"
-            value={snapshot?.pricePublishedAtMs == null
-              ? UNAVAILABLE
-              : formatTime(snapshot.pricePublishedAtMs)}
-          />
-          <Text style={styles.source}>
-            Pacifica mark, oracle, funding, volume, open interest, and mark candles
-            are read directly from Pacifica's public API. The executable order is
-            revalidated against a fresh mark before T signs.
-          </Text>
-        </View>
+        <MarketInfoList market={market} snapshot={snapshot} />
       )}
-
-      {orderSide === null ? (
-        <View style={styles.actionBar}>
-          <SideButton onPress={() => setOrderSide('long')} side="long" />
-          <SideButton onPress={() => setOrderSide('short')} side="short" />
-        </View>
-      ) : (
-        <View style={styles.ticket}>
-          {snapshot === null ? (
-            <Text accessibilityRole="alert" style={styles.source}>A current Pacifica mark is required before trading.</Text>
-          ) : <PacificaOrderTicket
-            apiOrigin={config.value.perps.pacificaApiOrigin}
-            centralState={config.value.perps.pacificaCentralState}
-            initialSide={orderSide}
-            market={market}
-            programId={config.value.perps.pacificaProgramId}
-            rpcUrl={config.value.api.rpcUrl}
-            snapshot={snapshot}
-            swapBuildUrl={config.value.api.swapBuildUrl}
-            usdcMint={config.value.perps.usdcMint}
-            usdtMint={config.value.perps.usdtMint}
-            vault={config.value.perps.pacificaVault}
-          />}
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setOrderSide(null)}
-            style={({ pressed }) => [styles.hide, pressed && styles.pressed]}
-          >
-            <Text style={styles.hideLabel}>Hide order ticket</Text>
-          </Pressable>
-        </View>
-      )}
+      </FadeInView>
     </AppScreen>
   );
 }
 
-function Figure({ label, value }: { readonly label: string; readonly value: string }) {
+function Figure({
+  label,
+  pending = false,
+  pendingWidth,
+  value,
+}: {
+  readonly label: string;
+  readonly pending?: boolean;
+  /** Width of the placeholder, set near the value's own so the row holds its shape. */
+  readonly pendingWidth: number;
+  readonly value: string;
+}) {
   return (
     <View style={styles.figure}>
-      <Text style={styles.figureLabel}>{label}</Text>
-      <Text
-        numberOfLines={1}
-        selectable
-        style={[styles.figureValue, value === UNAVAILABLE && styles.absent]}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function SideButton({
-  onPress,
-  side,
-}: {
-  readonly onPress: () => void;
-  readonly side: PacificaOrderSide;
-}) {
-  const long = side === 'long';
-
-  return (
-    <Pressable
-      accessibilityHint="Opens the order ticket on this side"
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.sideButton,
-        long ? styles.longButton : styles.shortButton,
-        pressed && styles.pressed,
-      ]}
-    >
-      <Text style={[styles.sideLabel, long ? styles.onLong : styles.onShort]}>
-        {long ? 'Buy / Long' : 'Sell / Short'}
-      </Text>
-    </Pressable>
-  );
-}
-
-function Stat({ label, value }: { readonly label: string; readonly value: string }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text selectable style={[styles.statValue, value === UNAVAILABLE && styles.absent]}>
-        {value}
-      </Text>
+      <Text numberOfLines={1} style={styles.figureLabel}>{label}</Text>
+      {pending ? (
+        <SkeletonText role="caption" width={pendingWidth} />
+      ) : (
+        <Text
+          numberOfLines={1}
+          selectable
+          style={[styles.figureValue, value === UNAVAILABLE && styles.absent]}
+        >
+          {value}
+        </Text>
+      )}
     </View>
   );
 }
@@ -259,19 +247,86 @@ function formatChange(value: number | null): string {
   return `${value >= 0 ? '+' : '-'}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}%`;
 }
 
-function funding(value: string): string {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? `${(parsed * 100).toFixed(4)}%` : UNAVAILABLE;
-}
-
 function toneStyle(value: number | null) {
   if (value === null) return styles.absent;
   return value < 0 ? styles.negative : styles.positive;
 }
 
-function formatTime(value: number): string {
-  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/**
+ * Shared by the real header and the loading one, so the chevron occupies the same slot
+ * in both and the row does not shift sideways when the instrument arrives. It also has
+ * to work while the catalog is still out: leaving is the one action that must never
+ * depend on data.
+ */
+function BackButton() {
+  const router = useRouter();
+
+  return (
+    <Pressable
+      accessibilityLabel="Back to markets"
+      accessibilityRole="button"
+      hitSlop={14}
+      onPress={() => router.back()}
+      style={({ pressed }) => [styles.back, pressed && styles.pressed]}
+    >
+      <Text style={styles.backLabel}>‹</Text>
+    </Pressable>
+  );
 }
+
+/** Placeholder widths for the figure row, near each real value's own width. */
+const FIGURE_WIDTHS = [56, 48, 64, 55, 55] as const;
+/** Matches `TradingViewMarketChart`'s workspace, so the fold lands in the same place. */
+const CHART_SKELETON_HEIGHT = 420;
+
+/**
+ * The screen before the venue has told us which instrument this is.
+ *
+ * Built from the same style objects as the real screen, so the header and the figure row
+ * fill in exactly where their placeholders were. That is the reason this replaced a
+ * centred spinner: a spinner sits in the middle of the screen and then vanishes, moving
+ * every piece of content into place from nowhere.
+ *
+ * The chart block reserves the workspace height rather than reproducing the section tabs
+ * and timeframe strip, so the fold holds but those two rows do appear when the catalog
+ * lands. Worth knowing, not worth another twenty lines of placeholder chrome for a wait
+ * measured in a few hundred milliseconds.
+ */
+function MarketDetailSkeleton({ compact }: { readonly compact: boolean }) {
+  return (
+    <AppScreen contentContainerStyle={[styles.content, compact && styles.compactGutter]}>
+      <View
+        accessibilityLabel="Loading market"
+        accessibilityRole="progressbar"
+        style={styles.instrument}
+      >
+        <BackButton />
+        <Skeleton height={30} radius={15} width={30} />
+        <View style={styles.identity}>
+          <SkeletonText role="heading" width={112} />
+          <SkeletonText role="caption" width={84} />
+        </View>
+        <View style={styles.priceSummary}>
+          <SkeletonText align="right" role="heading" width={84} />
+          <SkeletonText align="right" role="caption" width={52} />
+        </View>
+      </View>
+
+      <View style={styles.figureGrid}>
+        {FIGURE_WIDTHS.map((width, index) => (
+          <View key={width * 100 + index} style={styles.figure}>
+            <SkeletonText role="eyebrow" width={width * 0.7} />
+            <SkeletonText role="caption" width={width} />
+          </View>
+        ))}
+      </View>
+
+      <Skeleton height={CHART_SKELETON_HEIGHT} radius={radii.sm} />
+    </AppScreen>
+  );
+}
+
+
 
 const styles = StyleSheet.create({
   content: {
@@ -282,20 +337,31 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     gap: spacing.sm,
   },
+  // Below 360pt the figure row needs the margin more than the screen does; the
+  // markets list makes the same trade at the same breakpoint.
+  compactGutter: { paddingHorizontal: layout.screenPaddingCompact },
   centered: { flexGrow: 1, justifyContent: 'center' },
+  blocked: { ...typography.bodyCompact, color: colors.textSecondary },
   instrument: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  // Narrow by design: the chevron only needs this much ink, and `hitSlop` on the
+  // pressable keeps the touch target at full size without spending header width.
   back: {
-    width: layout.minTouchTarget,
+    width: 26,
     height: layout.minTouchTarget,
-    marginLeft: -spacing.sm,
+    marginLeft: -spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
   },
   backLabel: { ...typography.title, color: colors.textPrimary, lineHeight: 34 },
   identity: { flex: 1, minWidth: 0 },
-  symbolLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  symbol: { ...typography.heading, flexShrink: 1, color: colors.textPrimary },
-  name: { ...typography.caption, color: colors.textMuted },
+  symbol: { ...typography.heading, color: colors.textPrimary },
+  qualifier: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xxs,
+    minWidth: 0,
+  },
+  name: { ...typography.caption, flexShrink: 1, color: colors.textMuted },
   leverageBadge: {
     flexShrink: 0,
     paddingHorizontal: spacing.xxs,
@@ -305,52 +371,45 @@ const styles = StyleSheet.create({
   },
   leverage: { ...typography.eyebrow, letterSpacing: 0, color: colors.accentSoft },
   priceSummary: { flexShrink: 0, alignItems: 'flex-end' },
-  price: { ...typography.label, color: colors.textPrimary },
-  change: { ...typography.caption },
-  // Figures sit between two rules, the same band treatment the markets table
-  // uses for its column header.
-  figureStrip: {
-    gap: spacing.xl,
-    paddingVertical: spacing.xs,
+  // Label size, but on the symbol's line height: both blocks then measure the
+  // same two lines, so the price sits exactly on the symbol's line and the change
+  // on the line under it, without the price claiming the title's width.
+  price: {
+    ...typography.label,
+    lineHeight: typography.heading.lineHeight,
+    color: colors.textPrimary,
   },
-  figure: { minWidth: 64 },
+  change: { ...typography.caption },
+  // All five figures on one row. Each cell is only as wide as its own content and
+  // the leftover space is shared between them, so the row reads as evenly spaced
+  // without any cell being cut off — measured, the five come to 279pt against
+  // 296pt of content width on the narrowest screen the app supports.
+  //
+  // `wrap` is the safety valve rather than the layout: at normal text size
+  // everything fits one line, and if the reader scales type up the cells drop to
+  // a second row instead of clipping.
+  figureGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    columnGap: spacing.xs,
+    rowGap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  figure: { minWidth: 0 },
   figureLabel: { ...typography.eyebrow, letterSpacing: 0.5, color: colors.textMuted },
-  figureValue: { ...typography.label, color: colors.textPrimary },
+  // Caption size so five figures clear one row, but on the semibold face: these
+  // are numbers to scan, and the medium weight caption reads as body copy.
+  figureValue: {
+    ...typography.caption,
+    fontFamily: fonts.semiBold,
+    color: colors.textPrimary,
+  },
   positive: { color: colors.positive },
   negative: { color: colors.negative },
   absent: { color: colors.textMuted },
-  infoPanel: {
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-  },
-  source: { ...typography.caption, color: colors.textMuted },
-  stat: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
-  statLabel: { ...typography.bodyCompact, color: colors.textMuted },
-  statValue: {
-    ...typography.bodyCompact,
-    flexShrink: 1,
-    color: colors.textPrimary,
-    textAlign: 'right',
-  },
-  actionBar: { flexDirection: 'row', gap: spacing.sm, paddingTop: spacing.xs },
-  sideButton: {
-    flex: 1,
-    minHeight: layout.minTouchTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-  },
-  longButton: { backgroundColor: colors.positive },
-  shortButton: { backgroundColor: colors.negative },
-  sideLabel: { ...typography.label },
-  onLong: { color: colors.onLight },
-  onShort: { color: colors.onAccent },
-  ticket: { gap: spacing.sm },
-  hide: { minHeight: layout.minTouchTarget, alignItems: 'center', justifyContent: 'center' },
-  hideLabel: { ...typography.label, color: colors.textMuted },
+
   pressed: { opacity: 0.72 },
 });

@@ -1,5 +1,6 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, type DimensionValue } from 'react-native';
 
+import { SkeletonText } from '@/components/feedback/Skeleton';
 import { colors, spacing, typography } from '@/theme/tokens';
 
 export function StatusRow({
@@ -25,6 +26,32 @@ export function StatusRow({
       >
         {value}
       </Text>
+    </View>
+  );
+}
+
+/**
+ * A `StatusRow` whose data has not arrived yet.
+ *
+ * Lives beside the real row and shares its layout, so a screen can show the shape of
+ * what is coming and then drop the values in without anything moving. Widths are
+ * callers' business: varying them is what stops a column of these reading as a grid.
+ */
+export function StatusRowSkeleton({
+  labelWidth,
+  valueWidth,
+}: {
+  readonly labelWidth: DimensionValue;
+  readonly valueWidth: DimensionValue;
+}) {
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.row}
+    >
+      <SkeletonText role="bodyCompact" width={labelWidth} />
+      <SkeletonText align="right" role="bodyCompact" width={valueWidth} />
     </View>
   );
 }

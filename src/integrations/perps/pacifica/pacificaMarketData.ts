@@ -6,8 +6,12 @@ import {
 import { pacificaGet } from '@/integrations/perps/pacifica/pacificaApi';
 
 const PRICE_DECIMALS = 10 as const;
-const USD_DECIMALS = 6 as const;
+const USD_DECIMALS = 10 as const;
 const STALE_AFTER_MS = 30_000;
+const ICON_ALIASES: Readonly<Record<string, string>> = {
+  GOLD: 'XAU',
+  SILVER: 'XAG',
+};
 
 export type PacificaMarket = {
   readonly symbol: `${string}-PERP`;
@@ -43,6 +47,7 @@ export type PacificaMarketBundle = {
 
 export async function fetchPacificaMarketBundle(
   apiOrigin: string,
+  assetOrigin: string,
   signal?: AbortSignal,
 ): Promise<PacificaMarketBundle> {
   const [rawMarkets, rawPrices] = await Promise.all([
@@ -50,7 +55,7 @@ export async function fetchPacificaMarketBundle(
     pacificaGet<readonly unknown[]>({ apiOrigin, path: '/info/prices', signal }),
   ]);
   return {
-    markets: parseMarkets(rawMarkets),
+    markets: parseMarkets(rawMarkets, assetOrigin),
     snapshots: parsePacificaPrices(rawPrices),
   };
 }
@@ -87,7 +92,19 @@ export function parsePacificaPriceMessage(value: unknown): readonly PacificaMark
   return message.channel === 'prices' ? parsePacificaPrices(message.data) : null;
 }
 
-function parseMarkets(value: unknown): readonly PacificaMarket[] {
+export function formatPacificaRatePercent(value: string): string {
+  const negative = value.startsWith('-');
+  const unsigned = negative ? value.slice(1) : value;
+  const [whole = '0', fraction = ''] = unsigned.split('.');
+  const divisor = 10n ** BigInt(fraction.length);
+  const magnitude = BigInt(`${whole}${fraction}`);
+  const tenThousandths = (magnitude * 1_000_000n + divisor / 2n) / divisor;
+  const digits = tenThousandths.toString().padStart(5, '0');
+  const sign = tenThousandths === 0n ? '' : negative ? '-' : '+';
+  return `${sign}${digits.slice(0, -4)}.${digits.slice(-4)}%`;
+}
+
+function parseMarkets(value: unknown, assetOrigin: string): readonly PacificaMarket[] {
   if (!Array.isArray(value)) throw invalid('market catalog');
   return value.map((entry) => {
     const market = object(entry, 'market');
@@ -101,7 +118,7 @@ function parseMarkets(value: unknown): readonly PacificaMarket[] {
       displayName: baseAsset,
       maxLeverage,
       venueRef,
-      iconUrl: '',
+      iconUrl: `${assetOrigin}/imgs/tokens/${encodeURIComponent(ICON_ALIASES[baseAsset] ?? baseAsset)}.svg`,
       tickSize: decimalText(market.tick_size, 'tick size'),
       lotSize: decimalText(market.lot_size, 'lot size'),
       minOrderSize: decimalText(market.min_order_size, 'minimum order size'),

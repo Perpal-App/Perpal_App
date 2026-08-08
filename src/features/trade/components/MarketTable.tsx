@@ -8,6 +8,10 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { LinearGradient } from 'expo-linear-gradient';
+import { memo } from 'react';
+
+import { Skeleton, SkeletonText } from '@/components/feedback/Skeleton';
 import {
   formatCompactTokenPrice,
   formatCompactUsd,
@@ -20,7 +24,8 @@ import type {
   PacificaMarket,
   PacificaMarketSnapshot,
 } from '@/integrations/perps/pacifica/pacificaMarketData';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
+import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
 
 /**
  * Printed wherever the venue has not published a usable value yet. Shaped like
@@ -64,7 +69,7 @@ export type MarketTableEntry = {
 /**
  * Read-only perps table: one line per market, three columns, no per-row action.
  * Each column stacks a primary value over the one figure that qualifies it —
- * symbol over name, price over its 24h move, 24h volume over open interest —
+ * symbol over next funding, price over its 24h move, volume over open interest —
  * which is the densest honest form for scanning a venue on a phone.
  *
  * Rows render as soon as the market catalog is known and fill in as the venue
@@ -76,7 +81,16 @@ export function MarketTableHeader({
   readonly compact?: boolean;
 }) {
   return (
-    <View style={[styles.headerRow, compact && styles.compactGutter]}>
+    <View style={[styles.headerRow, compact && styles.compactStrip]}>
+      {/* Same raised treatment as the search field: a shallow ramp from a lit top
+          edge to a deeper base, rimmed on all four sides. */}
+      <LinearGradient
+        colors={gradients.surfaceRaise.colors}
+        end={{ x: 0.5, y: 1 }}
+        locations={gradients.surfaceRaise.locations}
+        start={{ x: 0.5, y: 0 }}
+        style={StyleSheet.absoluteFill}
+      />
       <View style={styles.marketHeader}>
         <TableText style={styles.headerLabel}>MARKET</TableText>
       </View>
@@ -100,15 +114,70 @@ function ColumnHeader({
   );
 }
 
-export function MarketTableRow({
-  entry,
+/**
+ * A row's geometry with every cell shimmering, for the wait before the venue's
+ * first answer. It matches the real row's paddings and type roles exactly, so the
+ * table does not resize when actual rows replace it.
+ */
+export function MarketTableSkeletonRow({
   compact = false,
-  onPress,
 }: {
+  readonly compact?: boolean;
+}) {
+  return (
+    <View style={[styles.row, compact && styles.compactGutter]}>
+      <View style={styles.marketColumn}>
+        <Skeleton
+          height={MARKET_LOGO_SIZE}
+          radius={radii.pill}
+          width={MARKET_LOGO_SIZE}
+        />
+        <View style={styles.identity}>
+          <SkeletonText role="label" width={62} />
+          <SkeletonText role="caption" width={84} />
+        </View>
+      </View>
+      <View style={styles.priceColumn}>
+        <SkeletonText align="right" role="label" width={70} />
+        <SkeletonText align="right" role="caption" width={46} />
+      </View>
+      <View style={styles.volumeColumn}>
+        <SkeletonText align="right" role="label" width={62} />
+        <SkeletonText align="right" role="caption" width={40} />
+      </View>
+    </View>
+  );
+}
+
+type MarketTableRowProps = {
   readonly entry: MarketTableEntry;
   readonly compact?: boolean;
-  readonly onPress: () => void;
-}) {
+  /**
+   * Takes the venue reference rather than being a closure over this row, so the screen
+   * can hand every row the same function. A per-row arrow would be a new prop on every
+   * render and would defeat the memo below.
+   */
+  readonly onSelect: (venueRef: string) => void;
+};
+
+/**
+ * One market row, memoized on the two things it actually draws from.
+ *
+ * The comparison looks through `entry` at `market` and `venue` because the screen rebuilds
+ * that wrapper object for every row on every price message — comparing the wrapper would
+ * never match. The market objects come from the catalog and the snapshots are preserved by
+ * the feed's merge for anything that did not tick, so what re-renders on a message is the
+ * handful of rows whose price actually moved rather than every row on screen.
+ */
+export const MarketTableRow = memo(
+  MarketRow,
+  (previous, next) => previous.compact === next.compact
+    && previous.onSelect === next.onSelect
+    && previous.entry.market === next.entry.market
+    && previous.entry.venue === next.entry.venue,
+);
+
+function MarketRow({ entry, compact = false, onSelect }: MarketTableRowProps) {
   const { market, venue } = entry;
   const price = venue !== null && !venue.priceStale ? venue.price : null;
   const change = price === null ? null : venue?.change24hBps ?? null;
@@ -121,6 +190,13 @@ export function MarketTableRow({
   const openInterestText = openInterest === null
     ? UNAVAILABLE
     : formatCompactUsd(openInterest);
+  const nextFundingText = venue === null
+    ? UNAVAILABLE
+    : formatPacificaRatePercent(venue.nextFundingRate);
+  // A row with no snapshot yet is still loading, so its cells shimmer. Once the
+  // venue has answered, a value it does not publish shows the placeholder
+  // instead: pending and unavailable are different states and read differently.
+  const pending = venue === null;
 
   return (
     <Pressable
@@ -132,10 +208,11 @@ export function MarketTableRow({
         `24 hour change ${spoken(changeText)}`,
         `24 hour volume ${spoken(volumeText)}`,
         `open interest ${spoken(openInterestText)}`,
+        `next funding ${spoken(nextFundingText)}`,
       ].join('. ')}
       accessibilityHint="Opens market details and trade controls"
       accessibilityRole="button"
-      onPress={onPress}
+      onPress={() => onSelect(market.venueRef)}
       style={({ pressed }) => [
         styles.row,
         compact && styles.compactGutter,
@@ -151,24 +228,46 @@ export function MarketTableRow({
               <TableText style={styles.leverageText}>{`${market.maxLeverage}×`}</TableText>
             </View>
           </View>
-          <TableText style={styles.marketName}>{market.displayName}</TableText>
+          {pending ? (
+            <SkeletonText role="caption" width={72} />
+          ) : (
+            <TableText style={styles.marketName}>{`Next ${nextFundingText}`}</TableText>
+          )}
         </View>
       </View>
 
       <View style={styles.priceColumn}>
-        <TableText style={[styles.primaryValue, price === null && styles.absent]}>
-          {priceText}
-        </TableText>
-        <TableText style={[styles.secondaryValue, changeTone(change)]}>
-          {changeText}
-        </TableText>
+        {pending ? (
+          <>
+            <SkeletonText align="right" role="label" width={70} />
+            <SkeletonText align="right" role="caption" width={46} />
+          </>
+        ) : (
+          <>
+            <TableText style={[styles.primaryValue, price === null && styles.absent]}>
+              {priceText}
+            </TableText>
+            <TableText style={[styles.secondaryValue, changeTone(change)]}>
+              {changeText}
+            </TableText>
+          </>
+        )}
       </View>
 
       <View style={styles.volumeColumn}>
-        <TableText style={[styles.primaryValue, volume === null && styles.absent]}>
-          {volumeText}
-        </TableText>
-        <TableText style={styles.secondaryValue}>{openInterestText}</TableText>
+        {pending ? (
+          <>
+            <SkeletonText align="right" role="label" width={62} />
+            <SkeletonText align="right" role="caption" width={40} />
+          </>
+        ) : (
+          <>
+            <TableText style={[styles.primaryValue, volume === null && styles.absent]}>
+              {volumeText}
+            </TableText>
+            <TableText style={styles.secondaryValue}>{openInterestText}</TableText>
+          </>
+        )}
       </View>
     </Pressable>
   );
@@ -227,18 +326,31 @@ const styles = StyleSheet.create({
   // inside a padded list. Their fill and rules therefore run the full width of the
   // screen while the text stays aligned with the title above — a header band that
   // stopped short of both edges read as a cropped rectangle instead of a rule.
+  // A rounded card whose inset and inner padding add up to the gutter: the card
+  // sits 8pt wider than the text column, and gives that 8pt back as padding, so
+  // the labels still start and end exactly where the row values below them do.
+  //
+  // The padding is what stops the right-most label being clipped: with the card
+  // flush to its content, `overflow: hidden` and the corner radius cut the last
+  // glyph. Column titles must land on their columns *and* clear the rounded edge,
+  // and this is the only arrangement that does both.
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xxs,
+    overflow: 'hidden',
+    marginHorizontal: layout.screenPadding - spacing.xs,
+    marginBottom: spacing.xs,
     paddingVertical: spacing.xs,
-    paddingHorizontal: layout.screenPadding,
-    backgroundColor: colors.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radii.xs,
   },
+  compactStrip: { marginHorizontal: layout.screenPaddingCompact - spacing.xs },
+  // Rows carry no fill of their own. The data is the content here, and a gradient
+  // repeated down every row read as banding rather than as depth — the raised
+  // treatment stays on the chrome that frames the table.
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -34,12 +34,20 @@ type IOSLoaderProps = {
 };
 
 /**
- * Shared iOS-style spinner used for every loading state in the app.
+ * Spinner for work the user just asked for, shown inside the control that asked for it:
+ * a button that is submitting, a text action that is sending a code.
  *
- * Drawn from primitives rather than `ActivityIndicator`, which renders the
- * Material circular spinner on Android. This keeps one identical spinner on both
- * platforms. Only `transform` and `opacity` animate, on the UI thread, so it
- * never triggers a layout pass; under reduce motion the wheel is shown static.
+ * Not for screens. A screen waiting on data uses `Skeleton`/`SkeletonText` placeholders
+ * in the shape of the content that is coming, which say what is being waited for and let
+ * the real values land without moving anything. A spinner centred on a screen can only
+ * say "wait", and then it vanishes and drops the whole layout in from nowhere. Whether
+ * the app is still restoring a session is likewise not something to announce — that state
+ * renders the bare background, which is what the launch screen already shows.
+ *
+ * Drawn from primitives rather than `ActivityIndicator`, which renders the Material
+ * circular spinner on Android. This keeps one identical spinner on both platforms. Only
+ * `transform` and `opacity` animate, on the UI thread, so it never triggers a layout
+ * pass; under reduce motion the wheel is shown static.
  */
 export function IOSLoader({
   accessibilityLabel = 'Loading',

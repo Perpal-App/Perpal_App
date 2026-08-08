@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { AppScreen } from '@/components/layout/AppScreen';
+import { OrderActionBar } from '@/features/trade/components/OrderActionBar';
 import { readAppConfig } from '@/config/appConfig';
 import { formatCompactTokenPrice, formatCompactUsd } from '@/domain/money/amount';
 import { ChartToolIcon } from '@/features/trade/components/ChartToolIcon';
@@ -13,6 +14,7 @@ import { useChartOrientation } from '@/features/trade/hooks/useChartOrientation'
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
 import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
+import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 export function MarketChartScreen() {
@@ -26,6 +28,7 @@ export function MarketChartScreen() {
   const perps = config.ok ? config.value.perps : null;
   const venue = usePacificaMarkets(
     perps?.pacificaApiOrigin ?? '',
+    perps?.pacificaAssetOrigin ?? '',
     perps?.pacificaWsOrigin ?? '',
   );
   const market = useMemo(
@@ -55,7 +58,13 @@ export function MarketChartScreen() {
   const openInterest = snapshot?.openInterest ?? null;
 
   return (
-    <AppScreen scroll={false}>
+    // Same bar as every other trading surface, so the chart is never a screen you
+    // have to leave to act on it. Landscape is the exception: there the chart is
+    // the whole point of the screen and the bar would take a slice of it.
+    <AppScreen
+      footer={isLandscape ? undefined : <OrderActionBar market={market} snapshot={snapshot} />}
+      scroll={false}
+    >
       <View style={styles.content}>
         <View style={styles.topBar}>
           <Pressable
@@ -117,7 +126,7 @@ export function MarketChartScreen() {
             <Metric label="24h volume" value={snapshot?.volume24h == null ? 'Unavailable' : formatCompactUsd(snapshot.volume24h)} />
             <Metric label="Open interest" value={openInterest === null ? 'Unavailable' : formatCompactUsd(openInterest)} />
             <Metric label="Oracle" value={snapshot === null ? 'Unavailable' : formatCompactTokenPrice(snapshot.oraclePrice)} />
-            <Metric label="Funding" value={snapshot === null ? 'Unavailable' : `${(Number(snapshot.fundingRate) * 100).toFixed(4)}%`} />
+            <Metric label="Funding" value={snapshot === null ? 'Unavailable' : formatPacificaRatePercent(snapshot.fundingRate)} />
           </ScrollView>
         ) : null}
 

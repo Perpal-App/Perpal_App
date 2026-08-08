@@ -1,4 +1,9 @@
 import { canonicalJson } from '@/integrations/perps/pacifica/pacificaApi';
+import {
+  formatPacificaRatePercent,
+  parsePacificaPrices,
+} from '@/integrations/perps/pacifica/pacificaMarketData';
+import { MARKET_TIMEFRAMES } from '@/integrations/perps/pacifica/pacificaHistory';
 
 describe('Pacifica canonical signing payload', () => {
   it('sorts every object recursively without changing array order', () => {
@@ -10,5 +15,36 @@ describe('Pacifica canonical signing payload', () => {
     })).toBe(
       '{"data":{"amount":"0.01","symbol":"BTC","take_profit":{"limit_price":"69900","stop_price":"70000"}},"expiry_window":5000,"timestamp":123,"type":"create_market_order"}',
     );
+  });
+});
+
+describe('Pacifica public prices', () => {
+  it('preserves the precision currently returned for 24 hour volume', () => {
+    const [snapshot] = parsePacificaPrices([{
+      funding: '0.0000125',
+      mark: '0.8',
+      next_funding: '0.0000125',
+      open_interest: '120.12',
+      oracle: '0.81',
+      symbol: 'ASTER',
+      timestamp: Date.now(),
+      volume_24h: '2691.2649208',
+      yesterday_price: '0.79',
+    }]);
+
+    expect(snapshot?.volume24h).toEqual({
+      baseUnits: 26_912_649_208_000n,
+      decimals: 10,
+    });
+    expect(formatPacificaRatePercent('0.0000125')).toBe('+0.0013%');
+  });
+});
+
+describe('Pacifica candle intervals', () => {
+  it('exposes every interval accepted by the mark-candle API', () => {
+    expect(MARKET_TIMEFRAMES.map(({ id }) => id)).toEqual([
+      '1m', '3m', '5m', '15m', '30m', '1h', '2h',
+      '4h', '8h', '12h', '1d', '1w', '1M',
+    ]);
   });
 });

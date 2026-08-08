@@ -4,7 +4,13 @@ export type ChartToolName =
   | 'cursor'
   | 'trend'
   | 'horizontal'
+  | 'shapes'
+  | 'fib'
+  | 'position'
   | 'ruler'
+  | 'brush'
+  | 'magnet'
+  | 'undo'
   | 'clear'
   | 'scale'
   | 'expand';
@@ -55,6 +61,49 @@ export function ChartToolIcon({
         <>
           <Line {...common} x1="3" x2="21" y1="12" y2="12" />
           <Circle {...common} cx="8" cy="12" r="2" />
+        </>
+      ) : null}
+
+      {name === 'shapes' ? (
+        <>
+          <Rect {...common} height="9" rx="1.5" width="11" x="3" y="4" />
+          <Circle {...common} cx="15" cy="15" r="5.5" />
+        </>
+      ) : null}
+
+      {name === 'fib' ? (
+        <>
+          <Line {...common} x1="3" x2="21" y1="5" y2="5" />
+          <Line {...common} x1="3" x2="21" y1="10" y2="10" />
+          <Line {...common} x1="3" x2="21" y1="14" y2="14" />
+          <Line {...common} x1="3" x2="21" y1="19" y2="19" />
+        </>
+      ) : null}
+
+      {name === 'position' ? (
+        <>
+          <Rect {...common} height="6" rx="1" width="16" x="4" y="5" />
+          <Rect {...common} height="6" rx="1" width="16" x="4" y="13" />
+          <Line {...common} x1="2" x2="22" y1="12" y2="12" />
+        </>
+      ) : null}
+
+      {name === 'brush' ? (
+        <Path {...common} d="M4 17c3-1 3-9 6-9s3 8 6 8 2-6 4-7" />
+      ) : null}
+
+      {name === 'magnet' ? (
+        <>
+          <Path {...common} d="M6 4v7a6 6 0 0 0 12 0V4" />
+          <Line {...common} x1="6" x2="10" y1="9" y2="9" />
+          <Line {...common} x1="14" x2="18" y1="9" y2="9" />
+        </>
+      ) : null}
+
+      {name === 'undo' ? (
+        <>
+          <Path {...common} d="M9 7H15a5 5 0 0 1 0 10H7" />
+          <Path {...common} d="M11.5 4.5L9 7l2.5 2.5" />
         </>
       ) : null}
 

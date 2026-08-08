@@ -9,6 +9,7 @@ const VALID: RawAppEnv = {
   marketStreamPath: '/v1/markets/stream',
   swapBuildPath: '/v1/swap/build',
   pacificaApiOrigin: 'https://api.pacifica.fi',
+  pacificaAssetOrigin: 'https://app.pacifica.fi',
   pacificaWsOrigin: 'wss://ws.pacifica.fi',
   pacificaProgramId: '11111111111111111111111111111111',
   pacificaCentralState: '11111111111111111111111111111111',
@@ -53,6 +54,7 @@ describe('parseAppConfig', () => {
         'https://gateway.example/v1/markets/stream',
       );
       expect(result.value.perps.pacificaApiOrigin).toBe('https://api.pacifica.fi');
+      expect(result.value.perps.pacificaAssetOrigin).toBe('https://app.pacifica.fi');
       expect(result.value.perps.pacificaWithdrawalFeeBaseUnits).toBe(1_000_000n);
       expect(result.value.privacy.umbraRelayerUrl).toBe(
         'https://relayer.api.umbraprivacy.com',

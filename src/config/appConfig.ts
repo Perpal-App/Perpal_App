@@ -10,6 +10,7 @@ export type AppConfig = {
   readonly privy: PrivyPublicConfig;
   readonly perps: {
     readonly pacificaApiOrigin: string;
+    readonly pacificaAssetOrigin: string;
     readonly pacificaWsOrigin: string;
     readonly pacificaProgramId: string;
     readonly pacificaCentralState: string;
@@ -60,6 +61,7 @@ export type RawAppEnv = {
   readonly marketStreamPath: string;
   readonly swapBuildPath: string;
   readonly pacificaApiOrigin: string;
+  readonly pacificaAssetOrigin: string;
   readonly pacificaWsOrigin: string;
   readonly pacificaProgramId: string;
   readonly pacificaCentralState: string;
@@ -90,6 +92,8 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_SWAP_BUILD_PATH?.trim() ?? '',
     pacificaApiOrigin:
       process.env.EXPO_PUBLIC_PACIFICA_API_ORIGIN?.trim() ?? '',
+    pacificaAssetOrigin:
+      process.env.EXPO_PUBLIC_PACIFICA_ASSET_ORIGIN?.trim() ?? '',
     pacificaWsOrigin:
       process.env.EXPO_PUBLIC_PACIFICA_WS_ORIGIN?.trim() ?? '',
     pacificaProgramId:
@@ -218,6 +222,7 @@ function validatePublicServiceOrigin(
   raw: string,
   variable:
     | 'EXPO_PUBLIC_PACIFICA_API_ORIGIN'
+    | 'EXPO_PUBLIC_PACIFICA_ASSET_ORIGIN'
     | 'EXPO_PUBLIC_UMBRA_INDEXER_URL'
     | 'EXPO_PUBLIC_UMBRA_RELAYER_URL'
     | 'EXPO_PUBLIC_UMBRA_ZK_ASSET_BASE_URL',
@@ -335,6 +340,11 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_PACIFICA_API_ORIGIN',
     issues,
   );
+  const pacificaAssetOrigin = validatePublicServiceOrigin(
+    raw.pacificaAssetOrigin,
+    'EXPO_PUBLIC_PACIFICA_ASSET_ORIGIN',
+    issues,
+  );
   const pacificaWsOrigin = validateWebSocketOrigin(raw.pacificaWsOrigin, issues);
   const pacificaWithdrawalFeeBaseUnits = validateUsdcFee(
     raw.pacificaWithdrawalFeeUsdc,
@@ -379,6 +389,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
       privy: { appId: raw.privyAppId, clientId: raw.privyClientId },
       perps: {
         pacificaApiOrigin,
+        pacificaAssetOrigin,
         pacificaWsOrigin,
         pacificaProgramId,
         pacificaCentralState,
@@ -413,6 +424,25 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
   };
 }
 
+let resolved: AppConfigResult | null = null;
+
+/**
+ * The build's configuration, parsed once per process.
+ *
+ * Cached deliberately rather than as an optimisation of last resort. Every value comes
+ * from an `EXPO_PUBLIC_*` variable, which the bundler inlines at build time, so the
+ * answer cannot change while the app is running — and deriving it is not cheap: a call
+ * runs five base58 decodes, seven URL parses, a regex and a BigInt construction. Screens
+ * call this during render, so an uncached read charged the whole validation once per
+ * screen re-rendered, which on a tab switch is every mounted screen.
+ *
+ * Returning one object identity matters as much as the saved work: callers can now put
+ * the result straight into a dependency array without re-running the effect behind it.
+ *
+ * `parseAppConfig` stays pure and exported for the tests, which drive it with explicit
+ * raw environments rather than the real one.
+ */
 export function readAppConfig(): AppConfigResult {
-  return parseAppConfig(readRawAppEnv());
+  resolved ??= parseAppConfig(readRawAppEnv());
+  return resolved;
 }

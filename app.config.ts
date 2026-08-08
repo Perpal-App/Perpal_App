@@ -18,6 +18,15 @@ const URL_SCHEME = 'perpal';
 
 // Surface-level brand colors only. Semantic design tokens live in the app.
 const BACKGROUND = '#0B0D10';
+/**
+ * Launch screen fill. Kept identical to `colors.background` in `src/theme/tokens.ts`
+ * rather than sharing `BACKGROUND` with the adaptive icon: the app draws nothing but
+ * this colour while the saved session is being restored, so the two surfaces have to
+ * match exactly or the handoff from launch screen to first frame reads as a flicker.
+ * Duplicated because this file is evaluated by the Expo CLI, outside the app's module
+ * graph and path aliases.
+ */
+const LAUNCH_BACKGROUND = '#07060B';
 
 /**
  * Every font the app is allowed to render, embedded natively at build time so
@@ -99,7 +108,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         image: './assets/splash-icon.png',
         imageWidth: 200,
         resizeMode: 'contain',
-        backgroundColor: BACKGROUND,
+        backgroundColor: LAUNCH_BACKGROUND,
       },
     ],
     [

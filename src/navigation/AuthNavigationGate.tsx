@@ -2,7 +2,6 @@ import { Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { AuthHandoffProvider } from '@/navigation/authHandoff';
@@ -23,7 +22,7 @@ type RootRouteName = '(auth)' | '(tabs)' | 'index';
  *
  * The Stack is keyed by the resolved session, so a restored `/access` history
  * cannot survive authentication: the authenticated tree remounts at `(tabs)`,
- * whose initial route is always `trade`.
+ * whose initial route is pinned to `home`.
  */
 export function AuthNavigationGate() {
   const { initializationError, isAuthenticated, isReady } = usePrivyAuth();
@@ -36,7 +35,7 @@ export function AuthNavigationGate() {
   const [lastResolvedSession, setLastResolvedSession] =
     useState<ResolvedSession | null>(currentSession);
   // Set only for a sign-in that happens while the app is running, never for a
-  // restored session, so a restart still goes straight to Markets.
+  // restored session, so a restart still goes straight to the tab shell.
   const [pendingEntry, setPendingEntry] = useState(false);
 
   useEffect(() => {
@@ -98,7 +97,7 @@ export function AuthNavigationGate() {
 
         <Stack.Protected guard={isAuthenticatedSession}>
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="market-chart" />
+          <Stack.Screen name="market-chart/[venueRef]" />
         </Stack.Protected>
       </Stack>
     </AuthHandoffProvider>
@@ -107,13 +106,15 @@ export function AuthNavigationGate() {
 
 function SessionResolutionState({ hasError = false }: { hasError?: boolean }) {
   if (!hasError) {
+    // Deliberately empty. The launch screen is a flat fill of this same background,
+    // so an empty screen here is indistinguishable from the one the OS was already
+    // showing — restoring a session looks like the app still starting up, which is
+    // what it is. A spinner would be the only thing announcing a wait that is
+    // normally over before anyone could read it, and it would appear and vanish for
+    // a few frames on every cold start.
     return (
-      <AppScreen>
-        <IOSLoader
-          accessibilityLabel="Restoring secure session"
-          fill
-          size="large"
-        />
+      <AppScreen scroll={false}>
+        <View style={styles.restoring} />
       </AppScreen>
     );
   }
@@ -132,6 +133,8 @@ function SessionResolutionState({ hasError = false }: { hasError?: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  // Holds the screen's height so the background fills it rather than collapsing.
+  restoring: { flexGrow: 1 },
   state: {
     flexGrow: 1,
     width: '100%',
