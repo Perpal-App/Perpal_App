@@ -1,4 +1,5 @@
 import {
+  hasError,
   isConnected,
   isCreating,
   isNotCreated,
@@ -21,6 +22,7 @@ import {
 
 import {
   resolveWalletProvisioningStatus,
+  shouldProvisionWallet,
   type WalletProvisioningStatus,
 } from '@/integrations/privy/walletProvisioningStatus';
 
@@ -59,17 +61,22 @@ function useWalletProvisioningState(): WalletProvisioning {
       return;
     }
 
-    const action = needsRecovery(wallet)
+    const action = hasError(wallet)
       ? {
-          operation: 'recover' as const,
-          run: () => recover({ recoveryMethod: 'privy' as const }),
+          operation: 'reconnect' as const,
+          run: () => wallet.getProvider(),
         }
-      : isNotCreated(wallet)
+      : needsRecovery(wallet)
         ? {
-            operation: 'create' as const,
-            run: () => wallet.create({ recoveryMethod: 'privy' as const }),
+            operation: 'recover' as const,
+            run: () => recover({ recoveryMethod: 'privy' as const }),
           }
-        : null;
+        : isNotCreated(wallet)
+          ? {
+              operation: 'create' as const,
+              run: () => wallet.create({ recoveryMethod: 'privy' as const }),
+            }
+          : null;
 
     if (attemptedRef.current || action === null) {
       return;
@@ -115,7 +122,13 @@ function useWalletProvisioningState(): WalletProvisioning {
       return;
     }
 
-    if (needsRecovery(wallet)) {
+    if (isConnected(wallet)) {
+      attemptedRef.current = false;
+      setFailed(false);
+      return;
+    }
+
+    if (shouldProvisionWallet(isAuthenticated, wallet.status)) {
       void provision();
     }
   }, [isAuthenticated, provision, wallet]);
@@ -142,7 +155,7 @@ function useWalletProvisioningState(): WalletProvisioning {
 
 function logProvisioningError(
   cause: unknown,
-  operation: 'create' | 'recover',
+  operation: 'create' | 'recover' | 'reconnect',
   walletStatus: string,
 ): void {
   const metadata =
@@ -162,7 +175,7 @@ function logProvisioningError(
 
 function logProvisioningEvent(
   event: 'started' | 'completed',
-  operation: 'create' | 'recover',
+  operation: 'create' | 'recover' | 'reconnect',
   walletStatus: string,
 ): void {
   console.info('[Perpal Privy wallet]', JSON.stringify({

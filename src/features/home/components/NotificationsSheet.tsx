@@ -1,73 +1,52 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Path } from 'react-native-svg';
 
+import { MailboxMark } from '@/assets/svg/MailboxMark';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
+import { NotificationRow } from '@/features/home/components/NotificationRow';
 import type { MarketNewsArticle } from '@/integrations/market-data/marketBriefing';
 import {
   markAllInAppNotificationsRead,
-  markInAppNotificationRead,
   type InAppNotification,
-  type InAppNotificationKind,
 } from '@/storage/inAppNotifications';
-import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 const CLOSE_TARGET = 34;
 const CLOSE_GLYPH = 15;
-const CHECK_TARGET = 30;
-const CHECK_GLYPH = 15;
-/** Outcome marker. Small enough to read as punctuation rather than as a bullet. */
-const DOT = 7;
+const GRABBER_WIDTH = 38;
+const GRABBER_HEIGHT = 4;
 
-/**
- * Section headings, one per kind of event.
- *
- * Sentence case and plural, because these are titles over a group rather than tags on a row.
- * The kind used to be printed on every row as an all-caps label, which meant a run of trade
- * events repeated the word "TRADE" down the whole sheet; grouping says it once.
- */
-const KIND_TITLES: Readonly<Record<InAppNotificationKind, string>> = {
-  trade: 'Trades',
-  funding: 'Funding',
-  withdrawal: 'Withdrawals',
-  wallet: 'Wallet',
-};
+type ReadFilter = 'all' | 'unread';
 
-/**
- * Section order, fixed rather than derived from what arrived first.
- *
- * Roughly the order these matter when something has gone wrong: what you did, what it cost,
- * what left the account, and the wallet underneath it all. A sheet that reorders itself as
- * events land would move a heading out from under the reader's thumb.
- */
-const KIND_ORDER: readonly InAppNotificationKind[] = [
-  'trade',
-  'funding',
-  'withdrawal',
-  'wallet',
+const FILTERS: readonly UnderlineTabOption<ReadFilter>[] = [
+  { id: 'all', label: 'All' },
+  { id: 'unread', label: 'Unread' },
 ];
 
-/** One venue reading in the live section. Not an event, so it carries no read state. */
-type LiveReading = {
+/** A run of events that happened on the same day, newest day first. */
+type DayGroup = {
+  readonly items: readonly InAppNotification[];
+  readonly key: string;
   readonly label: string;
-  readonly text: string;
-  readonly tone: 'positive' | 'negative' | 'neutral';
 };
 
 /**
- * The notifications sheet: live venue readings on top, the app's own event log under them.
+ * The notifications sheet.
  *
- * Grouped into cards with real headings instead of one flat run of rows under two all-caps
- * eyebrows. A card gives each group an edge, which is what lets the eye skip a whole category
- * it does not care about — the previous single column had to be read in order.
+ * Grouped by day rather than by kind. The kind moved onto each row as a glyph, which frees the
+ * headings to answer the question a log is actually read with — when did this happen — and means
+ * a single event no longer gets a whole titled section to itself.
  *
- * Read state is per row and acknowledged in place. Marking one read never removes it, because
- * this is a log rather than an inbox: the reason to come here is usually to check what happened,
- * and an event that vanished when acknowledged would take its own evidence with it.
+ * There is no back affordance anywhere in here on purpose: the sheet comes up from the bottom, so
+ * the only exits are the close button, the backdrop, and dragging it back down. A back arrow would
+ * promise a screen to return to that never existed.
  */
 export function NotificationsSheet({
   activity,
+  dragGesture,
   latestNews,
   onClose,
   topGainer,
@@ -75,69 +54,111 @@ export function NotificationsSheet({
   unread,
 }: {
   readonly activity: readonly InAppNotification[];
+  /**
+   * Resizes and dismisses the sheet. Built by the presenter, because the sheet's position is the
+   * presenter's to own, and applied here to the whole grabber-and-title block.
+   *
+   * Typed off the factory rather than by importing the gesture's class name: `PanGesture` is not
+   * re-exported from the package root, and a deep import into the library's build output would be
+   * one refactor away from breaking.
+   */
+  readonly dragGesture: ReturnType<typeof Gesture.Pan>;
   readonly latestNews: MarketNewsArticle | null;
   readonly onClose: () => void;
   readonly topGainer: string | null;
   readonly topLoser: string | null;
   readonly unread: number;
 }) {
-  const groups = useMemo(
-    () => KIND_ORDER
-      .map((kind) => ({ items: activity.filter((item) => item.kind === kind), kind }))
-      .filter((group) => group.items.length > 0),
-    [activity],
-  );
+  const [filter, setFilter] = useState<ReadFilter>('all');
 
-  // Built by pushing rather than by mapping over a sparse literal and filtering the holes out.
-  // Each reading is optional and independent, so a conditional push says that directly and keeps
-  // the tone literals narrow without a type guard standing in for the obvious.
+  const groups = useMemo<readonly DayGroup[]>(() => {
+    const scoped = filter === 'unread'
+      ? activity.filter((item) => item.readAtMs === null)
+      : activity;
+
+    // The log is already newest-first, so a day boundary is just a change of key between
+    // neighbours — no sorting, and no map keyed by date that would have to be ordered again.
+    const days: { items: InAppNotification[]; key: string; label: string }[] = [];
+
+    for (const item of scoped) {
+      const key = new Date(item.createdAtMs).toDateString();
+      const open = days[days.length - 1];
+
+      if (open !== undefined && open.key === key) open.items.push(item);
+      else days.push({ items: [item], key, label: dayLabel(item.createdAtMs) });
+    }
+
+    return days;
+  }, [activity, filter]);
+
   const liveRows = useMemo(() => {
     const rows: LiveReading[] = [];
 
-    if (topGainer !== null) rows.push({ label: 'Gainer', text: topGainer, tone: 'positive' });
-    if (topLoser !== null) rows.push({ label: 'Loser', text: topLoser, tone: 'negative' });
-    if (latestNews !== null) {
-      rows.push({ label: 'News', text: latestNews.headline, tone: 'neutral' });
-    }
+    if (topGainer !== null) rows.push({ label: 'Gainer', text: topGainer });
+    if (topLoser !== null) rows.push({ label: 'Loser', text: topLoser });
+    if (latestNews !== null) rows.push({ label: 'News', text: latestNews.headline });
 
     return rows;
   }, [latestNews, topGainer, topLoser]);
 
+  // Live readings are not events and cannot be read or unread, so they have no business under a
+  // filter that means "things I have not acknowledged".
+  const showLive = filter === 'all' && liveRows.length > 0;
+
   return (
     <View accessibilityViewIsModal style={styles.sheet}>
-      <View style={styles.header}>
-        <View style={styles.headingCopy}>
-          <Text accessibilityRole="header" style={styles.title}>Notifications</Text>
-          <Text style={styles.subtitle}>{summary(activity.length, unread)}</Text>
-        </View>
+      {/* The grabber and the title are one drag target. A 4pt bar is the affordance, not the hit
+          area — asking for the bar itself is why the sheet felt like it would not move. The close
+          button lives inside this region and still works, because the pan waits for the finger to
+          travel before it claims anything. */}
+      <GestureDetector gesture={dragGesture}>
+        <View style={styles.grip}>
+          <View accessibilityElementsHidden style={styles.grabberRow}>
+            <View style={styles.grabber} />
+          </View>
 
-        {/* Both actions live top right, and only one of them is always there. "Mark all read"
-            is absent when there is nothing unread rather than sitting disabled: a control that
-            cannot do anything is still something to read past. */}
-        <View style={styles.actions}>
-          {unread > 0 ? (
+          <View style={styles.header}>
+            <Text accessibilityRole="header" style={styles.title}>Notifications</Text>
             <PressableScale
-              accessibilityHint={`Acknowledges all ${unread} unread events`}
-              accessibilityLabel="Mark all as read"
+              accessibilityHint="Closes notifications"
+              accessibilityLabel="Close"
               accessibilityRole="button"
-              hitSlop={8}
-              onPress={markAllInAppNotificationsRead}
-              style={styles.markAll}
+              hitSlop={10}
+              onPress={onClose}
+              style={styles.close}
             >
-              <Text style={styles.markAllText}>Mark all read</Text>
+              <Svg height={CLOSE_GLYPH} viewBox="0 0 24 24" width={CLOSE_GLYPH}>
+                <Path
+                  d="M5.5 5.5 18.5 18.5M18.5 5.5 5.5 18.5"
+                  fill="none"
+                  stroke={colors.textPrimary}
+                  strokeLinecap="round"
+                  strokeWidth={2.4}
+                />
+              </Svg>
             </PressableScale>
-          ) : null}
-          <PressableScale
-            accessibilityHint="Closes notifications"
-            accessibilityLabel="Close"
-            accessibilityRole="button"
-            hitSlop={10}
-            onPress={onClose}
-            style={styles.close}
-          >
-            <CloseIcon />
-          </PressableScale>
+          </View>
         </View>
+      </GestureDetector>
+
+      {/* The filter and the bulk action share a line, because they are the two halves of one
+          thought: which of these have I dealt with, and deal with all of them. */}
+      <View style={styles.controls}>
+        <View style={styles.tabs}>
+          <UnderlineTabs onSelect={setFilter} options={FILTERS} selectedId={filter} />
+        </View>
+        {unread > 0 ? (
+          <PressableScale
+            accessibilityHint={`Acknowledges all ${unread} unread events`}
+            accessibilityLabel="Mark all as read"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={markAllInAppNotificationsRead}
+            style={styles.markAll}
+          >
+            <Text style={styles.markAllText}>Mark all read</Text>
+          </PressableScale>
+        ) : null}
       </View>
 
       <ScrollView
@@ -145,37 +166,33 @@ export function NotificationsSheet({
         contentInsetAdjustmentBehavior="never"
         showsVerticalScrollIndicator={false}
       >
-        {liveRows.length > 0 ? (
-          <Section title="Live market">
+        {showLive ? (
+          <Group label="Live market">
             {liveRows.map((row, index) => (
-              <LiveRow
+              <View
                 key={row.label}
-                label={row.label}
-                last={index === liveRows.length - 1}
-                text={row.text}
-                tone={row.tone}
-              />
+                style={[styles.liveRow, index === liveRows.length - 1 && styles.liveRowLast]}
+              >
+                <Text style={styles.liveLabel}>{row.label}</Text>
+                <Text numberOfLines={3} style={styles.liveText}>{row.text}</Text>
+              </View>
             ))}
-          </Section>
+          </Group>
         ) : null}
 
         <View accessibilityLiveRegion="polite" style={styles.groups}>
           {groups.length === 0 ? (
-            <Section title="App activity">
-              <Text style={styles.empty}>
-                Trade, funding, withdrawal, and wallet events will appear here.
-              </Text>
-            </Section>
+            <EmptyState filter={filter} />
           ) : groups.map((group) => (
-            <Section key={group.kind} title={KIND_TITLES[group.kind]}>
+            <Group key={group.key} label={group.label}>
               {group.items.map((item, index) => (
-                <ActivityRow
+                <NotificationRow
                   item={item}
                   key={item.id}
                   last={index === group.items.length - 1}
                 />
               ))}
-            </Section>
+            </Group>
           ))}
         </View>
       </ScrollView>
@@ -183,152 +200,92 @@ export function NotificationsSheet({
   );
 }
 
+/** One venue reading. Not an event, so it carries no read state and no action. */
+type LiveReading = { readonly label: string; readonly text: string };
+
+/**
+ * Nothing to show, said properly.
+ *
+ * A line of muted text was doing this job before, and an empty log looked indistinguishable from
+ * a log that had failed to load. A drawing makes the state deliberate, and the copy separates the
+ * two cases that both produce no rows: an empty history, and a history that is simply all read.
+ *
+ * The illustration is hidden from assistive tech — it carries no information the heading beneath
+ * it does not already state, so announcing it would only add noise.
+ */
+function EmptyState({ filter }: { readonly filter: ReadFilter }) {
+  const unreadView = filter === 'unread';
+
+  return (
+    <View style={styles.emptyState}>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        pointerEvents="none"
+      >
+        <MailboxMark />
+      </View>
+      <Text accessibilityRole="header" style={styles.emptyTitle}>
+        {unreadView ? 'You are all caught up' : 'No notifications yet'}
+      </Text>
+      <Text style={styles.emptyMessage}>
+        {unreadView
+          ? 'Every event has been read. Anything new will arrive here.'
+          : 'Trade, funding, withdrawal, and wallet events will appear here as they happen.'}
+      </Text>
+    </View>
+  );
+}
+
 /**
  * A heading and the card of rows under it.
  *
- * The card carries the app's raised material — a lit top edge falling to a deeper base — and
- * clips it, so one gradient serves however many rows the group holds and none of the rows has
- * to know it is inside a rounded box.
+ * Flat fill, no gradient. A ramp repeated down five cards stopped reading as material and started
+ * reading as five separate panels of slightly different colour, which is the look this redesign
+ * was pulling away from. The border and the raised fill are enough to group.
  */
-function Section({ children, title }: {
+function Group({ children, label }: {
   readonly children: ReactNode;
-  readonly title: string;
-}) {
-  return (
-    <View style={styles.section}>
-      <Text accessibilityRole="header" style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.card}>
-        <LinearGradient
-          colors={gradients.surfaceRaise.colors}
-          end={{ x: 0.5, y: 1 }}
-          locations={gradients.surfaceRaise.locations}
-          start={{ x: 0.5, y: 0 }}
-          style={StyleSheet.absoluteFill}
-        />
-        {children}
-      </View>
-    </View>
-  );
-}
-
-/**
- * One logged event.
- *
- * Two separate things are encoded, and deliberately not in the same place. The dot's colour is
- * the outcome — whether the thing succeeded — and that never changes. Brightness and the
- * presence of the tick are the read state. Folding both into one marker would mean an
- * acknowledged failure and an unacknowledged success could not be told apart.
- */
-function ActivityRow({ item, last }: {
-  readonly item: InAppNotification;
-  readonly last: boolean;
-}) {
-  const unread = item.readAtMs === null;
-
-  return (
-    <View style={[styles.row, last && styles.rowLast]}>
-      <View style={[styles.dot, toneFill(item.outcome)]} />
-      <View style={styles.rowBody}>
-        <Text style={[styles.rowTitle, !unread && styles.rowTitleRead]}>{item.title}</Text>
-        <Text style={styles.rowMessage}>{item.message}</Text>
-        <Text style={styles.rowTime}>{formatTime(item.createdAtMs)}</Text>
-      </View>
-      {unread ? (
-        <PressableScale
-          accessibilityHint="Marks this event as read"
-          accessibilityLabel={`Mark ${item.title} as read`}
-          accessibilityRole="button"
-          hitSlop={8}
-          onPress={() => markInAppNotificationRead(item.id)}
-          style={styles.check}
-        >
-          <CheckIcon />
-        </PressableScale>
-      ) : null}
-    </View>
-  );
-}
-
-/** A venue reading. No read state: nothing here is an event that happened to the account. */
-function LiveRow({ label, last, text, tone }: {
   readonly label: string;
-  readonly last: boolean;
-  readonly text: string;
-  readonly tone: 'positive' | 'negative' | 'neutral';
 }) {
   return (
-    <View style={[styles.row, last && styles.rowLast]}>
-      <View style={[styles.dot, toneFill(tone)]} />
-      <View style={styles.rowBody}>
-        <Text style={styles.rowLabel}>{label}</Text>
-        <Text numberOfLines={3} style={styles.rowTitle}>{text}</Text>
-      </View>
+    <View style={styles.group}>
+      <Text accessibilityRole="header" style={styles.groupLabel}>{label}</Text>
+      <View style={styles.card}>{children}</View>
     </View>
   );
 }
 
-/** Rounded caps and joins, so a 1.9pt cross has no hard points at its four ends. */
-function CloseIcon() {
-  return (
-    <Svg height={CLOSE_GLYPH} viewBox="0 0 24 24" width={CLOSE_GLYPH}>
-      <Path
-        d="M5.5 5.5 18.5 18.5M18.5 5.5 5.5 18.5"
-        fill="none"
-        stroke={colors.textPrimary}
-        strokeLinecap="round"
-        strokeWidth={2.4}
-      />
-    </Svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <Svg height={CHECK_GLYPH} viewBox="0 0 24 24" width={CHECK_GLYPH}>
-      <Path
-        d="M5 12.6 9.7 17.3 19 8"
-        fill="none"
-        stroke={colors.accentSoft}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2.4}
-      />
-    </Svg>
-  );
-}
-
-function toneFill(tone: 'positive' | 'negative' | 'neutral' | 'success' | 'error' | 'info') {
-  if (tone === 'positive' || tone === 'success') return styles.dotPositive;
-  if (tone === 'negative' || tone === 'error') return styles.dotNegative;
-  return styles.dotNeutral;
-}
-
 /**
- * The count line under the title.
+ * "Today", "Yesterday", or the date.
  *
- * Leads with what is unread when anything is, because that is the number the badge on the bell
- * was showing and the reason the sheet was opened.
+ * Compared as calendar days rather than by elapsed milliseconds: something that happened at 11pm
+ * is yesterday once midnight passes, not twenty-four hours later.
  */
-function summary(total: number, unread: number): string {
-  if (total === 0) return 'No app events yet';
-  if (unread === 0) return total === 1 ? '1 event, all read' : `${total} events, all read`;
-  return `${unread} unread of ${total}`;
-}
+function dayLabel(timeMs: number): string {
+  const day = new Date(timeMs).toDateString();
+  const now = new Date();
 
-function formatTime(timeMs: number): string {
+  if (day === now.toDateString()) return 'Today';
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (day === yesterday.toDateString()) return 'Yesterday';
+
   return new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
     month: 'short',
+    year: now.getFullYear() === new Date(timeMs).getFullYear() ? undefined : 'numeric',
   }).format(new Date(timeMs));
 }
 
 const styles = StyleSheet.create({
+  // Fills its host so that dragging the sheet to the top of the screen leaves no gap under it.
+  // The presenter owns where it sits; this only says how tall it is allowed to be.
   sheet: {
+    flex: 1,
     width: '100%',
     maxWidth: layout.maxContentWidth,
-    maxHeight: '100%',
     alignSelf: 'center',
     overflow: 'hidden',
     borderTopLeftRadius: radii.panel,
@@ -339,28 +296,28 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
     backgroundColor: colors.surface,
   },
+  // The draggable block. Everything in here answers to the pan, which is why it is one view.
+  grip: { paddingTop: spacing.sm },
+  grabberRow: { alignItems: 'center', paddingBottom: spacing.sm },
+  grabber: {
+    width: GRABBER_WIDTH,
+    height: GRABBER_HEIGHT,
+    borderRadius: GRABBER_HEIGHT / 2,
+    backgroundColor: colors.borderStrong,
+  },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
     paddingHorizontal: layout.screenPadding,
   },
-  headingCopy: { flex: 1, minWidth: 0, gap: 2 },
-  title: { ...typography.title, color: colors.textPrimary },
-  subtitle: { ...typography.caption, color: colors.textMuted },
-  actions: { flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  // A text action, not a filled button. It is the secondary of the two controls up here and a
-  // second solid target beside the close disc would make the header read as a toolbar.
-  markAll: { paddingVertical: spacing.xxs },
-  markAllText: { ...typography.caption, color: colors.accentSoft },
-  // The same glass disc as the bell that opened the sheet, so closing looks like the inverse of
-  // opening rather than like a different control borrowed from somewhere else.
+  title: { ...typography.title, flex: 1, minWidth: 0, color: colors.textPrimary },
   close: {
     width: CLOSE_TARGET,
     height: CLOSE_TARGET,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.pill,
@@ -368,60 +325,57 @@ const styles = StyleSheet.create({
     borderColor: colors.glassEdge,
     backgroundColor: colors.glassTint,
   },
-  list: {
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
     paddingHorizontal: layout.screenPadding,
-    paddingBottom: spacing.xxl,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  tabs: { flexShrink: 1, minWidth: 0 },
+  markAll: { flexShrink: 0, paddingBottom: spacing.xs },
+  markAllText: { ...typography.caption, color: colors.accentSoft },
+  list: {
+    paddingTop: spacing.lg,
+    paddingHorizontal: layout.screenPadding,
+    paddingBottom: spacing.xxxl,
     gap: spacing.lg,
   },
   groups: { gap: spacing.lg },
-  section: { gap: spacing.xs },
-  sectionTitle: { ...typography.heading, color: colors.textPrimary },
+  group: { gap: spacing.xs },
+  groupLabel: { ...typography.label, color: colors.textSecondary },
   card: {
     overflow: 'hidden',
     borderRadius: radii.md,
     borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
+  liveRow: {
+    gap: 2,
     padding: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  // The card's own edge closes the group, so the last row must not draw a second line inside it.
-  rowLast: { borderBottomWidth: 0 },
-  // Nudged down onto the first line's optical centre. Aligning it to the text box instead puts it
-  // above the cap height, where it reads as floating off the top of the row.
-  dot: {
-    width: DOT,
-    height: DOT,
-    marginTop: 7,
-    flexShrink: 0,
-    borderRadius: DOT / 2,
-  },
-  dotPositive: { backgroundColor: colors.positive },
-  dotNegative: { backgroundColor: colors.negative },
-  dotNeutral: { backgroundColor: colors.accentSoft },
-  rowBody: { flex: 1, minWidth: 0, gap: 2 },
-  rowLabel: { ...typography.eyebrow, color: colors.textMuted },
-  rowTitle: { ...typography.bodyCompact, color: colors.textPrimary },
-  // Read rows step back rather than disappearing. Still legible, clearly already dealt with.
-  rowTitleRead: { color: colors.textSecondary },
-  rowMessage: { ...typography.caption, color: colors.textSecondary },
-  rowTime: { ...typography.caption, marginTop: 2, color: colors.textMuted },
-  check: {
-    width: CHECK_TARGET,
-    height: CHECK_TARGET,
-    flexShrink: 0,
+  liveRowLast: { borderBottomWidth: 0 },
+  liveLabel: { ...typography.eyebrow, color: colors.textMuted },
+  liveText: { ...typography.bodyCompact, color: colors.textPrimary },
+  // Centred and given room above, so the drawing reads as the answer to the empty list rather
+  // than as a graphic that happens to be sitting where rows would be.
+  emptyState: {
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassEdge,
-    backgroundColor: colors.glassTint,
+    paddingTop: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.xs,
   },
-  empty: { ...typography.bodyCompact, padding: spacing.md, color: colors.textMuted },
+  emptyTitle: {
+    ...typography.heading,
+    marginTop: spacing.xs,
+    textAlign: 'center',
+    color: colors.textPrimary,
+  },
+  emptyMessage: { ...typography.bodyCompact, textAlign: 'center', color: colors.textMuted },
 });
