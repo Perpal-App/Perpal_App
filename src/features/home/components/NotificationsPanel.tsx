@@ -1,24 +1,32 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { useState, useSyncExternalStore } from 'react';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { PressableScale } from '@/components/ui/PressableScale';
+import { NotificationsSheet } from '@/features/home/components/NotificationsSheet';
 import type { MarketNewsArticle } from '@/integrations/market-data/marketBriefing';
 import {
+  countUnreadInAppNotifications,
   readInAppNotifications,
   subscribeInAppNotifications,
-  type InAppNotification,
 } from '@/storage/inAppNotifications';
-import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, layout, motion, radii, typography } from '@/theme/tokens';
+
+/**
+ * How far the sheet starts below its resting place on the first present, before it has been
+ * measured. Any value at least as tall as the sheet works — it only has to begin off-screen —
+ * and one layout pass later the real height takes over.
+ */
+const TRAVEL_FALLBACK = 640;
 
 export function NotificationsPanel({
   latestNews,
@@ -29,12 +37,45 @@ export function NotificationsPanel({
   readonly topGainer: string | null;
   readonly topLoser: string | null;
 }) {
-  const [visible, setVisible] = useState(false);
+  const reduceMotion = useReducedMotion();
+  // Two states, not one. `mounted` keeps the modal in the tree, `presented` drives the spring —
+  // a dismissal has to finish animating before the modal can unmount, and a single boolean would
+  // tear the sheet off the screen on the first frame of its own exit.
+  const [mounted, setMounted] = useState(false);
+  const presented = useSharedValue(0);
+  const travel = useSharedValue(TRAVEL_FALLBACK);
   const activity = useSyncExternalStore(
     subscribeInAppNotifications,
     readInAppNotifications,
     readInAppNotifications,
   );
+  const unread = countUnreadInAppNotifications(activity);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    presented.set(reduceMotion ? 1 : withSpring(1, motion.sheet));
+  }, [mounted, presented, reduceMotion]);
+
+  const close = useCallback(() => {
+    if (reduceMotion) {
+      presented.set(0);
+      setMounted(false);
+      return;
+    }
+
+    presented.set(withSpring(0, motion.sheet, (finished) => {
+      'worklet';
+      // Only on a completed exit. An interrupted spring means something re-presented the sheet,
+      // and unmounting then would close it out from under that.
+      if (finished === true) runOnJS(setMounted)(false);
+    }));
+  }, [presented, reduceMotion]);
+
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: presented.value }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - presented.value) * travel.value }],
+  }));
 
   return (
     <>
@@ -43,16 +84,16 @@ export function NotificationsPanel({
       <View style={styles.triggerWrapper}>
         <PressableScale
           accessibilityHint="Opens trade, funding, withdrawal, and wallet events"
-          accessibilityLabel={`Notifications, ${activity.length} events`}
+          accessibilityLabel={unread === 0
+            ? `Notifications, ${activity.length} events`
+            : `Notifications, ${unread} unread of ${activity.length} events`}
           accessibilityRole="button"
           hitSlop={8}
-          onPress={() => setVisible(true)}
+          onPress={() => setMounted(true)}
           style={styles.trigger}
         >
           {/* Built from the same layers as the avatar across the header from it, down to the
-              rim, so the two read as a matched pair bracketing the greeting. This used to be a
-              hairline ring on a flat fill, which put a drawn-on outline next to a solid
-              object. */}
+              rim, so the two read as a matched pair bracketing the greeting. */}
           <LinearGradient
             colors={gradients.cardSheen.colors}
             locations={gradients.cardSheen.locations}
@@ -66,80 +107,51 @@ export function NotificationsPanel({
             <BellIcon />
           </View>
         </PressableScale>
-        {activity.length > 0 ? (
+        {/* Unread, not total. A count that never cleared would make the badge a permanent
+            decoration, and clearing it is what the sheet's read actions are for. */}
+        {unread > 0 ? (
           <View accessibilityElementsHidden pointerEvents="none" style={styles.badge}>
-            <Text style={styles.badgeText}>
-              {activity.length > 99 ? '99+' : activity.length}
-            </Text>
+            <Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text>
           </View>
         ) : null}
       </View>
 
       <Modal
-        animationType="fade"
-        onRequestClose={() => setVisible(false)}
+        // The presentation is ours: `animationType` would run a second, unsprung transition
+        // underneath the one below and the two would fight over the same frames.
+        animationType="none"
+        onRequestClose={close}
         presentationStyle="overFullScreen"
         statusBarTranslucent
         transparent
-        visible={visible}
+        visible={mounted}
       >
         <View style={styles.overlay}>
-          <Pressable
-            accessibilityLabel="Close notifications"
-            accessibilityRole="button"
-            onPress={() => setVisible(false)}
-            style={StyleSheet.absoluteFill}
-          />
+          <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]}>
+            <Pressable
+              accessibilityLabel="Close notifications"
+              accessibilityRole="button"
+              onPress={close}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+
+          {/* A modal renders outside the screen tree, so it is on its own for insets — this is
+              the one place besides AppScreen and the tab bar that reads them. */}
           <SafeAreaView edges={['top', 'bottom']} pointerEvents="box-none" style={styles.safeArea}>
-            <View accessibilityViewIsModal style={styles.sheet}>
-              <View style={styles.header}>
-                <View style={styles.headingCopy}>
-                  <Text accessibilityRole="header" style={styles.title}>Notifications</Text>
-                  <Text style={styles.subtitle}>
-                    {activity.length === 1 ? '1 app event' : `${activity.length} app events`}
-                  </Text>
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => setVisible(false)}
-                  style={({ pressed }) => [styles.done, pressed && styles.pressed]}
-                >
-                  <Text style={styles.doneText}>Done</Text>
-                </Pressable>
-              </View>
-
-              <ScrollView
-                contentContainerStyle={styles.list}
-                contentInsetAdjustmentBehavior="never"
-                showsVerticalScrollIndicator={false}
-              >
-                {topGainer !== null || topLoser !== null || latestNews !== null ? (
-                  <View style={styles.group}>
-                    <Text style={styles.groupTitle}>LIVE MARKET</Text>
-                    {topGainer !== null ? (
-                      <LiveRow label="GAINER" text={topGainer} tone="positive" />
-                    ) : null}
-                    {topLoser !== null ? (
-                      <LiveRow label="LOSER" text={topLoser} tone="negative" />
-                    ) : null}
-                    {latestNews !== null ? (
-                      <LiveRow label="NEWS" text={latestNews.headline} tone="neutral" />
-                    ) : null}
-                  </View>
-                ) : null}
-
-                <View accessibilityLiveRegion="polite" style={styles.group}>
-                  <Text style={styles.groupTitle}>APP ACTIVITY</Text>
-                  {activity.map((item) => <ActivityRow item={item} key={item.id} />)}
-                  {activity.length === 0 ? (
-                    <Text style={styles.empty}>
-                      Trade, funding, withdrawal, and wallet events will appear here.
-                    </Text>
-                  ) : null}
-                </View>
-              </ScrollView>
-            </View>
+            <Animated.View
+              onLayout={(event) => travel.set(event.nativeEvent.layout.height)}
+              style={sheetStyle}
+            >
+              <NotificationsSheet
+                activity={activity}
+                latestNews={latestNews}
+                onClose={close}
+                topGainer={topGainer}
+                topLoser={topLoser}
+                unread={unread}
+              />
+            </Animated.View>
           </SafeAreaView>
         </View>
       </Modal>
@@ -149,9 +161,9 @@ export function NotificationsPanel({
 
 /**
  * Drawn in `textSecondary` rather than `textPrimary`. This sits across the header from the
- * avatar, which now carries a full-colour portrait, and the two discs are otherwise identical —
- * so the glyph is the only thing holding them apart. A pure-white bell would make the control
- * the louder of the pair, and it is the identity that should lead.
+ * avatar, which carries a full-colour portrait, and the two discs are otherwise identical — so
+ * the glyph is the only thing holding them apart. A pure-white bell would make the control the
+ * louder of the pair, and it is the identity that should lead.
  */
 function BellIcon() {
   return (
@@ -166,49 +178,6 @@ function BellIcon() {
       />
     </Svg>
   );
-}
-
-function ActivityRow({ item }: { readonly item: InAppNotification }) {
-  return (
-    <View style={styles.row}>
-      <View style={styles.rowHeader}>
-        <Text style={[
-          styles.label,
-          item.outcome === 'success' && styles.positive,
-          item.outcome === 'error' && styles.negative,
-        ]}>{item.kind.toUpperCase()}</Text>
-        <Text style={styles.time}>{formatTime(item.createdAtMs)}</Text>
-      </View>
-      <Text style={styles.text}>{item.title}</Text>
-      <Text style={styles.detail}>{item.message}</Text>
-    </View>
-  );
-}
-
-function LiveRow({ label, text, tone }: {
-  readonly label: string;
-  readonly text: string;
-  readonly tone: 'positive' | 'negative' | 'neutral';
-}) {
-  return (
-    <View style={styles.row}>
-      <Text style={[
-        styles.label,
-        tone === 'positive' && styles.positive,
-        tone === 'negative' && styles.negative,
-      ]}>{label}</Text>
-      <Text numberOfLines={3} style={styles.text}>{text}</Text>
-    </View>
-  );
-}
-
-function formatTime(timeMs: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    month: 'short',
-  }).format(new Date(timeMs));
 }
 
 const styles = StyleSheet.create({
@@ -241,56 +210,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   badgeText: { ...typography.eyebrow, fontSize: 9, color: colors.onAccent },
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(5, 5, 9, 0.72)',
-  },
-  safeArea: { width: '100%', maxHeight: '88%' },
-  sheet: {
-    width: '100%',
-    maxWidth: layout.maxContentWidth,
-    maxHeight: '100%',
-    alignSelf: 'center',
-    overflow: 'hidden',
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: 0,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.surface,
-  },
-  header: {
-    minHeight: 72,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    paddingHorizontal: layout.screenPadding,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  headingCopy: { flex: 1 },
-  title: { ...typography.heading, color: colors.textPrimary },
-  subtitle: { ...typography.caption, color: colors.textMuted },
-  done: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.xs },
-  doneText: { ...typography.label, color: colors.accentSoft },
-  pressed: { opacity: 0.6 },
-  list: { padding: layout.screenPadding, paddingBottom: spacing.xxl, gap: spacing.lg },
-  group: { gap: spacing.xxs },
-  groupTitle: { ...typography.eyebrow, color: colors.textMuted },
-  row: {
-    gap: 2,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  rowHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
-  label: { ...typography.eyebrow, color: colors.textMuted },
-  time: { ...typography.caption, color: colors.textMuted },
-  text: { ...typography.bodyCompact, color: colors.textPrimary },
-  detail: { ...typography.caption, color: colors.textSecondary },
-  empty: { ...typography.bodyCompact, paddingVertical: spacing.md, color: colors.textMuted },
-  positive: { color: colors.positive },
-  negative: { color: colors.negative },
+  overlay: { flex: 1, justifyContent: 'flex-end' },
+  // Its own layer so the fade is animated without touching the sheet's opacity: dimming the
+  // sheet as it travelled would make it read as a projection rather than as a panel.
+  backdrop: { backgroundColor: 'rgba(5, 5, 9, 0.72)' },
+  safeArea: { width: '100%', maxHeight: '92%' },
 });

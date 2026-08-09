@@ -13,6 +13,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { avatarForAddress } from '@/assets/svg/avatars';
 import { AppScreen } from '@/components/layout/AppScreen';
+import { layoutMorph } from '@/components/motion/layoutMorph';
 import { RiseInView } from '@/components/motion/RiseInView';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { readAppConfig } from '@/config/appConfig';
@@ -151,7 +152,13 @@ export function HomeScreen() {
         />
       </RiseInView>
 
-      <RiseInView delay={motion.rise.stagger} style={styles.summary}>
+      {/* Every section below the header carries the same layout spring, and it has to be every one
+          of them. Reanimated animates the frame of the view the prop is on and nothing else — a
+          section further down is placed at its final position on the frame after the change — so
+          animating only the box that resized leaves all of its neighbours snapping around it. That
+          was the rough shift: the movers list grew smoothly while the news below it jumped. Shared
+          physics matters for the same reason; two springs at different rates visibly come apart. */}
+      <RiseInView delay={motion.rise.stagger} layout={layoutMorph()} style={styles.summary}>
         <AccountOverviewCard
           balances={walletBalances.balances}
           balancesPending={walletBalances.status === 'loading'}
@@ -163,17 +170,21 @@ export function HomeScreen() {
       {/* Extra air either side of the sentiment block. With neither it nor the balance above in a
           container, the screen's uniform gap left them reading as one run of text; a few points
           more is enough to separate them without opening a hole in the column. */}
-      <RiseInView delay={motion.rise.stagger * 2} style={styles.sentiment}>
+      <RiseInView
+        delay={motion.rise.stagger * 2}
+        layout={layoutMorph()}
+        style={styles.sentiment}
+      >
         <FearGreedCard {...fearGreed} />
       </RiseInView>
 
-      <RiseInView delay={motion.rise.stagger * 3}>
+      <RiseInView delay={motion.rise.stagger * 3} layout={layoutMorph()}>
         <MarketMoversSection entries={ranked} onSelect={openMarket} pending={pending} />
       </RiseInView>
 
       {/* The events calendar lives inside this section now, as its "Events" tab — same
           briefing request, one heading. */}
-      <RiseInView delay={motion.rise.stagger * 4}>
+      <RiseInView delay={motion.rise.stagger * 4} layout={layoutMorph()}>
         <MarketNewsSection {...briefing} />
       </RiseInView>
     </AppScreen>

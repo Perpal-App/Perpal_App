@@ -7,6 +7,8 @@ import Animated, {
   useSharedValue,
   withDelay,
   withTiming,
+  type BaseAnimationBuilder,
+  type LayoutAnimationFunction,
 } from 'react-native-reanimated';
 
 import { motion } from '@/theme/tokens';
@@ -21,6 +23,15 @@ type RiseInViewProps = ViewProps & {
   delay?: number;
   /** Distance in px the layer travels upward into place. */
   offsetY?: number;
+  /**
+   * Layout transition for the wrapper itself, for sections that get pushed up or down when a
+   * neighbour changes size. Declared explicitly because `ViewProps` has no `layout`, so it would
+   * otherwise be dropped by the spread below rather than reaching the animated view.
+   *
+   * Typed exactly as Reanimated types the prop. Pass `layoutMorph()` unless there is a reason not
+   * to — every displaced box in a column has to share one spring or they arrive out of step.
+   */
+  layout?: BaseAnimationBuilder | LayoutAnimationFunction | typeof BaseAnimationBuilder;
 };
 
 /**
@@ -40,6 +51,7 @@ export function RiseInView({
   duration = motion.rise.duration,
   delay = 0,
   offsetY = motion.rise.offsetY,
+  layout,
   style,
   ...rest
 }: RiseInViewProps) {
@@ -67,7 +79,10 @@ export function RiseInView({
   }));
 
   return (
-    <Animated.View {...rest} style={[style, animatedStyle]}>
+    // The entrance is a transform and the layout transition is a frame change, so the two compose
+    // instead of overwriting each other. The transition also cannot fire on the first frame —
+    // there is no previous layout to travel from — so it never collides with the rise.
+    <Animated.View {...rest} layout={layout} style={[style, animatedStyle]}>
       {children}
     </Animated.View>
   );

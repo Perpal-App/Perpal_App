@@ -1,15 +1,27 @@
 import { createMMKV, type MMKV } from 'react-native-mmkv';
 
+export type InAppNotificationKind = 'trade' | 'funding' | 'withdrawal' | 'wallet';
+
 export type InAppNotification = {
   readonly createdAtMs: number;
   readonly id: string;
-  readonly kind: 'trade' | 'funding' | 'withdrawal' | 'wallet';
+  readonly kind: InAppNotificationKind;
   readonly message: string;
   readonly outcome: 'success' | 'error' | 'info';
+  /**
+   * When the reader acknowledged this, or null while it is still unread.
+   *
+   * A timestamp rather than a boolean, and stored per item rather than as a single
+   * "last read at" watermark. A watermark is smaller but it cannot express reading one
+   * event and leaving the one above it unread, which is exactly what a per-row action is
+   * for. The value itself is not shown anywhere yet; it exists so that ordering by when
+   * something was acknowledged stays possible without another migration.
+   */
+  readonly readAtMs: number | null;
   readonly title: string;
 };
 
-type NotificationInput = Omit<InAppNotification, 'createdAtMs' | 'id'>;
+type NotificationInput = Omit<InAppNotification, 'createdAtMs' | 'id' | 'readAtMs'>;
 
 const KEY = 'activity.v1';
 const MAX_ITEMS = 40;
@@ -54,12 +66,65 @@ export function publishInAppNotification(input: NotificationInput): void {
     now - latest.createdAtMs < 5_000
   ) return;
 
-  snapshot = [{
+  commit([{
     ...input,
     createdAtMs: now,
     id: `${now}-${sequence++}`,
-  }, ...current].slice(0, MAX_ITEMS);
-  getStorage().set(KEY, JSON.stringify(snapshot));
+    readAtMs: null,
+  }, ...current].slice(0, MAX_ITEMS));
+}
+
+/**
+ * Acknowledges one event.
+ *
+ * Bails when the event is already read or missing, and that bail matters: `useSyncExternalStore`
+ * re-renders on any snapshot that is not reference-equal to the last one, so committing an
+ * identical list would re-render every subscriber for nothing.
+ */
+export function markInAppNotificationRead(id: string): void {
+  const current = readInAppNotifications();
+  if (!current.some((item) => item.id === id && item.readAtMs === null)) return;
+
+  const now = Date.now();
+  commit(current.map((item) => (
+    item.id === id && item.readAtMs === null ? { ...item, readAtMs: now } : item
+  )));
+}
+
+/** Acknowledges everything unread, under one timestamp so the batch stays identifiable. */
+export function markAllInAppNotificationsRead(): void {
+  const current = readInAppNotifications();
+  if (!current.some((item) => item.readAtMs === null)) return;
+
+  const now = Date.now();
+  commit(current.map((item) => (
+    item.readAtMs === null ? { ...item, readAtMs: now } : item
+  )));
+}
+
+/** How many events are still unacknowledged, which is what the bell's badge counts. */
+export function countUnreadInAppNotifications(
+  items: readonly InAppNotification[],
+): number {
+  return items.reduce((total, item) => (item.readAtMs === null ? total + 1 : total), 0);
+}
+
+/**
+ * Replaces the snapshot, persists it, and wakes every subscriber.
+ *
+ * The in-memory snapshot is swapped before the disk write and the write may fail on its own: an
+ * acknowledgement is a direct response to a tap, so the UI has to move now, and a read flag that
+ * survives the session but not a restart is a far smaller failure than a button that does nothing.
+ */
+function commit(next: readonly InAppNotification[]): void {
+  snapshot = next;
+
+  try {
+    getStorage().set(KEY, JSON.stringify(next));
+  } catch {
+    // Kept in memory for this session; see above.
+  }
+
   for (const listener of listeners) listener();
 }
 
@@ -87,6 +152,13 @@ function parse(value: unknown): readonly InAppNotification[] {
       kind: item.kind as InAppNotification['kind'],
       message: item.message,
       outcome: item.outcome as InAppNotification['outcome'],
+      // Absent on anything written before read state existed, so a missing or unusable value
+      // reads as unread rather than rejecting the record. Treating legacy events as unread is
+      // the safe direction: the reader can clear them in one tap, whereas defaulting them to
+      // read would silently bury events they never saw.
+      readAtMs: typeof item.readAtMs === 'number' && Number.isFinite(item.readAtMs)
+        ? item.readAtMs
+        : null,
       title: item.title,
     }];
   }).slice(0, MAX_ITEMS);

@@ -370,24 +370,57 @@ export const motion = {
     fillOutMs: 190,
   },
   /**
-   * Filter swap: the list under a tab strip being replaced by a different set of rows.
+   * Layout morph: a block changing size, and the page below it travelling to follow.
    *
-   * `resize` animates the container's height, and that is the part that was jarring. Different
-   * filters return different numbers of rows — four gainers, nine bookmarks, one news category —
-   * so the block under the strip used to snap to its new height in a single frame and drag
-   * everything below it up or down with it.
+   * A spring rather than a duration, because this is the one animation in the app the user did
+   * not ask for — it is a correction for content changing underneath them, and a spring is what
+   * makes that read as a physical settle instead of as a scripted transition. Damping ratio works
+   * out just under 1 (about 0.87), so there is a whisper of settle at the end and no visible
+   * bounce; a block of text arriving with a bounce reads as a toy.
    *
-   * `fade` brings the incoming rows up, and is deliberately shorter than `resize`. The content is
-   * legible while the height is still settling, which reads as the list growing into place rather
-   * than as two animations running one after the other. Longer than this and the swap starts to
-   * feel like a page load.
+   * The important part is that one set of physics is shared by every view that participates.
+   * Reanimated's `layout` animates a view's own frame and nothing else — siblings below it are
+   * placed at their final positions on the very next frame — so a smooth vertical reflow needs
+   * every box in the column animating on identical physics. Mixed timings would have each section
+   * arrive at a different moment, which looks worse than no animation at all.
    *
-   * Reanimated's layout animations default to `ReduceMotion.System`, so both are already disabled
-   * for anyone who has asked for less motion; neither needs a manual guard.
+   * Layout animations default to `ReduceMotion.System`, so this is already suppressed for anyone
+   * who has asked for less motion and needs no manual guard.
    */
-  filterSwap: {
-    resize: 260,
-    fade: 170,
+  layoutMorph: {
+    damping: 22,
+    stiffness: 190,
+    mass: 0.85,
+  },
+  /**
+   * Bottom sheet presenting and dismissing.
+   *
+   * A spring rather than a duration curve, which is what makes it read as iOS rather than as a
+   * web modal: the panel arrives with momentum and decelerates into place instead of easing
+   * along a fixed path. `dampingRatio` sits just under 1 so it settles without a bounce — a
+   * sheet that overshoots its own edge looks like a bug, not like polish.
+   *
+   * `duration` is the spring's perceptual settling time, not a keyframe length; Reanimated
+   * solves the stiffness and mass from the pair. Long enough to feel like weight moving, short
+   * enough that dismissing never feels like waiting for permission to leave.
+   */
+  sheet: {
+    duration: 460,
+    dampingRatio: 0.9,
+  },
+  /**
+   * How a row arrives when a filter swaps the set under it.
+   *
+   * `layout` alone cannot cover this. It animates the frame of a view that exists in both the old
+   * and the new render, and a filter swap replaces the rows with different components under
+   * different keys — so the ones that carry over slide, and the ones that are genuinely new have no
+   * previous frame to travel from and would otherwise appear instantly. This is what those get.
+   *
+   * Short, and shorter than the morph spring on purpose: the rows should be readable while the box
+   * around them is still settling, so the two read as one movement rather than a queue.
+   */
+  rowSwap: {
+    fadeMs: 150,
   },
   /**
    * Skeleton sweep. One pass of the highlight across a placeholder, looped while

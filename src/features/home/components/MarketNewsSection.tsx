@@ -1,12 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  FadeIn,
-  LayoutAnimationConfig,
-  LinearTransition,
-} from 'react-native-reanimated';
+import Animated, { FadeIn, LayoutAnimationConfig } from 'react-native-reanimated';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
+import { layoutMorph } from '@/components/motion/layoutMorph';
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import { MajorEventsList } from '@/features/home/components/MajorEventsList';
 import type { MarketBriefingState } from '@/features/home/hooks/useMarketBriefing';
@@ -117,33 +114,40 @@ export function MarketNewsSection({ data, status }: MarketBriefingState) {
         </View>
       ) : null}
 
-      {/* The height of this block is the thing that moves when a tab is tapped: six crypto
-          articles and one Fed article are very different lengths, and the events calendar is
-          different again. The outer view animates that height so the page below travels instead of
-          jumping; the inner one is keyed by the tab so the incoming rows fade up rather than
-          appear. `skipEntering` keeps both out of the section's own `RiseInView` entrance. */}
+      {/* Same morph as the movers strip above, on the same spring, and for the same two reasons.
+
+          The box resizes on nearly every tab — six crypto articles, one Fed article and the events
+          calendar are all very different heights — and being the last section on the screen its
+          height is also the scroll content's height.
+
+          Each article also animates in its own right. A tab swap replaces the list with different
+          articles under different keys, and `layout` only animates a view that exists in both
+          renders, so without this the box sprang while the articles inside it swapped instantly.
+          An article that appears under both "All" and its own category now slides between the two
+          positions rather than jumping. */}
       <LayoutAnimationConfig skipEntering>
-        <Animated.View layout={LinearTransition.duration(motion.filterSwap.resize)}>
-          <Animated.View
-            entering={FadeIn.duration(motion.filterSwap.fade)}
-            key={active}
-            style={styles.list}
-          >
-            {data === null ? (
-              status === 'loading'
-                ? Array.from({ length: 4 }, (_unused, index) => (
-                  <View key={index} style={styles.item}>
-                    <SkeletonText role="label" width="90%" />
-                  </View>
-                ))
-                : <Text accessibilityRole="alert" style={styles.unavailable}>News unavailable</Text>
-            ) : active === 'events' ? (
-              <MajorEventsList data={data} status={status} />
-            ) : articles.map((article) => (
+        <Animated.View layout={layoutMorph()} style={styles.list}>
+          {data === null ? (
+            status === 'loading'
+              ? Array.from({ length: 4 }, (_unused, index) => (
+                <View key={index} style={styles.item}>
+                  <SkeletonText role="label" width="90%" />
+                </View>
+              ))
+              : <Text accessibilityRole="alert" style={styles.unavailable}>News unavailable</Text>
+          ) : active === 'events' ? (
+            <MajorEventsList data={data} status={status} />
+          ) : articles.map((article) => (
+            // The animation sits on a wrapper rather than on the Pressable so the row keeps its
+            // own `pressed` style function, which an animated component would have to give up.
+            <Animated.View
+              entering={FadeIn.duration(motion.rowSwap.fadeMs)}
+              key={article.url}
+              layout={layoutMorph()}
+            >
               <Pressable
                 accessibilityHint="Opens the source article"
                 accessibilityRole="link"
-                key={article.url}
                 onPress={() => void openArticle(article.url)}
                 style={({ pressed }) => [styles.item, pressed && styles.pressed]}
               >
@@ -155,8 +159,8 @@ export function MarketNewsSection({ data, status }: MarketBriefingState) {
                 </View>
                 <Text numberOfLines={3} style={styles.headline}>{article.headline}</Text>
               </Pressable>
-            ))}
-          </Animated.View>
+            </Animated.View>
+          ))}
         </Animated.View>
       </LayoutAnimationConfig>
     </View>
@@ -197,9 +201,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  // Carries the item rhythm that `section`'s own gap used to supply, now that the articles sit
-  // one level deeper inside the animated wrapper.
-  list: { gap: spacing.xxs },
+  // Carries the item rhythm that `section`'s own gap used to supply, now that the articles sit one
+  // level deeper inside the animated wrapper. Clipped for the same reason as the movers list: the
+  // rows reach their final size before the box does, so on a switch that adds height the overflow
+  // would spill past the box until the spring caught up.
+  list: { overflow: 'hidden', gap: spacing.xxs },
   item: {
     gap: spacing.xxs,
     paddingVertical: spacing.sm,

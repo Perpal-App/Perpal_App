@@ -10,7 +10,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   FadeIn,
   LayoutAnimationConfig,
-  LinearTransition,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -21,6 +20,7 @@ import Animated, {
 import Svg, { Path } from 'react-native-svg';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
+import { layoutMorph } from '@/components/motion/layoutMorph';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import { formatCompactTokenPrice, formatSignedBpsPercent } from '@/domain/money/amount';
@@ -124,51 +124,47 @@ export function MarketMoversSection({
         <UnderlineTabs onSelect={setFilter} options={FILTERS} selectedId={filter} />
       </View>
 
-      {/* Two nested animated views, doing two different jobs.
+      {/* The box morphs and the rows inside it morph with it, and it takes both.
 
-          The outer one owns the height. Each tab returns a different number of rows, so this
-          block's height changes on every swap, and `layout` turns that from a single-frame snap
-          into a travel — which is what stops the rest of the page lurching.
+          The box: each tab returns a different number of rows, so this height changes on every
+          switch, and the spring turns that from a snap into a settle. The section below travels on
+          the same spring, so the whole column moves as one.
 
-          The inner one is keyed by the filter, so switching tabs unmounts it and mounts a fresh
-          one that fades up. Keying is what makes the fade possible at all: without a new key React
-          would reconcile the same view with different children and there would be no mount to
-          animate.
+          The rows: `layout` on the box alone was not enough, because a filter swap does not resize
+          a stable list — it replaces the rows with different components under different keys.
+          Reanimated's `layout` only animates a view present in both renders, so the box sprang
+          while every row inside it teleported, and the section read as unanimated. Each row now
+          carries the same spring, so a market appearing under two filters slides between its two
+          positions instead of jumping.
 
-          `skipEntering` covers the first paint only. The section already arrives under
-          `RiseInView`, and without this the rows would fade in behind that entrance. */}
+          `skipEntering` keeps the first paint still: without it every row would fade in behind the
+          section's own `RiseInView` entrance. */}
       <LayoutAnimationConfig skipEntering>
-        <Animated.View layout={LinearTransition.duration(motion.filterSwap.resize)}>
-          <Animated.View
-            entering={FadeIn.duration(motion.filterSwap.fade)}
-            key={filter}
-            style={styles.list}
-          >
-            {pending && placeholders > 0 ? (
-              Array.from({ length: placeholders }, (_unused, index) => (
-                <View key={index} style={styles.row}>
-                  <SkeletonText role="label" width={110} />
-                  <SkeletonText align="right" role="label" width={90} />
-                </View>
-              ))
-            ) : visible.length === 0 ? (
-              <Text accessibilityLiveRegion="polite" style={styles.empty}>
-                {filter === 'bookmarks'
-                  ? 'No bookmarks yet. Tap the ribbon on any market to keep it here.'
-                  : 'No markets reported by Pacifica.'}
-              </Text>
-            ) : (
-              visible.map(({ market, snapshot }) => (
-                <MoverRow
-                  bookmarked={saved.has(market.venueRef)}
-                  key={market.venueRef}
-                  market={market}
-                  onSelect={onSelect}
-                  snapshot={snapshot}
-                />
-              ))
-            )}
-          </Animated.View>
+        <Animated.View layout={layoutMorph()} style={styles.list}>
+          {pending && placeholders > 0 ? (
+            Array.from({ length: placeholders }, (_unused, index) => (
+              <View key={index} style={styles.row}>
+                <SkeletonText role="label" width={110} />
+                <SkeletonText align="right" role="label" width={90} />
+              </View>
+            ))
+          ) : visible.length === 0 ? (
+            <Text accessibilityLiveRegion="polite" style={styles.empty}>
+              {filter === 'bookmarks'
+                ? 'No bookmarks yet. Tap the ribbon on any market to keep it here.'
+                : 'No markets reported by Pacifica.'}
+            </Text>
+          ) : (
+            visible.map(({ market, snapshot }) => (
+              <MoverRow
+                bookmarked={saved.has(market.venueRef)}
+                key={market.venueRef}
+                market={market}
+                onSelect={onSelect}
+                snapshot={snapshot}
+              />
+            ))
+          )}
         </Animated.View>
       </LayoutAnimationConfig>
     </View>
@@ -199,7 +195,15 @@ function MoverRow({
   const changeText = formatSignedBpsPercent(change);
 
   return (
-    <View style={styles.row}>
+    // `layout` carries a row that survives the swap to its new slot; `entering` covers the rows
+    // that are new to this filter, which have no previous frame to travel from. No `exiting`: a
+    // departing row is fading out inside a box that is already shrinking past it, so the two fight
+    // over the same pixels and the clip cuts the loser anyway.
+    <Animated.View
+      entering={FadeIn.duration(motion.rowSwap.fadeMs)}
+      layout={layoutMorph()}
+      style={styles.row}
+    >
       <Pressable
         accessibilityHint="Opens market details"
         accessibilityLabel={`${market.baseAsset}, ${price}, ${changeText} over 24 hours`}
@@ -223,7 +227,7 @@ function MoverRow({
         symbol={market.baseAsset}
         venueRef={market.venueRef}
       />
-    </View>
+    </Animated.View>
   );
 }
 
@@ -345,7 +349,13 @@ const styles = StyleSheet.create({
   },
   // Carries the row rhythm that `section`'s own gap used to supply. The rows are one level
   // deeper now that they share an animated wrapper, so the gap has to follow them down.
-  list: { gap: spacing.xxs },
+  //
+  // Clipped, and that is what makes the morph read as a shape rather than as a slide. The rows are
+  // laid out at their final size the instant the filter changes while the box is still travelling
+  // to meet them, so on a switch that adds rows the overflow would spill over the section below
+  // for the length of the spring. Clipping turns the same frames into the box opening to reveal
+  // them. On a switch that removes rows the content already fits and this does nothing.
+  list: { overflow: 'hidden', gap: spacing.xxs },
   // The rule spans the toggle's column too, so the list reads as full-width rows rather than
   // as a table with a stripe of unruled margin down its right edge.
   row: {
