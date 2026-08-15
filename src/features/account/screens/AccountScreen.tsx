@@ -6,6 +6,7 @@ import { SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { layoutMorph } from '@/components/motion/layoutMorph';
 import { RiseInView } from '@/components/motion/RiseInView';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
 import { ProfileHeader } from '@/features/account/components/ProfileHeader';
 import {
@@ -60,6 +61,7 @@ export function AccountScreen() {
   const { showOnboardingIntro } = useAppPreferences();
   const signOutInFlight = useRef(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [rotateOpen, setRotateOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const version = Application.nativeApplicationVersion ?? 'Unavailable';
 
@@ -72,17 +74,9 @@ export function AccountScreen() {
         session.retryRestore();
         return;
       case 'ready':
-        // The preconditions are stated here, at the point of consent, rather than standing on the
-        // page: rotation is rare, and the row is not where that sentence earns its space.
-        Alert.alert(
-          'Rotate private wallet?',
-          'Rotation proceeds only after balances, collateral, positions, orders, and pending '
-          + 'private operations are confirmed empty.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Verify and rotate', onPress: () => void session.rotate() },
-          ],
-        );
+        // The preconditions are stated at the point of consent rather than standing on the page:
+        // rotation is rare, and the row is not where that sentence earns its space.
+        setRotateOpen(true);
         return;
       default:
         return;
@@ -148,6 +142,7 @@ export function AccountScreen() {
               <CopyableAddress
                 address={wallet.embeddedWalletAddress}
                 fallback={publicFallback}
+                role="micro"
                 subject="public wallet address"
                 wide
               />
@@ -168,11 +163,12 @@ export function AccountScreen() {
             icon="shield"
             label="Private wallet"
             subtitle={privatePending ? (
-              <SkeletonText role="caption" width={124} />
+              <SkeletonText role="eyebrow" width={124} />
             ) : session.address === null ? undefined : (
               <CopyableAddress
                 address={session.address}
                 fallback={publicFallback}
+                role="micro"
                 subject="private wallet address"
                 wide
               />
@@ -235,6 +231,19 @@ export function AccountScreen() {
           <SettingsRow icon="info" label="Version" value={version} />
         </SettingsGroup>
       </RiseInView>
+
+      <ConfirmDialog
+        confirmLabel="Rotate"
+        message={'Rotation proceeds only after balances, collateral, positions, orders, and pending '
+          + 'private operations are confirmed empty.'}
+        onCancel={() => setRotateOpen(false)}
+        onConfirm={() => {
+          setRotateOpen(false);
+          void session.rotate();
+        }}
+        title="Rotate private wallet?"
+        visible={rotateOpen}
+      />
 
       {alerts.length === 0 ? null : (
         <RiseInView layout={layoutMorph()} style={styles.alerts}>

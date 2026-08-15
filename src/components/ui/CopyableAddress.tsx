@@ -12,7 +12,8 @@ import Svg, { Path } from 'react-native-svg';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { colors, motion, spacing, typography } from '@/theme/tokens';
 
-const ICON_SIZE = 16;
+/** Glyph size per role, so the copy mark stays proportional to the text it sits beside. */
+const ICON_SIZE = { caption: 16, label: 16, micro: 14 } as const;
 /** How long the tick holds before the copy glyph returns. */
 const COPIED_HOLD_MS = 1_600;
 /** Scale the tick springs up from, so the confirmation lands rather than blinks into place. */
@@ -56,10 +57,12 @@ export function CopyableAddress({
   /** Stands in when there is no address yet: a status word, not an explanation. */
   readonly fallback: string;
   /**
-   * Type role for the address. `caption` where it is a secondary line under a heading, `label`
-   * where the address is the primary line of its block.
+   * Type role for the address. `label` where it is the primary line of its block, `caption` where it
+   * is a secondary line under a heading, `micro` where it is a secondary line under a heading that
+   * also carries an icon — there the caption size made the text block taller than the mark beside it,
+   * which inverted which of the two the row read from.
    */
-  readonly role?: 'caption' | 'label';
+  readonly role?: 'caption' | 'label' | 'micro';
   /** Named in the accessibility label and announcement, e.g. `public wallet address`. */
   readonly subject: string;
   /** Keeps more of the address, for a row with the width to spend on it. */
@@ -117,7 +120,7 @@ export function CopyableAddress({
     >
       <Text numberOfLines={1} style={textStyle}>{display}</Text>
       <Animated.View style={animatedStyle}>
-        {copied ? <CheckIcon /> : <CopyIcon />}
+        {copied ? <CheckIcon size={ICON_SIZE[role]} /> : <CopyIcon size={ICON_SIZE[role]} />}
       </Animated.View>
     </PressableScale>
   );
@@ -133,9 +136,9 @@ export function shortenAddress(address: string, wide = false): string {
 }
 
 /** Confirmation only. Round caps and joins, so a 1.8pt tick does not end in two hard points. */
-function CheckIcon() {
+function CheckIcon({ size }: { readonly size: number }) {
   return (
-    <Svg height={ICON_SIZE} viewBox="0 0 24 24" width={ICON_SIZE}>
+    <Svg height={size} viewBox="0 0 24 24" width={size}>
       <Path
         d="M5 12.6 9.7 17.3 19 8"
         fill="none"
@@ -149,9 +152,9 @@ function CheckIcon() {
 }
 
 /** Two sheets, the front one offset off the back. Rounded, so it matches the app's chrome. */
-function CopyIcon() {
+function CopyIcon({ size }: { readonly size: number }) {
   return (
-    <Svg height={ICON_SIZE} viewBox="0 0 24 24" width={ICON_SIZE}>
+    <Svg height={size} viewBox="0 0 24 24" width={size}>
       <Path
         d="M11 9h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2ZM7 15a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2"
         fill="none"
@@ -177,6 +180,16 @@ const styles = StyleSheet.create({
   },
   caption: { ...typography.caption, flexShrink: 1, color: colors.textPrimary },
   label: { ...typography.label, flexShrink: 1, color: colors.textPrimary },
+  // `eyebrow`'s metrics with its tracking neutralised, which is the app's smallest non-caps text —
+  // the same borrowing the leverage badge and the state pill already make. Not a new size in the
+  // scale: an address is a run of base58 and the letter-spacing meant for all-caps labels would
+  // stretch it into something harder to read at a glance, not easier.
+  micro: {
+    ...typography.eyebrow,
+    letterSpacing: 0,
+    flexShrink: 1,
+    color: colors.textPrimary,
+  },
   /** A status word is not data, so it never renders at full white. */
   absent: { color: colors.textMuted },
 });

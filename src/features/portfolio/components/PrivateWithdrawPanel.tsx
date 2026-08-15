@@ -55,10 +55,15 @@ export function PrivateWithdrawPanel({
   /**
    * The tokens supported as collateral, which bounds what can be withdrawn.
    *
-   * Still the bound, even now that the list shown is filtered by balance: a token in the wallet that
-   * Umbra cannot route is not withdrawable, and offering every SPL account in T would produce options
-   * that fail at `assertRelayerSupportsMint`. Native SOL is absent for the same reason — it pays fees,
-   * it was never deposited as collateral, and it is not a mint the private transfer handles.
+   * Still the bound, even now that the list shown is filtered by balance: offering every SPL account in
+   * T would produce options that fail at `assertRelayerSupportsMint` after the reader had committed.
+   *
+   * SOL is absent, and not because the relayer cannot route it — `privateFunding` asserts support for
+   * `WRAPPED_SOL_MINT` on every deposit, so the private leg would carry it. Two things are missing
+   * instead. `beginPrivateExit` would deliver wrapped SOL to the destination and nothing unwraps it, so
+   * the reader would receive a token account rather than spendable SOL. And T's wrapped SOL *is* its
+   * fee reserve: draining it leaves the wallet unable to pay for its own transactions, including the
+   * next withdrawal. Both are protocol work, not a list to widen.
    */
   const supported = useMemo<readonly ProviderCollateral[]>(() => {
     const config = readAppConfig();

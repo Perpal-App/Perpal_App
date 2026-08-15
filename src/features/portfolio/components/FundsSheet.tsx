@@ -56,6 +56,9 @@ const FLICK_PROJECTION = 0.13;
  */
 const BACKDROP_GAP = spacing.xxl;
 
+/** How dark the backdrop gets with the sheet fully open. */
+const SCRIM_OPACITY = 0.72;
+
 /**
  * The deposit and withdraw panels, in a sheet that can be dragged down to close.
  *
@@ -133,7 +136,10 @@ export function FundsSheet({
       return;
     }
 
-    offset.set(withSpring(height.value, motion.sheet, (finished) => {
+    // `sheetDismiss`, not `sheet`. The arrival spring's tail is what made closing feel delayed: the
+    // panel looked gone while the spring was still running, and the modal only unmounted once it
+    // formally finished.
+    offset.set(withSpring(height.value, motion.sheetDismiss, (finished) => {
       'worklet';
       if (finished === true) runOnJS(setMounted)(false);
     }));
@@ -170,6 +176,18 @@ export function FundsSheet({
     transform: [{ translateY: offset.value }],
   }));
 
+  // Tied to the sheet's position rather than to a timeline of its own, so the two can never disagree:
+  // dragging the panel halfway down lightens the backdrop by half, and a dismissal fades it out over
+  // exactly the travel the sheet takes. It was a static fill before, which meant the backdrop held at
+  // full strength while the sheet slid away and then vanished with the modal — the hard cut that made
+  // closing look broken rather than slow.
+  const scrimStyle = useAnimatedStyle(() => {
+    const travel = height.value;
+    const progress = travel === 0 ? 0 : 1 - Math.min(Math.max(offset.value / travel, 0), 1);
+
+    return { opacity: SCRIM_OPACITY * progress };
+  });
+
   const onSheetLayout = useCallback((event: LayoutChangeEvent) => {
     const value = event.nativeEvent.layout.height;
     height.set(value);
@@ -187,12 +205,14 @@ export function FundsSheet({
       {/* Its own gesture root: a `Modal` renders outside the one at the top of the app, so without
           this the pan would never receive an event. */}
       <GestureHandlerRootView style={styles.root}>
-        <Pressable
-          accessibilityLabel="Close funds panel"
-          accessibilityRole="button"
-          onPress={requestClose}
-          style={styles.scrim}
-        />
+        <Animated.View style={[styles.scrim, scrimStyle]}>
+          <Pressable
+            accessibilityLabel="Close funds panel"
+            accessibilityRole="button"
+            onPress={requestClose}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
         {/* A modal renders outside the screen tree, so it is on its own for insets — this is one of
             the few places besides AppScreen and the tab bar that reads them. Both edges, so the
             backdrop gap starts below the notch and the sheet's own base clears the home indicator. */}
@@ -231,7 +251,9 @@ export function FundsSheet({
                   showsVerticalScrollIndicator={false}
                   style={styles.scroll}
                 >
-                  {mode === 'deposit' ? <PrivateFundingPanel tradingReady /> : null}
+                  {mode === 'deposit' ? (
+                    <PrivateFundingPanel balances={balances} tradingReady />
+                  ) : null}
                   {mode === 'withdraw' ? (
                     <PrivateWithdrawPanel balances={balances} snapshot={snapshot} />
                   ) : null}
@@ -262,7 +284,9 @@ function CloseIcon() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  scrim: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim, opacity: 0.72 },
+  // No static opacity: the animated style owns it, and a value here would be multiplied against that
+  // one every frame.
+  scrim: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim },
   safeArea: { flex: 1 },
   // The gap is padding on the dock rather than a height on the sheet, so the bound is expressed as
   // "leave this much backdrop" instead of "be this tall" — the same result on every device, with

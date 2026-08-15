@@ -473,6 +473,22 @@ export const motion = {
     dampingRatio: 0.9,
   },
   /**
+   * Dismissing a sheet, which is not the arrival played backwards.
+   *
+   * Critically damped and much shorter. `sheet` is tuned for something appearing — it settles, and a
+   * damping ratio under 1 keeps a long asymptotic tail that reads as weight on the way in. Reused for
+   * the exit that tail becomes a wait: the panel looks gone while the spring is still technically
+   * running, and anything that fires on completion — unmounting the modal, releasing the backdrop —
+   * happens noticeably after the sheet has left.
+   *
+   * At a ratio of exactly 1 there is no overshoot and no tail, so the sheet arrives at the bottom edge
+   * once and the frame it lands on is the frame it finishes.
+   */
+  sheetDismiss: {
+    duration: 240,
+    dampingRatio: 1,
+  },
+  /**
    * How a row arrives when a filter swaps the set under it.
    *
    * `layout` alone cannot cover this. It animates the frame of a view that exists in both the old
