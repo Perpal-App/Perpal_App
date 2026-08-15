@@ -51,8 +51,8 @@ export function CopyableAddress({
   /** Stands in when there is no address yet: a status word, not an explanation. */
   readonly fallback: string;
   /**
-   * Type role for the address. `caption` where it is a secondary line under a heading,
-   * `label` where the address is the primary line of its block.
+   * Type role for the address. `caption` where it is a secondary line under a heading, `label`
+   * where the address is the primary line of its block.
    */
   readonly role?: 'caption' | 'label';
   /** Named in the accessibility label and announcement, e.g. `public wallet address`. */
@@ -79,7 +79,7 @@ export function CopyableAddress({
   }, [copied, reduceMotion, settle]);
 
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: settle.value }] }));
-  const textStyle = role === 'label' ? styles.label : styles.caption;
+  const textStyle = styles[role];
 
   // No disabled button when there is nothing to copy. A control that cannot act is still an
   // element a screen reader has to walk past, and the fallback is text either way.

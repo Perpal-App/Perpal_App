@@ -169,6 +169,20 @@ export const gradients = {
     colors: ['#3E2C86', '#261B56', '#120D28', '#07060B'],
     locations: [0, 0.26, 0.58, 1],
   },
+  /**
+   * Profile header panel: the ambient field's own light, in a smaller room.
+   *
+   * The first two stops are the home backdrop's, unchanged, because this has to read as the
+   * same gradient. What differs is where it ends: the backdrop runs all the way down to
+   * `background` because it covers a whole screen and everything below the header has to sit on
+   * the page. This one completes inside a panel a couple of hundred points tall, so it stops at
+   * a deep violet instead — the panel keeps a visible bottom edge for the avatar to straddle,
+   * which a ramp that resolved to the page colour would not have.
+   */
+  profilePanel: {
+    colors: ['#3E2C86', '#261B56', '#191138'],
+    locations: [0, 0.55, 1],
+  },
   onboardingCoolEdge: {
     colors: [
       'rgba(74, 72, 204, 0.62)',

@@ -20,6 +20,7 @@ import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
 import { AccountOverviewCard } from '@/features/home/components/AccountOverviewCard';
+import { GlobalActivityTracker } from '@/features/portfolio/components/GlobalActivityTracker';
 import { PrivateWithdrawPanel } from '@/features/portfolio/components/PrivateWithdrawPanel';
 import { cancelPacificaOrder } from '@/integrations/perps/pacifica/pacificaOrder';
 import type {
@@ -135,6 +136,11 @@ export function PacificaPortfolioContent({
         ) : null}
 
         <Funds />
+
+        <GlobalActivityTracker
+          account={session.address ?? ''}
+          apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
+        />
       </View>
     </AppScreen>
   );
@@ -292,7 +298,7 @@ const styles = StyleSheet.create({
   note: { ...typography.bodyCompact, color: colors.textSecondary },
   sheetRoot: { flex: 1 },
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: colors.scrim,
     opacity: 0.72,
   },

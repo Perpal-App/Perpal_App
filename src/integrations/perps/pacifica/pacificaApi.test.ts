@@ -1,5 +1,9 @@
 import { canonicalJson } from '@/integrations/perps/pacifica/pacificaApi';
 import {
+  parsePacificaBalanceActivity,
+  parsePacificaTradeActivity,
+} from '@/integrations/perps/pacifica/pacificaActivity';
+import {
   formatPacificaRatePercent,
   parsePacificaPrices,
 } from '@/integrations/perps/pacifica/pacificaMarketData';
@@ -46,5 +50,28 @@ describe('Pacifica candle intervals', () => {
       '1m', '3m', '5m', '15m', '30m', '1h', '2h',
       '4h', '8h', '12h', '1d', '1w', '1M',
     ]);
+  });
+});
+
+describe('Pacifica account activity', () => {
+  it('keeps exact trade and balance values from the account history APIs', () => {
+    expect(parsePacificaTradeActivity([{
+      amount: '0.001',
+      cause: 'normal',
+      created_at: 1_765_006_315_306,
+      fee: '0.026',
+      history_id: 22,
+      pnl: '1.250000',
+      price: '65000.25',
+      side: 'close_long',
+      symbol: 'BTC',
+    }])[0]).toMatchObject({ amount: '0.001', pnl: '1.250000', side: 'close_long' });
+
+    expect(parsePacificaBalanceActivity([{
+      amount: '100.000000',
+      balance: '1200.000000',
+      created_at: 1_716_200_000_000,
+      event_type: 'deposit',
+    }])[0]).toMatchObject({ amount: '100.000000', eventType: 'deposit' });
   });
 });

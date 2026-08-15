@@ -2,37 +2,44 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 import { colors } from '@/theme/tokens';
 
-export const PROFILE_GLYPH_SIZE = 20;
+/**
+ * Glyph size inside a settings tile.
+ *
+ * A little over half the tile, which is the proportion iOS uses: any larger and the mark
+ * crowds the rounded square it sits in, any smaller and the tile reads as empty.
+ */
+export const PROFILE_GLYPH_SIZE = 17;
 
 export type ProfileGlyphName =
+  | 'info'
   | 'lock'
   | 'rotate'
   | 'shield'
   | 'signOut'
-  | 'spark'
   | 'wallet';
 
 /**
- * The stroked glyph that opens a profile row.
- *
- * Bare, on the page. The version this replaced sat each icon in a filled rounded square, which
- * put a second surface and a second radius on every row and made a list of four settings read
- * as a stack of tiles — the icon is a marker for the row, not an object in its own right.
+ * The glyph inside a settings row's tile.
  *
  * Drawn here rather than taken from an icon font, like every other glyph in the app: one stroke
  * weight, one cap style, and no dependency deciding what a wallet looks like. Every coordinate
  * is written out rather than relying on SVG's implicit number separators, which are legal but
  * not worth betting a glyph on.
+ *
+ * Stroked at 1.9 rather than the 1.7 used elsewhere, because these sit on a saturated tile at
+ * 17pt: a hairline mark on colour reads thinner than the same mark on the page.
  */
 export function ProfileGlyph({
   name,
-  tone = colors.textSecondary,
+  size = PROFILE_GLYPH_SIZE,
+  tone = colors.onAccent,
 }: {
   readonly name: ProfileGlyphName;
+  readonly size?: number;
   readonly tone?: string;
 }) {
   return (
-    <Svg height={PROFILE_GLYPH_SIZE} viewBox="0 0 24 24" width={PROFILE_GLYPH_SIZE}>
+    <Svg height={size} viewBox="0 0 24 24" width={size}>
       {paths(name, tone)}
     </Svg>
   );
@@ -44,7 +51,7 @@ function paths(name: ProfileGlyphName, tone: string) {
     stroke: tone,
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
-    strokeWidth: 1.7,
+    strokeWidth: 1.9,
   } as const;
 
   switch (name) {
@@ -56,16 +63,16 @@ function paths(name: ProfileGlyphName, tone: string) {
             {...stroke}
             d="M3.5 8.5A2.5 2.5 0 0 1 6 6h12A2.5 2.5 0 0 1 20.5 8.5v7A2.5 2.5 0 0 1 18 18H6a2.5 2.5 0 0 1 -2.5 -2.5Z"
           />
-          <Circle cx="16.5" cy="12" fill={tone} r="1.1" />
+          <Circle cx="16.4" cy="12" fill={tone} r="1.2" />
         </>
       );
-    // A crest with a keyhole: the derived wallet, held by this device.
+    // A crest with a keyhole: the wallet this device derived and holds.
     case 'shield':
       return (
         <>
           <Path {...stroke} d="M12 3.2 19 5.8v5.4c0 4.2 -2.8 7.3 -7 8.9 -4.2 -1.6 -7 -4.7 -7 -8.9V5.8Z" />
-          <Circle {...stroke} cx="12" cy="10.8" r="1.9" />
-          <Path {...stroke} d="M12 12.7v2.6" />
+          <Circle {...stroke} cx="12" cy="10.6" r="1.9" />
+          <Path {...stroke} d="M12 12.5v2.6" />
         </>
       );
     // Three quarters of a circle with a head on the open end.
@@ -91,18 +98,19 @@ function paths(name: ProfileGlyphName, tone: string) {
     case 'signOut':
       return (
         <>
-          <Path {...stroke} d="M14 5.5H7.8A2.3 2.3 0 0 0 5.5 7.8v8.4A2.3 2.3 0 0 0 7.8 18.5H14" />
-          <Path {...stroke} d="M11.6 12h8" />
-          <Path {...stroke} d="M17.2 9.4 19.8 12l-2.6 2.6" />
+          <Path {...stroke} d="M13.6 5.5H7.8A2.3 2.3 0 0 0 5.5 7.8v8.4A2.3 2.3 0 0 0 7.8 18.5h5.8" />
+          <Path {...stroke} d="M11.4 12h8.1" />
+          <Path {...stroke} d="M17 9.5 19.5 12 17 14.5" />
         </>
       );
-    // A four-point burst for experience. Filled, so a small mark still carries at row size.
-    case 'spark':
+    // A ringed lowercase i. The dot is filled, so it survives at this size.
+    case 'info':
       return (
-        <Path
-          d="M12 3.4 13.7 9.1 19.4 10.8 13.7 12.5 12 18.2 10.3 12.5 4.6 10.8 10.3 9.1Z"
-          fill={tone}
-        />
+        <>
+          <Circle {...stroke} cx="12" cy="12" r="8.2" />
+          <Path {...stroke} d="M12 11.2v5" />
+          <Circle cx="12" cy="8.2" fill={tone} r="1.1" />
+        </>
       );
   }
 }
