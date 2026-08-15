@@ -70,11 +70,8 @@ export function PortfolioScreen() {
     <PacificaPortfolioContent
       balances={walletBalances.balances}
       balancesPending={walletBalances.status === 'loading'}
-      balancesUnavailable={walletBalances.status === 'error'}
       portfolioPending={portfolio.status === 'loading'}
       portfolioUnavailable={portfolio.status === 'error'}
-      privateAddress={session.address}
-      publicAddress={publicWallet.embeddedWalletAddress}
       snapshot={portfolio.snapshot}
     />
   );
@@ -106,9 +103,6 @@ const SUMMARY_ROWS: readonly (readonly [number, number])[] = [
   [104, 86],
   [96, 78],
   [128, 82],
-  [146, 74],
-  [86, 68],
-  [90, 34],
 ];
 
 /**

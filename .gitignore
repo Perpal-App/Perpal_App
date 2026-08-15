@@ -49,5 +49,6 @@ yarn-error.*
 .env.mainnet
 
 # internal docs (not shipped)
+/docs/
 perpal_docs_gitignore_it/
 IMPLEMENTATION_STATUS.md

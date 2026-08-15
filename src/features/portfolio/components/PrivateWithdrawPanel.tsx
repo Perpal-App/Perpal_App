@@ -57,9 +57,9 @@ export function PrivateWithdrawPanel() {
     <View style={styles.panel}>
       <Text accessibilityRole="header" style={styles.title}>Withdraw</Text>
       <Text selectable style={styles.note}>
-        Closing a trade releases its collateral into your private balance. One
-        withdrawal moves the requested USDC through T and privately delivers it
-        to your public wallet or another Solana wallet.
+        Closed collateral remains part of your private funds. One withdrawal
+        automatically collects the required USDC into T, then privately delivers
+        it to your public wallet or another Solana wallet.
       </Text>
       <View style={styles.buttons}>
         <View style={styles.button}>

@@ -1,75 +1,119 @@
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Application from 'expo-application';
-import * as Clipboard from 'expo-clipboard';
-import { useEffect, useState, type ComponentProps, type ReactNode } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
+import { avatarForAddress } from '@/assets/svg/avatars';
+import { SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
-import { PressableScale } from '@/components/ui/PressableScale';
+import { layoutMorph } from '@/components/motion/layoutMorph';
+import { RiseInView } from '@/components/motion/RiseInView';
+import { CopyableAddress } from '@/components/ui/CopyableAddress';
+import {
+  ProfileRow,
+  ProfileSection,
+  StatePill,
+  type StatePillTone,
+} from '@/features/account/components/ProfileRow';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
-import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
+import { colors, gradients, layout, motion, radii, spacing, typography } from '@/theme/tokens';
+import {
+  useTradingSession,
+  type TradingSessionStatus,
+} from '@/wallet/trading/TradingSessionProvider';
 
-const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
+/**
+ * Sized to the label-and-address stack beside it, the same way the home header's avatar is
+ * sized to the greeting-and-address block: the disc's top lands with the label and its base
+ * with the address.
+ */
+const AVATAR_SIZE = 52;
 
-type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
+const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8_000;
 
+/** Both wallets, so the two blocks name themselves the same way. */
+const PUBLIC_TITLE = 'Public wallet';
+const PRIVATE_TITLE = 'Private wallet';
+
+const PRIVACY_DISCLOSURE =
+  'Perpal never holds your signing keys or funds. Umbra can obscure the direct funding link, '
+  + 'while public Solana activity and the trading venue can still observe their respective '
+  + 'transactions and account activity.';
+
+/**
+ * The private wallet's one action, per session state.
+ *
+ * The visible label is a verb and nothing more — the section it sits in already says which
+ * wallet it acts on. The accessibility label spells that out, because a screen reader lands on
+ * the row without the heading beside it.
+ */
+const PRIVATE_ACTIONS = {
+  inactive: { label: 'Activate', spoken: 'Activate private wallet' },
+  ready: { label: 'Rotate', spoken: 'Rotate private wallet' },
+  error: { label: 'Retry restore', spoken: 'Retry private wallet restore' },
+} as const satisfies Partial<
+  Record<TradingSessionStatus, { readonly label: string; readonly spoken: string }>
+>;
+
+/**
+ * Profile: the two wallets this device holds, what can be done with them, and the way out.
+ *
+ * Built the way the home screen is built — cardless blocks on the page, one staggered
+ * entrance, hierarchy from type and spacing rather than from borders. The version it replaced
+ * put every item in a filled rounded panel with an icon chip and a sentence of explanation
+ * under it, which spent a full screen on four settings and made the least important text the
+ * largest thing on it.
+ *
+ * Every row is one line. Detail lives in what the row opens: the rotation confirmation states
+ * its own preconditions, the privacy row states the trust boundary, and neither needs a
+ * standing summary on the page.
+ */
 export function AccountScreen() {
   const auth = usePrivyAuth();
-  const walletProvisioning = useWalletProvisioning();
-  const tradingSession = useTradingSession();
-  const [addressCopied, setAddressCopied] = useState(false);
+  const wallet = useWalletProvisioning();
+  const session = useTradingSession();
+  const Avatar = avatarForAddress(wallet.embeddedWalletAddress);
   const [signingOut, setSigningOut] = useState(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!logoutRequested || (auth.isReady && !auth.isAuthenticated)) return;
+    if (!logoutRequested || (auth.isReady && !auth.isAuthenticated)) return undefined;
 
     const timer = setTimeout(() => {
       setLogoutRequested(false);
       setSigningOut(false);
-      setError('Sign out could not be confirmed. Please try again.');
+      setError('Sign out could not be confirmed. Try again.');
     }, LOGOUT_CONFIRMATION_TIMEOUT_MS);
 
     return () => clearTimeout(timer);
   }, [auth.isAuthenticated, auth.isReady, logoutRequested]);
 
-  const copyAddress = async () => {
-    const address = walletProvisioning.embeddedWalletAddress;
-    if (!address) return;
-
-    try {
-      await Clipboard.setStringAsync(address);
-      setAddressCopied(true);
-      setError(null);
-    } catch {
-      setError('The wallet address could not be copied. Please try again.');
-    }
-  };
-
   const handlePrivateWallet = () => {
-    switch (tradingSession.status) {
+    switch (session.status) {
       case 'inactive':
-        void tradingSession.activate();
+        void session.activate();
         return;
       case 'error':
-        tradingSession.retryRestore();
+        session.retryRestore();
         return;
       case 'ready':
+        // The preconditions are stated here, at the point of consent, rather than standing on
+        // the page: rotation is rare, and the row is not where that sentence earns its space.
         Alert.alert(
           'Rotate private wallet?',
-          'Rotation proceeds only after balances, collateral, positions, orders, and pending private operations are confirmed empty.',
+          'Rotation proceeds only after balances, collateral, positions, orders, and pending '
+          + 'private operations are confirmed empty.',
           [
             { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Verify and rotate',
-              onPress: () => void tradingSession.rotate(),
-            },
+            { text: 'Verify and rotate', onPress: () => void session.rotate() },
           ],
         );
+        return;
+      default:
+        return;
     }
   };
 
@@ -83,352 +127,224 @@ export function AccountScreen() {
       setLogoutRequested(true);
     } catch {
       setSigningOut(false);
-      setError('Sign out could not be completed. Please try again.');
+      setError('Sign out could not be completed. Try again.');
     }
   };
 
-  const privateWalletActionable =
-    tradingSession.status === 'inactive' ||
-    tradingSession.status === 'error' ||
-    tradingSession.status === 'ready';
-  const address = walletProvisioning.embeddedWalletAddress;
+  const privateState = privateWalletState(session.status);
+  const privateAction = readPrivateAction(session.status);
+  // A wallet still being derived has an address on its way, so its row shimmers. A wallet that
+  // is inactive or unrecoverable has none coming, and the state beside the heading says so
+  // without a line of placeholder pretending otherwise.
+  const privatePending = session.address === null && isDeriving(session.status);
+  const walletRetryable = wallet.status === 'error' || wallet.status === 'needs-recovery';
+  const alerts = [
+    session.recovery === null ? null : 'Private wallet recovery is required before trading.',
+    session.error,
+    error,
+  ].filter((message): message is string => message !== null);
 
   return (
-    <AppScreen>
-      <View style={styles.container}>
-        <Text accessibilityRole="header" style={styles.title}>
-          Profile
-        </Text>
+    <AppScreen contentContainerStyle={styles.content}>
+      <RiseInView>
+        <Text accessibilityRole="header" style={styles.title}>Profile</Text>
+      </RiseInView>
 
+      {/* Every block below the title carries the same layout spring, and it has to be every one
+          of them: Reanimated places a section further down at its final position on the frame
+          after a change, so animating only the block that resized leaves its neighbours snapping
+          around it. Shared physics for the same reason — two springs at different rates visibly
+          come apart. */}
+      <RiseInView delay={motion.rise.stagger} layout={layoutMorph()}>
         <View style={styles.identity}>
+          {/* Assigned from the wallet address, so a given wallet always wears the same face here
+              and on the home header. Glass with a lit top edge rather than a flat grey fill: a
+              solid disc at this size reads as a hole punched in the page. */}
           <View accessibilityElementsHidden style={styles.avatar}>
-            <MaterialCommunityIcons
-              color={colors.accentSoft}
-              name="account-outline"
-              size={30}
+            <LinearGradient
+              colors={gradients.cardSheen.colors}
+              locations={gradients.cardSheen.locations}
+              style={StyleSheet.absoluteFill}
             />
+            <Avatar size={AVATAR_SIZE} />
           </View>
           <View style={styles.identityCopy}>
-            <Text style={styles.identityLabel}>Public wallet</Text>
-            <Text
-              accessibilityLabel={address ?? walletProvisioningLabel(walletProvisioning.status)}
-              numberOfLines={1}
-              selectable={address !== null}
-              style={styles.address}
-            >
-              {address ? shortenAddress(address) : walletProvisioningLabel(walletProvisioning.status)}
-            </Text>
+            <Text accessibilityRole="header" style={styles.blockTitle}>{PUBLIC_TITLE}</Text>
+            <CopyableAddress
+              address={wallet.embeddedWalletAddress}
+              fallback={publicWalletFallback(wallet.status)}
+              role="label"
+              subject="public wallet address"
+            />
           </View>
-          {address ? (
-            <PressableScale
-              accessibilityLabel={addressCopied ? 'Wallet address copied' : 'Copy wallet address'}
-              accessibilityRole="button"
-              hitSlop={8}
-              onPress={() => void copyAddress()}
-              style={styles.copyButton}
-            >
-              <MaterialCommunityIcons
-                color={addressCopied ? colors.positive : colors.textSecondary}
-                name={addressCopied ? 'check' : 'content-copy'}
-                size={20}
-              />
-            </PressableScale>
-          ) : null}
         </View>
 
-        {walletProvisioning.status === 'error' ||
-        walletProvisioning.status === 'needs-recovery' ? (
-          <ProfileGroup title="Wallet recovery">
+        {walletRetryable ? (
+          <ProfileRow
+            accessibilityHint="Reconnects the same Privy identity used on this device"
+            label={wallet.isProvisioning ? 'Restoring wallet' : 'Retry wallet restore'}
+            onPress={wallet.isProvisioning ? null : () => void wallet.retry()}
+          />
+        ) : null}
+      </RiseInView>
+
+      <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()}>
+        <ProfileSection
+          title={PRIVATE_TITLE}
+          trailing={<StatePill label={privateState.label} tone={privateState.tone} />}
+        >
+          {privatePending ? (
+            <View style={styles.addressRow}>
+              <SkeletonText role="label" width={132} />
+            </View>
+          ) : session.address === null ? null : (
+            <View style={styles.addressRow}>
+              <CopyableAddress
+                address={session.address}
+                fallback={privateState.label}
+                role="label"
+                subject="private wallet address"
+              />
+            </View>
+          )}
+
+          {privateAction === null ? null : (
             <ProfileRow
-              detail="Reconnect the same Privy identity used on this device."
-              icon="wallet-outline"
-              onPress={() => void walletProvisioning.retry()}
-              title={walletProvisioning.isProvisioning ? 'Restoring wallet' : 'Retry wallet restore'}
-              trailing={walletProvisioning.isProvisioning ? 'Working' : null}
+              accessibilityLabel={privateAction.spoken}
+              label={privateAction.label}
+              onPress={handlePrivateWallet}
             />
-          </ProfileGroup>
-        ) : null}
+          )}
+        </ProfileSection>
+      </RiseInView>
 
-        <ProfileGroup title="Settings">
-          <ProfileRow
-            detail={privateWalletDescription(tradingSession.status)}
-            icon="shield-key-outline"
-            onPress={privateWalletActionable ? handlePrivateWallet : null}
-            title={privateWalletTitle(tradingSession.status)}
-            trailing={privateWalletSettingLabel(tradingSession.status)}
-          />
-          <ProfileRow
-            detail="Lessons, quests, and earned progress will appear after the learning modules are built."
-            divided
-            icon="book-open-page-variant-outline"
-            onPress={null}
-            title="Learning and XP"
-            trailing="Planned"
-          />
-          <ProfileRow
-            detail="See what Perpal, the trading venue, and public Solana activity can observe."
-            divided
-            icon="shield-lock-outline"
-            onPress={() => Alert.alert(
-              'Privacy and custody',
-              'Perpal never holds your signing keys or funds. Umbra can obscure the direct funding link, while public Solana activity and the trading venue can still observe their respective transactions and account activity.',
-            )}
-            title="Privacy and custody"
-            trailing={null}
-          />
-          <ProfileRow
-            detail="Installed application version"
-            divided
-            icon="information-outline"
-            onPress={null}
-            title="App version"
-            trailing={Application.nativeApplicationVersion ?? 'Unavailable'}
-          />
-        </ProfileGroup>
+      <RiseInView delay={motion.rise.stagger * 3} layout={layoutMorph()}>
+        <ProfileRow
+          accessibilityHint="Explains what Perpal, the trading venue, and public Solana activity can observe"
+          label="Privacy and custody"
+          onPress={() => Alert.alert('Privacy and custody', PRIVACY_DISCLOSURE)}
+        />
+        <ProfileRow
+          accessibilityHint="Ends the Privy session on this device"
+          label={signingOut ? 'Signing out' : 'Sign out'}
+          onPress={signingOut ? null : () => void handleSignOut()}
+          tone="destructive"
+        />
+      </RiseInView>
 
-        <ProfileGroup title="Account">
-          <ProfileRow
-            destructive
-            detail="End the current Privy session on this device."
-            icon="logout-variant"
-            onPress={signingOut ? null : () => void handleSignOut()}
-            title={signingOut ? 'Signing out' : 'Sign out'}
-            trailing={null}
-          />
-        </ProfileGroup>
+      {alerts.length === 0 ? null : (
+        <RiseInView layout={layoutMorph()} style={styles.alerts}>
+          {alerts.map((message, index) => (
+            <Text
+              accessibilityLiveRegion="polite"
+              accessibilityRole="alert"
+              key={index}
+              selectable
+              style={styles.alert}
+            >
+              {message}
+            </Text>
+          ))}
+        </RiseInView>
+      )}
 
-        {tradingSession.recovery ? (
-          <Text accessibilityRole="alert" selectable style={styles.error}>
-            Private wallet recovery needs attention before trading can resume.
-          </Text>
-        ) : null}
-        {tradingSession.error ? (
-          <Text accessibilityRole="alert" selectable style={styles.error}>
-            {tradingSession.error}
-          </Text>
-        ) : null}
-        {error ? (
-          <Text accessibilityLiveRegion="polite" accessibilityRole="alert" selectable style={styles.error}>
-            {error}
-          </Text>
-        ) : null}
-      </View>
+      {/* The build, as a footer line. It was a row with an icon and the words "Installed
+          application version" under it, which is a caption explaining a version number. */}
+      <Text style={styles.version}>
+        {`Perpal ${Application.nativeApplicationVersion ?? 'build unavailable'}`}
+      </Text>
     </AppScreen>
   );
 }
 
-function ProfileGroup({ children, title }: { readonly children: ReactNode; readonly title: string }) {
-  return (
-    <View style={styles.group}>
-      <Text accessibilityRole="header" style={styles.groupTitle}>
-        {title}
-      </Text>
-      <View style={styles.groupSurface}>{children}</View>
-    </View>
-  );
+/** True while an address is genuinely on its way, which is the only state worth shimmering. */
+function isDeriving(status: TradingSessionStatus): boolean {
+  return status === 'waiting-for-wallet'
+    || status === 'restoring'
+    || status === 'activating';
 }
 
-function ProfileRow({
-  destructive = false,
-  detail,
-  divided = false,
-  icon,
-  onPress,
-  title,
-  trailing,
-}: {
-  readonly destructive?: boolean;
-  readonly detail: string;
-  readonly divided?: boolean;
-  readonly icon: IconName;
-  readonly onPress: (() => void) | null;
-  readonly title: string;
-  readonly trailing: string | null;
-}) {
-  const content = (
-    <>
-      <View accessibilityElementsHidden style={styles.rowIcon}>
-        <MaterialCommunityIcons
-          color={destructive ? colors.negative : colors.accentSoft}
-          name={icon}
-          size={22}
-        />
-      </View>
-      <View style={styles.rowCopy}>
-        <Text style={[styles.rowTitle, destructive && styles.destructive]}>{title}</Text>
-        <Text style={styles.rowDetail}>{detail}</Text>
-      </View>
-      {trailing ? <Text style={styles.trailing}>{trailing}</Text> : null}
-      {onPress ? (
-        <MaterialCommunityIcons color={colors.textMuted} name="chevron-right" size={22} />
-      ) : null}
-    </>
-  );
+function readPrivateAction(
+  status: TradingSessionStatus,
+): (typeof PRIVATE_ACTIONS)[keyof typeof PRIVATE_ACTIONS] | null {
+  return status === 'inactive' || status === 'ready' || status === 'error'
+    ? PRIVATE_ACTIONS[status]
+    : null;
+}
 
-  if (onPress === null) {
-    return <View style={[styles.row, divided && styles.divided]}>{content}</View>;
+/**
+ * The private wallet's state as one word.
+ *
+ * The word is the state; the tone only agrees with it. Violet for work in flight, green for a
+ * usable wallet, red for something that needs attention, grey for a wallet that simply has not
+ * been set up — which is not a fault and should not be coloured like one.
+ */
+function privateWalletState(
+  status: TradingSessionStatus,
+): { readonly label: string; readonly tone: StatePillTone } {
+  switch (status) {
+    case 'waiting-for-wallet': return { label: 'Waiting', tone: 'neutral' };
+    case 'restoring': return { label: 'Restoring', tone: 'accent' };
+    case 'inactive': return { label: 'Inactive', tone: 'neutral' };
+    case 'activating': return { label: 'Activating', tone: 'accent' };
+    case 'rotating': return { label: 'Checking', tone: 'accent' };
+    case 'ready': return { label: 'Active', tone: 'positive' };
+    case 'recovery-required': return { label: 'Recovery', tone: 'negative' };
+    case 'error': return { label: 'Unavailable', tone: 'negative' };
   }
-
-  return (
-    <PressableScale
-      accessibilityHint={detail}
-      accessibilityLabel={trailing ? `${title}. ${trailing}` : title}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={[styles.row, divided && styles.divided]}
-    >
-      {content}
-    </PressableScale>
-  );
 }
 
-function shortenAddress(address: string): string {
-  return address.length <= 16 ? address : `${address.slice(0, 8)}…${address.slice(-8)}`;
-}
-
-function walletProvisioningLabel(
+/** Stands in for the public address while there is none. A state, not a sentence. */
+function publicWalletFallback(
   status: ReturnType<typeof useWalletProvisioning>['status'],
 ): string {
   switch (status) {
     case 'unauthenticated': return 'Signed out';
-    case 'provisioning': return 'Creating or restoring';
-    case 'ready': return 'Ready';
+    case 'provisioning': return 'Restoring';
+    case 'ready': return 'Unavailable';
     case 'needs-recovery': return 'Recovery required';
     case 'error': return 'Unavailable';
   }
 }
 
-function privateWalletTitle(
-  status: ReturnType<typeof useTradingSession>['status'],
-): string {
-  switch (status) {
-    case 'inactive': return 'Activate private trading';
-    case 'ready': return 'Rotate private wallet';
-    case 'error': return 'Restore private trading';
-    default: return 'Private trading';
-  }
-}
-
-function privateWalletSettingLabel(
-  status: ReturnType<typeof useTradingSession>['status'],
-): string {
-  switch (status) {
-    case 'waiting-for-wallet': return 'Waiting';
-    case 'restoring': return 'Restoring';
-    case 'inactive': return 'Inactive';
-    case 'activating': return 'Activating';
-    case 'rotating': return 'Checking';
-    case 'ready': return 'Active';
-    case 'recovery-required': return 'Recovery';
-    case 'error': return 'Unavailable';
-  }
-}
-
-function privateWalletDescription(
-  status: ReturnType<typeof useTradingSession>['status'],
-): string {
-  switch (status) {
-    case 'inactive': return 'Create or restore the device-held trading wallet.';
-    case 'ready': return 'Rotation is available only after every private and venue balance is empty.';
-    case 'error': return 'Retry the secure restore without creating a new identity.';
-    case 'recovery-required': return 'Resolve the saved identity mismatch before trading.';
-    default: return 'Secure wallet setup is in progress.';
-  }
-}
-
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
+  content: {
     width: '100%',
     maxWidth: layout.maxContentWidth,
     alignSelf: 'center',
-    gap: spacing.xl,
     paddingHorizontal: layout.screenPadding,
-    paddingTop: spacing.lg,
+    paddingTop: spacing.md,
+    // The floating bar draws over this screen, so the last line buys its own room.
     paddingBottom: TAB_BAR_CLEARANCE,
+    gap: spacing.lg,
   },
   title: { ...typography.title, color: colors.textPrimary },
-  identity: {
-    minHeight: 84,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-  },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // Glass rather than an opaque raise, matching the home header's disc: clipped, so the tint,
+  // the sheen and the drawing all take the disc's shape — the figures are drawn square and rely
+  // on the caller to crop them.
   avatar: {
-    width: 52,
-    height: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceElevated,
-  },
-  identityCopy: { flex: 1, minWidth: 0 },
-  identityLabel: { ...typography.caption, color: colors.textMuted },
-  address: {
-    ...typography.label,
-    marginTop: spacing.xxs,
-    color: colors.textPrimary,
-    fontVariant: ['tabular-nums'],
-  },
-  copyButton: {
-    width: layout.minTouchTarget,
-    height: layout.minTouchTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-  },
-  group: { gap: spacing.xs },
-  groupTitle: {
-    ...typography.caption,
-    paddingHorizontal: spacing.xs,
-    color: colors.textMuted,
-  },
-  groupSurface: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
     overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-  },
-  row: {
-    minHeight: 76,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  divided: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
-  rowIcon: {
-    width: 36,
-    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radii.sm,
-    backgroundColor: colors.surfaceElevated,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassEdge,
+    backgroundColor: colors.glassTint,
   },
-  rowCopy: { flex: 1, minWidth: 0 },
-  rowTitle: { ...typography.label, color: colors.textPrimary },
-  rowDetail: {
-    ...typography.caption,
-    marginTop: spacing.xxs,
-    color: colors.textSecondary,
+  identityCopy: { flex: 1, minWidth: 0, alignItems: 'flex-start' },
+  blockTitle: { ...typography.label, color: colors.textPrimary },
+  // The address sits on a row of its own inside the private block, so it keeps the same rule
+  // and rhythm as the action under it without borrowing a pressable row's touch target.
+  addressRow: {
+    minHeight: layout.minTouchTarget,
+    justifyContent: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  trailing: {
-    ...typography.caption,
-    maxWidth: 86,
-    color: colors.textMuted,
-    textAlign: 'right',
-    fontVariant: ['tabular-nums'],
-  },
-  destructive: { color: colors.negative },
-  error: { ...typography.bodyCompact, color: colors.negative },
+  alerts: { gap: spacing.xs },
+  alert: { ...typography.bodyCompact, color: colors.negative },
+  version: { ...typography.caption, color: colors.textMuted },
 });

@@ -109,13 +109,13 @@ export function AccountOverviewCard({
       <View style={styles.parts}>
         <Part
           hidden={hidden}
-          label={walletLabel('Public', balances?.publicWallet ?? null)}
+          label={walletLabel('Public funds', balances?.publicWallet ?? null)}
           pending={balancesPending}
           value={money(publicBalance)}
         />
         <Part
           hidden={hidden}
-          label={walletLabel('Private', balances?.privateWallet ?? null)}
+          label={walletLabel('Private funds', balances?.privateWallet ?? null)}
           pending={balancesPending || portfolioPending}
           value={money(privateBalance)}
         />

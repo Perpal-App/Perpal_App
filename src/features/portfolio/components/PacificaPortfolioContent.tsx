@@ -1,12 +1,23 @@
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppScreen } from '@/components/layout/AppScreen';
 import { Button } from '@/components/ui/Button';
-import { StatusRow, StatusRowSkeleton } from '@/components/ui/StatusRow';
+import { PressableScale } from '@/components/ui/PressableScale';
+import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig } from '@/config/appConfig';
-import { amountFromBaseUnits, formatDetailedUsd } from '@/domain/money/amount';
-import type { WalletBalance, WalletBalances } from '@/features/account/hooks/useWalletBalances';
+import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
 import { AccountOverviewCard } from '@/features/home/components/AccountOverviewCard';
 import { PrivateWithdrawPanel } from '@/features/portfolio/components/PrivateWithdrawPanel';
@@ -17,28 +28,22 @@ import type {
   PacificaPosition,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
-import { colors, layout, spacing, typography } from '@/theme/tokens';
+import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Props = {
   readonly balances: WalletBalances | null;
   readonly balancesPending: boolean;
-  readonly balancesUnavailable: boolean;
   readonly portfolioPending: boolean;
   readonly portfolioUnavailable: boolean;
-  readonly privateAddress: string;
-  readonly publicAddress: string | null;
   readonly snapshot: PacificaPortfolioSnapshot | null;
 };
 
 export function PacificaPortfolioContent({
   balances,
   balancesPending,
-  balancesUnavailable,
   portfolioPending,
   portfolioUnavailable,
-  privateAddress,
-  publicAddress,
   snapshot,
 }: Props) {
   const config = readAppConfig();
@@ -85,7 +90,7 @@ export function PacificaPortfolioContent({
       <View style={styles.container}>
         <View style={styles.header}>
           <Text accessibilityRole="header" style={styles.title}>Portfolio</Text>
-          <Text selectable style={styles.subtitle}>Public and private account overview</Text>
+          <Text selectable style={styles.subtitle}>Your funds and active trades</Text>
         </View>
 
         <AccountOverviewCard
@@ -95,31 +100,15 @@ export function PacificaPortfolioContent({
           portfolioPending={portfolioPending}
         />
 
-        <View style={styles.section}>
-          <Text accessibilityRole="header" style={styles.heading}>Accounts</Text>
-          <AccountBlock
-            address={publicAddress}
-            balance={balances?.publicWallet ?? null}
-            label="Public wallet (M)"
-            pending={balancesPending}
-            unavailable={balancesUnavailable}
-          />
-          <AccountBlock
-            address={privateAddress}
-            balance={balances?.privateWallet ?? null}
-            label="Private wallet (T)"
-            pending={balancesPending}
-            unavailable={balancesUnavailable}
-          />
-        </View>
+        {portfolioUnavailable ? (
+          <Text accessibilityRole="alert" selectable style={styles.note}>
+            Active trades are temporarily unavailable. Your wallet balances remain visible.
+          </Text>
+        ) : null}
 
-        <View style={styles.section}>
-          <Text accessibilityRole="header" style={styles.heading}>Trading</Text>
-          <TradingSummary
-            pending={portfolioPending}
-            snapshot={snapshot}
-            unavailable={portfolioUnavailable}
-          />
+        {snapshot !== null && (snapshot.positions.length > 0 || snapshot.orders.length > 0) ? (
+          <View style={styles.section}>
+            <Text accessibilityRole="header" style={styles.heading}>Positions and orders</Text>
           {snapshot?.positions.length ? (
             <View style={styles.list}>
               <Text accessibilityRole="header" style={styles.subheading}>Open positions</Text>
@@ -127,11 +116,6 @@ export function PacificaPortfolioContent({
                 <Position key={`${position.symbol}:${position.side}`} position={position} />
               ))}
             </View>
-          ) : snapshot !== null && !portfolioPending ? (
-            <State
-              message="Closed positions release their collateral into your private trading balance."
-              title="No open positions"
-            />
           ) : null}
           {snapshot?.orders.length ? (
             <View style={styles.list}>
@@ -147,7 +131,8 @@ export function PacificaPortfolioContent({
               ))}
             </View>
           ) : null}
-        </View>
+          </View>
+        ) : null}
 
         <Funds />
       </View>
@@ -171,91 +156,74 @@ function Funds() {
           <Button
             label="Deposit"
             onPress={() => setActive('deposit')}
-            variant={active === 'deposit' ? 'primary' : 'secondary'}
           />
         </View>
         <View style={styles.action}>
           <Button
             label="Withdraw"
             onPress={() => setActive('withdraw')}
-            variant={active === 'withdraw' ? 'primary' : 'secondary'}
+            variant="secondary"
           />
         </View>
       </View>
-      {active === 'deposit' ? <PrivateFundingPanel tradingReady /> : null}
-      {active === 'withdraw' ? <PrivateWithdrawPanel /> : null}
+      <FundsSheet active={active} onClose={() => setActive(null)} />
     </View>
   );
 }
 
-function AccountBlock({
-  address,
-  balance,
-  label,
-  pending,
-  unavailable,
+function FundsSheet({
+  active,
+  onClose,
 }: {
-  readonly address: string | null;
-  readonly balance: WalletBalance | null;
-  readonly label: string;
-  readonly pending: boolean;
-  readonly unavailable: boolean;
+  readonly active: 'deposit' | 'withdraw' | null;
+  readonly onClose: () => void;
 }) {
   return (
-    <View style={styles.account}>
-      <Text accessibilityRole="header" style={styles.subheading}>{label}</Text>
-      <StatusRow label="Address" selectable value={address ?? 'Unavailable'} />
-      {pending && balance === null ? (
-        <StatusRowSkeleton labelWidth={86} valueWidth={74} />
-      ) : (
-        <StatusRow
-          label="Wallet value"
-          value={unavailable ? 'Unavailable' : walletValue(balance)}
+    <Modal
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      transparent
+      visible={active !== null}
+    >
+      <View style={styles.sheetRoot}>
+        <Pressable
+          accessibilityLabel="Close funds panel"
+          accessibilityRole="button"
+          onPress={onClose}
+          style={styles.scrim}
         />
-      )}
-      {balance?.valuation && balance.valuation.unpricedAssetCount > 0 ? (
-        <Text selectable style={styles.note}>
-          {balance.valuation.unpricedAssetCount} asset value could not be priced.
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-function TradingSummary({
-  pending,
-  snapshot,
-  unavailable,
-}: {
-  readonly pending: boolean;
-  readonly snapshot: PacificaPortfolioSnapshot | null;
-  readonly unavailable: boolean;
-}) {
-  if (pending && snapshot === null) {
-    return (
-      <View accessibilityLabel="Loading trading balances" accessibilityRole="progressbar" style={styles.summary}>
-        <StatusRowSkeleton labelWidth={124} valueWidth={68} />
-        <StatusRowSkeleton labelWidth={148} valueWidth={74} />
-        <StatusRowSkeleton labelWidth={92} valueWidth={62} />
+        <KeyboardAvoidingView behavior="padding" pointerEvents="box-none" style={styles.sheetDock}>
+          <SafeAreaView accessibilityViewIsModal edges={['bottom']} style={styles.sheet}>
+            <View accessibilityElementsHidden style={styles.grabber} />
+            <View style={styles.sheetHeader}>
+              <PressableScale
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+                hitSlop={12}
+                onPress={onClose}
+                style={styles.close}
+              >
+                <MaterialCommunityIcons
+                  color={colors.textPrimary}
+                  name="close"
+                  size={20}
+                />
+              </PressableScale>
+            </View>
+            <ScrollView
+              contentContainerStyle={styles.sheetContent}
+              contentInsetAdjustmentBehavior="never"
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {active === 'deposit' ? <PrivateFundingPanel tradingReady /> : null}
+              {active === 'withdraw' ? <PrivateWithdrawPanel /> : null}
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </View>
-    );
-  }
-
-  if (unavailable || snapshot === null) {
-    return (
-      <Text accessibilityRole="alert" selectable style={styles.note}>
-        Trading balances are temporarily unavailable. Wallet balances remain visible above.
-      </Text>
-    );
-  }
-
-  return (
-    <View style={styles.summary}>
-      <StatusRow label="Available to trade" value={usd(snapshot.availableToSpend)} />
-      <StatusRow label="Closed funds available" value={usd(snapshot.availableToWithdraw)} />
-      <StatusRow label="Margin in use" value={usd(snapshot.totalMarginUsed)} />
-      <StatusRow label="Open orders" value={String(snapshot.orders.length)} />
-    </View>
+    </Modal>
   );
 }
 
@@ -279,21 +247,6 @@ function Position({ position }: { readonly position: PacificaPosition }) {
       <StatusRow label="Margin mode" value={position.marginMode} />
     </View>
   );
-}
-
-function State({ title, message }: { readonly title: string; readonly message: string }) {
-  return (
-    <View style={styles.state}>
-      <Text accessibilityRole="header" style={styles.subheading}>{title}</Text>
-      <Text selectable style={styles.note}>{message}</Text>
-    </View>
-  );
-}
-
-function walletValue(balance: WalletBalance | null): string {
-  return balance?.valuation === null || balance === null
-    ? 'Unavailable'
-    : formatDetailedUsd(amountFromBaseUnits(balance.valuation.usdBaseUnits, 6));
 }
 
 function usd(value: string): string {
@@ -326,8 +279,6 @@ const styles = StyleSheet.create({
   action: { flex: 1 },
   heading: { ...typography.heading, color: colors.textPrimary },
   subheading: { ...typography.label, color: colors.textPrimary },
-  account: { gap: spacing.sm },
-  summary: { gap: spacing.md },
   list: { gap: spacing.md },
   listItem: {
     gap: spacing.md,
@@ -339,5 +290,46 @@ const styles = StyleSheet.create({
   long: { ...typography.bodyCompact, color: colors.positive },
   short: { ...typography.bodyCompact, color: colors.negative },
   note: { ...typography.bodyCompact, color: colors.textSecondary },
-  state: { gap: spacing.sm, paddingVertical: spacing.sm },
+  sheetRoot: { flex: 1 },
+  scrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.scrim,
+    opacity: 0.72,
+  },
+  sheetDock: { flex: 1, justifyContent: 'flex-end' },
+  sheet: {
+    maxHeight: '88%',
+    overflow: 'hidden',
+    borderTopLeftRadius: radii.panel,
+    borderTopRightRadius: radii.panel,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+  },
+  grabber: {
+    width: 44,
+    height: 4,
+    alignSelf: 'center',
+    marginTop: spacing.sm,
+    borderRadius: radii.pill,
+    backgroundColor: colors.borderStrong,
+  },
+  sheetHeader: {
+    minHeight: 40,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingHorizontal: layout.screenPadding,
+  },
+  close: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    backgroundColor: colors.surfaceElevated,
+  },
+  sheetContent: {
+    paddingHorizontal: layout.screenPadding,
+    paddingBottom: spacing.xxl,
+  },
 });

@@ -14,6 +14,8 @@ Status: Pacifica mainnet integration implemented locally on 8 August 2026. Stati
 8. **Withdraw privately** requests an idempotent Pacifica USDC withdrawal to T, waits for T's balance, then sends it through Umbra to M or another Solana wallet.
 9. Rotate T only after Solana balances, Pacifica balance/pending balance, positions, orders, and private operations all verify empty.
 
+The Portfolio presents T wallet value plus Pacifica account equity as one product-level **Private funds** balance. Venue ledger fields remain internal except when a trade, risk state, or withdrawal confirmation needs them. Closing a position increases this aggregate balance; a user-requested private withdrawal performs Pacifica → T → Umbra without exposing those intermediate steps as separate wallets.
+
 Pacifica's account is a venue ledger keyed by T, not another user-facing wallet. The UI exposes only Wallet, Markets, Order, and Portfolio.
 
 ## Runtime boundaries

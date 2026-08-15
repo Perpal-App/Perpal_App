@@ -156,16 +156,16 @@ export const gradients = {
     locations: [0, 0.38, 0.49, 0.6, 0.71, 0.82, 0.92, 1],
   },
   /**
-   * Home ambience: a violet rise behind the header that has resolved into the page by the time
-   * the content below it starts.
+   * Ambience for the reader's own screens — home and profile: a violet rise behind the header
+   * that has resolved into the page by the time the content below it starts.
    *
    * The onboarding field could not be reused as-is even though this is the same idea — that ramp
    * blooms to near-white at the bottom of the screen, which is a hero treatment and would put
    * the markets list on white. This one runs the other way and stops: brightest at the top where
-   * the greeting and the balance sit, `background` from a little past halfway down, so everything
+   * the identity and the balance sit, `background` from a little past halfway down, so everything
    * that scrolls past reads against the same surface it always did.
    */
-  homeField: {
+  ambientField: {
     colors: ['#3E2C86', '#261B56', '#120D28', '#07060B'],
     locations: [0, 0.26, 0.58, 1],
   },

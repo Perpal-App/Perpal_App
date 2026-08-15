@@ -1,27 +1,19 @@
-import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
+import { useCallback, useMemo } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { avatarForAddress } from '@/assets/svg/avatars';
+import { AmbientBackdrop } from '@/components/layout/AmbientBackdrop';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { layoutMorph } from '@/components/motion/layoutMorph';
 import { RiseInView } from '@/components/motion/RiseInView';
-import { PressableScale } from '@/components/ui/PressableScale';
+import { CopyableAddress } from '@/components/ui/CopyableAddress';
 import { readAppConfig } from '@/config/appConfig';
 import { formatSignedBpsPercent } from '@/domain/money/amount';
 import { useWalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { AccountOverviewCard } from '@/features/home/components/AccountOverviewCard';
 import { FearGreedCard } from '@/features/home/components/FearGreedCard';
-import { HomeBackdrop } from '@/features/home/components/HomeBackdrop';
 import {
   MarketMoversSection,
   type MoverEntry,
@@ -47,11 +39,6 @@ import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
  * the block instead, its top lands with the greeting and its base with the address.
  */
 const AVATAR_SIZE = 52;
-const COPY_ICON_SIZE = 16;
-/** How long the tick holds before the copy glyph returns. */
-const COPIED_HOLD_MS = 1_600;
-/** Scale the tick springs up from, so the confirmation lands rather than blinks into place. */
-const COPIED_FROM_SCALE = 0.4;
 
 /**
  * Landing screen: what the venue is doing right now, and the ways into it.
@@ -117,7 +104,7 @@ export function HomeScreen() {
   );
 
   return (
-    <AppScreen background={<HomeBackdrop />} contentContainerStyle={styles.content}>
+    <AppScreen background={<AmbientBackdrop />} contentContainerStyle={styles.content}>
       <RiseInView style={styles.header}>
         <View style={styles.identity}>
           {/* Assigned from the wallet address, so a given wallet always wears the same face.
@@ -135,7 +122,11 @@ export function HomeScreen() {
           </View>
           <View style={styles.headingCopy}>
             <Text accessibilityRole="header" style={styles.greeting}>{greeting()}</Text>
-            <WalletAddress address={publicWallet.embeddedWalletAddress} />
+            <CopyableAddress
+              address={publicWallet.embeddedWalletAddress}
+              fallback="Privy wallet unavailable"
+              subject="public wallet address"
+            />
           </View>
         </View>
         <NotificationsPanel
@@ -196,105 +187,6 @@ function greeting(): string {
   return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 }
 
-function shortAddress(address: string | null): string {
-  return address === null ? 'Privy wallet unavailable' : `${address.slice(0, 5)}…${address.slice(-4)}`;
-}
-
-/**
- * The wallet address, and copying it.
- *
- * Confirmation is the icon's job alone. Swapping the address for the word "Copied" would move the
- * only thing on the row anyone came to read, and a toast would put the answer somewhere other than
- * where the tap happened — the glyph is at the finger, so that is where the acknowledgement goes.
- *
- * It reverts on a timer rather than on the next interaction, because there may not be one: copying
- * an address is usually the last thing done here before leaving for another app.
- */
-function WalletAddress({ address }: { readonly address: string | null }) {
-  const reduceMotion = useReducedMotion();
-  const [copied, setCopied] = useState(false);
-  const settle = useSharedValue(1);
-
-  useEffect(() => {
-    if (!copied) return undefined;
-
-    const timer = setTimeout(() => setCopied(false), COPIED_HOLD_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
-
-  useEffect(() => {
-    if (!copied || reduceMotion) return;
-
-    // Undersized then sprung, so the tick arrives rather than appears. Only on the way in: the
-    // revert is a state nobody is watching by then.
-    settle.set(COPIED_FROM_SCALE);
-    settle.set(withSpring(1, motion.spring));
-  }, [copied, reduceMotion, settle]);
-
-  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: settle.value }] }));
-
-  const copy = () => {
-    if (address === null) return;
-
-    void Clipboard.setStringAsync(address).then(
-      () => {
-        setCopied(true);
-        AccessibilityInfo.announceForAccessibility('Public wallet address copied.');
-      },
-      () => AccessibilityInfo.announceForAccessibility('Public wallet address could not be copied.'),
-    );
-  };
-
-  return (
-    <PressableScale
-      accessibilityHint="Copies the full Privy public wallet address"
-      accessibilityLabel={`Copy public wallet address, ${shortAddress(address)}`}
-      accessibilityRole="button"
-      disabled={address === null}
-      hitSlop={10}
-      onPress={copy}
-      style={styles.walletRow}
-    >
-      <Text numberOfLines={1} style={styles.walletAddress}>{shortAddress(address)}</Text>
-      <Animated.View style={animatedStyle}>
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </Animated.View>
-    </PressableScale>
-  );
-}
-
-/** Confirmation only. Round caps and joins, so a 1.8pt tick does not end in two hard points. */
-function CheckIcon() {
-  return (
-    <Svg height={COPY_ICON_SIZE} viewBox="0 0 24 24" width={COPY_ICON_SIZE}>
-      <Path
-        d="M5 12.6 9.7 17.3 19 8"
-        fill="none"
-        stroke={colors.positive}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
-/** Two sheets, the front one offset off the back. Rounded, so it matches the app's chrome. */
-function CopyIcon() {
-  return (
-    <Svg height={COPY_ICON_SIZE} viewBox="0 0 24 24" width={COPY_ICON_SIZE}>
-      <Path
-        d="M11 9h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2ZM7 15a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2"
-        fill="none"
-        stroke={colors.textSecondary}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.8}
-      />
-    </Svg>
-  );
-}
-
 const styles = StyleSheet.create({
   content: {
     width: '100%',
@@ -334,17 +226,6 @@ const styles = StyleSheet.create({
   // section titles further down, so it read as one of them. Regular 15 is quieter than both and
   // shares its weight with neither.
   greeting: { ...typography.body, color: colors.textPrimary },
-  // No fill and no leading padding: the chip's left inset was holding the address a few points
-  // off the greeting's left edge, so the two lines beside the avatar never lined up. The vertical
-  // padding stays because it is invisible and buys the touch target its height.
-  walletRow: {
-    maxWidth: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xxs,
-    paddingVertical: spacing.xxs,
-  },
-  walletAddress: { ...typography.caption, flexShrink: 1, color: colors.textPrimary },
   summary: { width: '100%' },
   sentiment: { marginTop: spacing.xs, marginBottom: spacing.xs },
 });
