@@ -5,12 +5,12 @@ import { StyleSheet, Text, View } from 'react-native';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { AuthHandoffProvider } from '@/navigation/authHandoff';
+import { resolveRootRouteMode } from '@/navigation/rootRouteMode';
 import { globalScreenOptions } from '@/navigation/screenOptions';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 
 type ResolvedSession = 'authenticated' | 'unauthenticated';
-type RootRouteName = '(auth)' | '(tabs)' | 'index';
 
 /**
  * Owns the route tree for both authenticated and unauthenticated sessions.
@@ -52,9 +52,14 @@ export function AuthNavigationGate() {
 
   const confirmEntry = useCallback(() => setPendingEntry(false), []);
   const session = currentSession ?? lastResolvedSession;
-  // While the success confirmation is pending, the auth route stays mounted so
-  // the card can play. Tabs remain unmounted until the user acknowledges it.
-  const isAwaitingEntry = pendingEntry && session === 'authenticated';
+  // Include the transition render itself. Waiting for the effect would mount
+  // the authenticated tree for one frame before returning to the handoff.
+  const isEnteringAuthenticatedSession =
+    currentSession === 'authenticated' &&
+    lastResolvedSession === 'unauthenticated';
+  const isAwaitingEntry =
+    (pendingEntry || isEnteringAuthenticatedSession) &&
+    session === 'authenticated';
   const handoff = useMemo(
     () => ({ isAwaitingEntry, confirmEntry }),
     [confirmEntry, isAwaitingEntry],
@@ -71,31 +76,34 @@ export function AuthNavigationGate() {
     return <SessionResolutionState />;
   }
 
-  const isAuthenticatedSession = session === 'authenticated' && !isAwaitingEntry;
-  const initialRouteName: RootRouteName = isAuthenticatedSession
-    ? '(tabs)'
-    : preferences.hasSeenOnboardingIntro
-      ? '(auth)'
-      : 'index';
+  const routeMode = resolveRootRouteMode({
+    hasSeenOnboardingIntro: preferences.hasSeenOnboardingIntro,
+    isAuthenticated: session === 'authenticated',
+    isAwaitingEntry,
+  });
+  const initialRouteName =
+    routeMode === 'app'
+      ? '(tabs)'
+      : routeMode === 'auth'
+        ? '(auth)'
+        : 'index';
 
   return (
     <AuthHandoffProvider value={handoff}>
       <Stack
-        key={isAuthenticatedSession ? 'authenticated' : 'unauthenticated'}
+        key={routeMode === 'app' ? 'authenticated' : 'unauthenticated'}
         initialRouteName={initialRouteName}
         screenOptions={globalScreenOptions}
       >
-        {/* Dropping `index` during the handoff also prunes it from history, so
-            back cannot return to onboarding while already signed in. */}
-        <Stack.Protected guard={!isAuthenticatedSession && !isAwaitingEntry}>
+        <Stack.Protected guard={routeMode === 'onboarding'}>
           <Stack.Screen name="index" />
         </Stack.Protected>
 
-        <Stack.Protected guard={!isAuthenticatedSession}>
+        <Stack.Protected guard={routeMode === 'auth'}>
           <Stack.Screen name="(auth)" />
         </Stack.Protected>
 
-        <Stack.Protected guard={isAuthenticatedSession}>
+        <Stack.Protected guard={routeMode === 'app'}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="market-chart/[venueRef]" />
         </Stack.Protected>

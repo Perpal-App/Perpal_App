@@ -14,17 +14,27 @@ import { colors, fonts, gradients, layout, radii, spacing, typography } from '@/
  */
 export function SearchField({
   compact = false,
+  flush = false,
   onChangeText,
   placeholder,
   value,
 }: {
   readonly compact?: boolean;
+  /**
+   * Drop the field's own gutter and bottom margin.
+   *
+   * The default assumes the markets screen, where the list content carries no horizontal padding and
+   * this field's margin is what creates the gutter. Set it inside a column that is already padded —
+   * the portfolio screen — or the two insets add up and the field sits visibly narrower than
+   * everything around it.
+   */
+  readonly flush?: boolean;
   readonly onChangeText: (value: string) => void;
   readonly placeholder: string;
   readonly value: string;
 }) {
   return (
-    <View style={[styles.band, compact && styles.compactGutter]}>
+    <View style={[styles.band, compact && styles.compactGutter, flush && styles.flush]}>
       <LinearGradient
         colors={gradients.surfaceRaise.colors}
         end={{ x: 0.5, y: 1 }}
@@ -129,6 +139,8 @@ const styles = StyleSheet.create({
     borderRadius: radii.xs,
   },
   compactGutter: { marginHorizontal: layout.screenPaddingCompact - spacing.xs },
+  // Last in the style array, so it wins over either gutter above.
+  flush: { marginHorizontal: 0, marginBottom: 0 },
   input: {
     ...typography.bodyCompact,
     // The token's lineHeight is dropped deliberately; see the note on the input.

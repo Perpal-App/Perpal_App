@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import {
+  clearOnboardingIntroSeen,
   readOnboardingIntroSeen,
   writeOnboardingIntroSeen,
 } from '@/storage/appPreferences';
@@ -17,6 +18,7 @@ type AppPreferences = {
   hasSeenOnboardingIntro: boolean;
   isReady: boolean;
   markOnboardingIntroSeen: () => void;
+  showOnboardingIntro: () => void;
 };
 
 const AppPreferencesContext = createContext<AppPreferences | null>(null);
@@ -55,16 +57,23 @@ export function AppPreferencesProvider({
     setHasSeenOnboardingIntro(true);
   }, []);
 
+  const showOnboardingIntro = useCallback(() => {
+    clearOnboardingIntroSeen();
+    setHasSeenOnboardingIntro(false);
+  }, []);
+
   const value = useMemo(
     () => ({
       hasSeenOnboardingIntro,
       isReady,
       markOnboardingIntroSeen,
+      showOnboardingIntro,
     }),
     [
       hasSeenOnboardingIntro,
       isReady,
       markOnboardingIntroSeen,
+      showOnboardingIntro,
     ],
   );
 

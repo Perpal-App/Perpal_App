@@ -25,3 +25,7 @@ export function readOnboardingIntroSeen() {
 export function writeOnboardingIntroSeen() {
   getPreferencesStorage().set(ONBOARDING_INTRO_SEEN_KEY, true);
 }
+
+export function clearOnboardingIntroSeen() {
+  getPreferencesStorage().set(ONBOARDING_INTRO_SEEN_KEY, false);
+}

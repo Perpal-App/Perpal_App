@@ -1,5 +1,6 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { Children, Fragment, type ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -7,29 +8,53 @@ import {
   ProfileGlyph,
   type ProfileGlyphName,
 } from '@/features/account/components/ProfileGlyph';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
-/** Tile geometry, taken from iOS Settings: a 29pt rounded square with a continuous corner. */
-const TILE_SIZE = 29;
-const TILE_RADIUS = 7;
+const TILE_SIZE = 30;
+
+/**
+ * Tile corner, held at the order buttons' proportion rather than their exact value.
+ *
+ * Those are 42pt tall on `radii.sm`, a touch under a quarter of their height. A 30pt tile on the
+ * same token would be a third of its height, which starts to read as a pill; 8 keeps the ratio,
+ * so the tile and the buy button look like the same material cut to different sizes.
+ */
+const TILE_RADIUS = 8;
 
 const CHEVRON_SIZE = 16;
 
-/** Tint strength behind a state word. Matched to the balance card's rate pill. */
-const PILL_TINT_OPACITY = 0.18;
-
-export type StatePillTone = 'accent' | 'negative' | 'neutral' | 'positive';
 export type SettingsTone = 'accent' | 'negative';
 
 /**
- * A grouped run of settings rows: an inset rounded surface, a caps header above it, and
- * hairline separators between rows.
+ * The material a tile is cut from.
+ *
+ * The same recipe as the order buttons: a ramp from a lit top edge to a deeper base, rimmed one
+ * step darker on all four sides. That is what gives a small square its dimension — the fill reads
+ * as a curved surface catching light rather than as a flat block of colour, which is what the
+ * solid violet squares this replaced looked like.
+ *
+ * Destructive rows take the app's red action material, the same one the sell button uses. There
+ * is one red action material, not two: a second red gradient a shade off this one would be a
+ * palette with a bug in it.
+ *
+ * Left to infer rather than annotated, deliberately: `LinearGradient` wants its stops as tuples of
+ * at least two entries, and widening them to `readonly string[]` on the way through a record type
+ * is enough to lose that and fail the call.
+ */
+const TILE_MATERIALS = {
+  accent: { edge: colors.accentEdge, ramp: gradients.accentAction },
+  negative: { edge: colors.shortEdge, ramp: gradients.shortAction },
+} as const;
+
+/**
+ * A grouped run of settings rows: an inset rounded surface, a caps header above it, and hairline
+ * separators between rows.
  *
  * The group owns the separators rather than each row declaring one, which is what keeps them
  * correct when a row is conditional — a row that renders as `null` is dropped by
- * `Children.toArray` before the separators are placed, so a hidden row never leaves a rule
- * behind or doubles one up. It also means the last row never carries a hairline against the
- * surface's own bottom edge.
+ * `Children.toArray` before the separators are placed, so a hidden row never leaves a rule behind
+ * or doubles one up. It also means the last row never carries a hairline against the surface's
+ * own bottom edge.
  */
 export function SettingsGroup({
   children,
@@ -56,11 +81,10 @@ export function SettingsGroup({
 }
 
 /**
- * One settings row: a tinted glyph tile, a label, and whatever the row carries on the right.
+ * One settings row: a glyph tile, a label, and whatever the row carries on the right.
  *
- * `subtitle` puts a second line under the label, for a row whose value is too long to sit
- * beside it — an address. `value` is the right-aligned muted figure iOS uses for a version or a
- * count. `trailing` is for a node rather than text, currently the wallet state pill.
+ * `subtitle` puts a second line under the label, for a value too long to sit beside it — an
+ * address. `value` is the right-aligned muted text iOS uses for a version, a handle, or a state.
  *
  * Without `onPress` the row grows no chevron and takes no touches, so a value that cannot be
  * acted on never looks like it can.
@@ -71,10 +95,10 @@ export function SettingsRow({
   icon,
   iconTone = 'accent',
   label,
+  loading = false,
   onPress = null,
   subtitle,
   tone = 'default',
-  trailing,
   value,
 }: {
   readonly accessibilityHint?: string;
@@ -83,24 +107,26 @@ export function SettingsRow({
   readonly icon: ProfileGlyphName;
   readonly iconTone?: SettingsTone;
   readonly label: string;
+  readonly loading?: boolean;
   readonly onPress?: (() => void) | null;
   readonly subtitle?: ReactNode;
   readonly tone?: 'default' | 'destructive';
-  readonly trailing?: ReactNode;
   readonly value?: string;
 }) {
+  const material = TILE_MATERIALS[iconTone];
   const content = (
     <>
-      <View
+      <LinearGradient
         accessibilityElementsHidden
+        colors={material.ramp.colors}
+        end={{ x: 0.5, y: 1 }}
         importantForAccessibility="no-hide-descendants"
-        style={[
-          styles.tile,
-          { backgroundColor: iconTone === 'negative' ? colors.negative : colors.accent },
-        ]}
+        locations={material.ramp.locations}
+        start={{ x: 0.5, y: 0 }}
+        style={[styles.tile, { borderColor: material.edge }]}
       >
         <ProfileGlyph name={icon} />
-      </View>
+      </LinearGradient>
       <View style={styles.body}>
         <View style={styles.headline}>
           <Text
@@ -112,8 +138,14 @@ export function SettingsRow({
           {value === undefined ? null : (
             <Text numberOfLines={1} style={styles.value}>{value}</Text>
           )}
-          {trailing}
-          {onPress === null ? null : <Chevron />}
+          {loading ? (
+            <ActivityIndicator
+              color={tone === 'destructive' ? colors.negative : colors.accent}
+              size="small"
+            />
+          ) : onPress === null ? null : (
+            <Chevron />
+          )}
         </View>
         {subtitle}
       </View>
@@ -129,47 +161,18 @@ export function SettingsRow({
       accessibilityHint={accessibilityHint}
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityRole="button"
-      // Barely any travel. A full-width row scaling by the app's usual 4% moves its edges
-      // several points against the group's own edge, which reads as the surface flexing.
-      pressedScale={0.99}
+      accessibilityState={{ busy: loading, disabled: loading }}
+      disabled={loading}
       onPress={onPress}
+      // Barely any travel. A full-width row scaling by the app's usual 4% moves its edges several
+      // points against the group's own edge, which reads as the surface flexing.
+      pressedScale={0.99}
       style={styles.row}
     >
       {content}
     </PressableScale>
   );
 }
-
-/**
- * A state word in a tinted box.
- *
- * The word carries the state and the colour only agrees with it, so nothing is read from colour
- * alone. Same recipe as the balance card's rate pill: a separate tint layer rather than opacity
- * on the container, which would take the word down with it.
- */
-export function StatePill({
-  label,
-  tone,
-}: {
-  readonly label: string;
-  readonly tone: StatePillTone;
-}) {
-  const colour = PILL_TONES[tone];
-
-  return (
-    <View style={styles.pill}>
-      <View style={[StyleSheet.absoluteFill, styles.pillTint, { backgroundColor: colour }]} />
-      <Text style={[styles.pillLabel, { color: colour }]}>{label}</Text>
-    </View>
-  );
-}
-
-const PILL_TONES: Readonly<Record<StatePillTone, string>> = {
-  accent: colors.accentSoft,
-  negative: colors.negative,
-  neutral: colors.textMuted,
-  positive: colors.positive,
-};
 
 /** Stroked rather than a text glyph, so its weight matches the app's other drawn icons. */
 function Chevron() {
@@ -194,9 +197,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     color: colors.textMuted,
   },
-  // One surface for the whole group, clipped so the first and last rows take its corners. The
-  // rows themselves carry no fill, which is what lets the separators between them read as rules
-  // on one panel rather than as gaps between several.
+  // One surface for the whole group, clipped so the first and last rows take its corners. The rows
+  // themselves carry no fill, which is what lets the separators between them read as rules on one
+  // panel rather than as gaps between several.
   group: {
     overflow: 'hidden',
     borderRadius: radii.md,
@@ -212,15 +215,18 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
   },
+  // Clipped, so the ramp takes the tile's corners, and rimmed at a full point rather than a
+  // hairline — the same weight the order buttons carry, which is what makes the edge read as the
+  // side of a raised surface instead of an outline drawn around it.
   tile: {
     width: TILE_SIZE,
     height: TILE_SIZE,
     flexShrink: 0,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
     borderRadius: TILE_RADIUS,
-    // A circular corner meets the straight edge at an abrupt change in curvature, which at this
-    // size is what reads as a radius being slightly wrong; a continuous corner eases into it.
     borderCurve: 'continuous',
   },
   body: { flex: 1, minWidth: 0, gap: 2 },
@@ -228,23 +234,11 @@ const styles = StyleSheet.create({
   label: { ...typography.bodyCompact, flex: 1, minWidth: 0, color: colors.textPrimary },
   value: { ...typography.bodyCompact, flexShrink: 0, color: colors.textMuted },
   destructive: { color: colors.negative },
-  // Inset past the tile so it starts under the label, which is where iOS breaks a settings
-  // list: a rule running the full width would cut the icons off from their own rows.
+  // Inset past the tile so it starts under the label, which is where iOS breaks a settings list: a
+  // rule running the full width would cut the icons off from their own rows.
   separator: {
     marginLeft: spacing.sm + TILE_SIZE + spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  // Boxy and small: a capsule at this size would read as a button rather than as a state.
-  pill: {
-    flexShrink: 0,
-    overflow: 'hidden',
-    paddingHorizontal: spacing.xxs,
-    paddingVertical: 1,
-    borderRadius: radii.xs,
-  },
-  // Carries the corner itself as well as the parent's clip — an absolutely positioned child of
-  // a rounded, clipped View is the case Android is least reliable about clipping.
-  pillTint: { opacity: PILL_TINT_OPACITY, borderRadius: radii.xs },
-  pillLabel: { ...typography.eyebrow, letterSpacing: 0 },
 });

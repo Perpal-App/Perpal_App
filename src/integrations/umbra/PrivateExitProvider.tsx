@@ -11,8 +11,9 @@ import {
 } from 'react';
 
 import { readAppConfig } from '@/config/appConfig';
-import { pacificaCollateral } from '@/integrations/perps/providerCollateral';
+import type { ProviderCollateral } from '@/integrations/perps/providerCollateral';
 import { ensurePacificaCollateralInWallet } from '@/integrations/perps/pacifica/pacificaWithdrawal';
+import { readTokenBalance } from '@/integrations/solana/stablecoinSwap';
 import {
   beginPrivateExit,
   resumePrivateExit,
@@ -32,6 +33,7 @@ type State = {
   readonly start: (
     amountBaseUnits: bigint,
     destinationAddress: string,
+    collateral: ProviderCollateral,
   ) => Promise<void>;
   readonly resume: () => Promise<void>;
 };
@@ -114,21 +116,55 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
     }
   }, []);
 
+  /**
+   * Withdraws one collateral token privately.
+   *
+   * Two legs, and only the first is token-specific. The venue holds its margin in USDC alone, so
+   * collecting from the trading account is a USDC operation — `ensurePacificaCollateralInWallet`
+   * validates `availableToWithdraw` as USDC and posts a USDC-denominated withdraw. Any other
+   * collateral is already sitting in private wallet T, having been deposited there and never sent to
+   * the venue, so there is nothing to collect and the leg is skipped.
+   *
+   * The private leg was already token-agnostic: `beginPrivateExit` takes the mint and symbol, records
+   * them for recovery, and `assertRelayerSupportsMint` refuses a mint the Umbra relayer cannot route
+   * before any funds move. So this change opens the path that existed rather than widening it.
+   *
+   * The skipped leg is replaced by a balance read, not by nothing. Collection is what would otherwise
+   * have surfaced a shortfall, and entering a resumable state machine for an amount the wallet does
+   * not hold would leave a record to recover from a failure that was knowable up front.
+   */
   const start = useCallback(async (
     amountBaseUnits: bigint,
     destinationAddress: string,
+    collateral: ProviderCollateral,
   ) => {
     await run(async () => {
       const input = operationInput();
-      await ensurePacificaCollateralInWallet(amountBaseUnits, {
-        account: input.sourceWalletAddress,
-        apiOrigin: input.config.perps.pacificaApiOrigin,
-        mint: input.config.perps.usdcMint,
-        rpcUrl: input.config.api.rpcUrl,
-        signer: input.gatewaySigner,
-        withdrawalFeeBaseUnits: input.config.perps.pacificaWithdrawalFeeBaseUnits,
-      });
-      const collateral = pacificaCollateral(input.config.perps.usdcMint);
+
+      if (collateral.mint === input.config.perps.usdcMint) {
+        await ensurePacificaCollateralInWallet(amountBaseUnits, {
+          account: input.sourceWalletAddress,
+          apiOrigin: input.config.perps.pacificaApiOrigin,
+          mint: collateral.mint,
+          rpcUrl: input.config.api.rpcUrl,
+          signer: input.gatewaySigner,
+          withdrawalFeeBaseUnits: input.config.perps.pacificaWithdrawalFeeBaseUnits,
+        });
+      } else {
+        const held = await readTokenBalance({
+          mint: collateral.mint,
+          owner: input.sourceWalletAddress,
+          rpcUrl: input.config.api.rpcUrl,
+          signer: input.gatewaySigner,
+        });
+
+        if (held < amountBaseUnits) {
+          throw new Error(
+            `Private wallet T does not hold enough ${collateral.symbol} for this withdrawal.`,
+          );
+        }
+      }
+
       return beginPrivateExit(
         {
           ...input,

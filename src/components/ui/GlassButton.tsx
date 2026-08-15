@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, fonts, gradients, motion, radii, typography } from '@/theme/tokens';
+import { colors, gradients, motion, radii, typography } from '@/theme/tokens';
 
 type GlassButtonProps = {
   label: string;
@@ -27,14 +27,23 @@ type GlassButtonProps = {
 };
 
 /**
- * Translucent glass action. The backdrop shows through a darkening tint, with a
- * specular sheen along the top edge and a tinted rim instead of a hard outline.
+ * The app's primary action, cut from the same material as the order buttons: a ramp from a lit top
+ * edge to a deeper base.
  *
- * The glass is built from translucent gradients rather than a native blur. What
- * sits behind this button is a smooth gradient, so there is no detail for a blur
- * to soften: it would cost a native blur pass on every frame of the entrance
- * animation and look the same. A screen that puts real content behind a glass
- * surface would want `expo-blur` instead.
+ * It used to be translucent — a darkening tint the backdrop showed through. That read as a panel
+ * over the gradient rather than as a control on it, and it meant the one button on the screen was
+ * the only thing on it made of nothing. The material is the accent now, so a primary action looks
+ * the same here as it does on a market.
+ *
+ * What stays is the glass finish and the way it behaves: the specular highlight along the top edge
+ * that fades out before the midpoint, so the surface reads as curved rather than flat; the spring
+ * press; and the composited fade-and-rise entrance. Those are what make it feel like glass, and
+ * none of them depended on the fill being see-through.
+ *
+ * Sized down to a single line of `label` type at 52pt tall. The 64pt height came from the pill this
+ * replaced, where the height was the shape; on a rounded rectangle the same height is just a slab.
+ * The radius is proportional to the order buttons' rather than equal to it — those are 42pt on
+ * `radii.sm`, a touch under a quarter of their height, so `radii.md` at 52 holds the same ratio.
  */
 export function GlassButton({
   label,
@@ -43,8 +52,8 @@ export function GlassButton({
   accessibilityLabel = label,
   disabled = false,
   fadeIn = false,
-  // Mirrors the pressable's own defaults: `exactOptionalPropertyTypes` rules out
-  // forwarding `undefined` to let it fall back to them.
+  // Mirrors the pressable's own defaults: `exactOptionalPropertyTypes` rules out forwarding
+  // `undefined` to let it fall back to them.
   fadeDuration = motion.fade.duration,
   fadeDelay = 0,
   enterOffsetY = 0,
@@ -66,9 +75,9 @@ export function GlassButton({
       style={[styles.button, disabled && styles.disabled, style]}
     >
       <LinearGradient
-        colors={gradients.glassAction.colors}
+        colors={gradients.accentAction.colors}
         end={{ x: 0.5, y: 1 }}
-        locations={gradients.glassAction.locations}
+        locations={gradients.accentAction.locations}
         start={{ x: 0.5, y: 0 }}
         style={styles.fill}
       >
@@ -88,12 +97,18 @@ export function GlassButton({
 }
 
 const styles = StyleSheet.create({
+  // No rim. The order buttons carry one because two of them sit side by side and each needs an
+  // edge against the other; this is one control alone on a gradient, where the same stroke reads as
+  // an outline drawn around the button rather than as its side. The ramp's own dark base is what
+  // separates it from the page now.
   button: {
-    height: 64,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.glassEdge,
-    // Keeps the translucent fill and its sheen inside the pill.
+    height: 52,
+    borderRadius: radii.md,
+    // A circular corner meets the straight edge at an abrupt change in curvature; a continuous
+    // corner eases into it, which at this radius is the difference between a rounded rectangle and
+    // a rectangle with its corners cut off.
+    borderCurve: 'continuous',
+    // Keeps the ramp and its sheen inside the corners.
     overflow: 'hidden',
   },
   fill: {
@@ -108,10 +123,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
   },
+  // `label` on the semibold face rather than `heading` on bold. At 64pt tall the heavier, larger
+  // type was what the height was built around; at 52 it filled the button, and a label that crowds
+  // its own control is most of what made this read as bulky.
   label: {
-    ...typography.heading,
-    fontFamily: fonts.bold,
-    color: colors.textPrimary,
+    ...typography.label,
+    color: colors.onAccent,
     textAlign: 'center',
     letterSpacing: 0.2,
   },

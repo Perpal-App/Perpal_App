@@ -1,4 +1,3 @@
-import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import {
@@ -27,16 +26,14 @@ const heroDelay = (step: number) =>
   CANDLE_REVEAL_TOTAL_DURATION + step * motion.rise.stagger;
 
 export function OnboardingLandingScreen() {
-  const router = useRouter();
   const { markOnboardingIntroSeen } = useAppPreferences();
   const { width } = useWindowDimensions();
   const compact = width < 360;
 
   const handleContinue = () => {
     // This bounded, non-sensitive preference is written from the user event,
-    // never during render. It only selects the next guest entry screen.
+    // never during render. The root guard then exposes only the auth route.
     markOnboardingIntroSeen();
-    router.push('/access');
   };
 
   return (
@@ -71,19 +68,22 @@ export function OnboardingLandingScreen() {
             <SparkMark size={compact ? 180 : 200} />
           </RiseInView>
 
+          {/* One row, and it has to be pinned to one: three words at display size measure wider
+              than a 360pt phone's content column, so left alone the line would break after
+              "Test." and read as a sentence that ran out of room. `numberOfLines` forbids the
+              break and `adjustsFontSizeToFit` gives the type licence to shrink instead — which is
+              also what keeps the row intact at large accessibility text sizes, where a fixed size
+              would clip. `minimumFontScale` stops the shrinking well before it stops being a
+              heading. */}
           <RiseInView delay={heroDelay(2)}>
             <Text
               accessibilityRole="header"
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+              numberOfLines={1}
               style={[styles.title, compact && styles.compactTitle]}
             >
-              Private trading.{`\n`}Your control.
-            </Text>
-          </RiseInView>
-
-          <RiseInView delay={heroDelay(3)}>
-            <Text style={styles.description}>
-              Your signing key stays on your device. Private funding and trading
-              are being added to this Android prototype in verified stages.
+              Learn. Test. Trade.
             </Text>
           </RiseInView>
         </View>
@@ -92,7 +92,7 @@ export function OnboardingLandingScreen() {
           <GlassButton
             accessibilityHint="Opens sign in and account creation options"
             enterOffsetY={motion.rise.offsetY}
-            fadeDelay={heroDelay(4)}
+            fadeDelay={heroDelay(3)}
             fadeDuration={motion.rise.duration}
             fadeIn
             label="Get Started"
@@ -170,21 +170,25 @@ const styles = StyleSheet.create({
   spark: {
     marginBottom: spacing.xl,
   },
+  // A step under `display`, which is the size the two-line heading this replaced was set at. The
+  // full 36 needs about 322pt for one row and a 360pt phone offers 312, so the shrink-to-fit above
+  // would be doing the work on every mid-size device rather than only at large text sizes. 32
+  // clears the narrowest supported column outright and leaves the fallback for what it is for.
+  //
+  // `width: '100%'` because `adjustsFontSizeToFit` measures against the box it is given: a text
+  // node sized to its own content has nothing to shrink into and the fit is computed against the
+  // wrong width.
   title: {
     ...typography.display,
+    width: '100%',
+    fontSize: 32,
+    lineHeight: 48,
     color: colors.textPrimary,
     textAlign: 'center',
   },
   compactTitle: {
-    fontSize: 30,
-    lineHeight: 45,
-  },
-  description: {
-    ...typography.bodyCompact,
-    maxWidth: 336,
-    marginTop: spacing.md,
-    color: colors.textSecondary,
-    textAlign: 'center',
+    fontSize: 28,
+    lineHeight: 42,
   },
   footer: {
     alignItems: 'center',

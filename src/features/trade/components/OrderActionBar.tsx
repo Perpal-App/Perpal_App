@@ -1,7 +1,7 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { ActionButton } from '@/components/ui/ActionButton';
 import { readAppConfig } from '@/config/appConfig';
 import { PacificaOrderTicket } from '@/features/trade/components/PacificaOrderTicket';
 import type { PacificaOrderSide } from '@/integrations/perps/pacifica/pacificaOrder';
@@ -9,7 +9,7 @@ import type {
   PacificaMarket,
   PacificaMarketSnapshot,
 } from '@/integrations/perps/pacifica/pacificaMarketData';
-import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 /**
  * The app's only way into an order.
@@ -47,9 +47,26 @@ export function OrderActionBar({
         </Text>
       )}
 
+      {/* The two sides are `ActionButton`s now rather than this file's own pressables. The material
+          is identical — it was lifted from here — and sharing it is what lets a deposit on the
+          portfolio screen read as the same kind of control as a buy. */}
       <View style={styles.actions}>
-        <SideButton disabled={!tradable} onPress={() => setSide('long')} side="long" />
-        <SideButton disabled={!tradable} onPress={() => setSide('short')} side="short" />
+        <ActionButton
+          accessibilityHint="Opens the order ticket on this side"
+          disabled={!tradable}
+          label="Buy / Long"
+          onPress={() => setSide('long')}
+          style={styles.action}
+          tone="positive"
+        />
+        <ActionButton
+          accessibilityHint="Opens the order ticket on this side"
+          disabled={!tradable}
+          label="Sell / Short"
+          onPress={() => setSide('short')}
+          style={styles.action}
+          tone="negative"
+        />
       </View>
 
       <Modal
@@ -110,49 +127,6 @@ export function OrderActionBar({
   );
 }
 
-function SideButton({
-  disabled,
-  onPress,
-  side,
-}: {
-  readonly disabled: boolean;
-  readonly onPress: () => void;
-  readonly side: PacificaOrderSide;
-}) {
-  const long = side === 'long';
-  const ramp = long ? gradients.longAction : gradients.shortAction;
-
-  return (
-    <Pressable
-      accessibilityHint="Opens the order ticket on this side"
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.button,
-        { borderColor: long ? colors.longEdge : colors.shortEdge },
-        pressed && styles.pressed,
-        disabled && styles.disabled,
-      ]}
-    >
-      <LinearGradient
-        colors={ramp.colors}
-        end={{ x: 0.5, y: 1 }}
-        locations={ramp.locations}
-        start={{ x: 0.5, y: 0 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <Text style={[styles.label, long ? styles.onLong : styles.onShort]}>
-        {long ? 'Buy / Long' : 'Sell / Short'}
-      </Text>
-    </Pressable>
-  );
-}
-
-/** Compact by intent: tall enough to hit, short enough to leave the data room. */
-const BUTTON_HEIGHT = 42;
-
 const styles = StyleSheet.create({
   bar: {
     gap: spacing.xs,
@@ -165,20 +139,8 @@ const styles = StyleSheet.create({
   },
   blocked: { ...typography.caption, color: colors.textMuted },
   actions: { flexDirection: 'row', gap: spacing.sm },
-  button: {
-    flex: 1,
-    height: BUTTON_HEIGHT,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: radii.sm,
-  },
-  label: { ...typography.label },
-  onLong: { color: colors.onLight },
-  onShort: { color: colors.onAccent },
+  action: { flex: 1 },
   pressed: { opacity: 0.86 },
-  disabled: { opacity: 0.4 },
   sheetRoot: { flex: 1, justifyContent: 'flex-end' },
   scrim: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim, opacity: 0.72 },
   sheet: {

@@ -1,4 +1,3 @@
-import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
@@ -21,6 +20,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { AuthFlowCard } from '@/features/auth/components/AuthFlowCard';
 import { OnboardingBackdrop } from '@/features/onboarding/components/OnboardingBackdrop';
 import { useAuthHandoff } from '@/navigation/authHandoff';
+import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, motion, spacing, typography } from '@/theme/tokens';
 
 const successCopy = {
@@ -49,8 +49,8 @@ const revealDelay = (step: number) =>
  * actions live in a bottom-sheet card.
  */
 export function AuthAccessScreen() {
-  const router = useRouter();
   const { isAwaitingEntry, confirmEntry } = useAuthHandoff();
+  const { showOnboardingIntro } = useAppPreferences();
   const { width, height } = useWindowDimensions();
   const compact = width < 360;
   const reduceMotion = useReducedMotion();
@@ -82,7 +82,7 @@ export function AuthAccessScreen() {
   }));
 
   const handleBack = () => {
-    router.back();
+    showOnboardingIntro();
   };
 
   return (

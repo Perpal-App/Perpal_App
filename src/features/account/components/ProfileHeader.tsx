@@ -30,6 +30,21 @@ const AVATAR_RING = 5;
 const PANEL_HEIGHT = 160;
 
 /**
+ * The band's corners, shared by the clipped container and the glow layer inside it.
+ *
+ * Rounded on all four, so the band reads as one object rather than as a stripe cut off at the top.
+ * The top pair is tighter than the bottom: those corners sit against the device's own rounding and
+ * a radius competing with it looks like a mistake, while the bottom pair is the edge the disc
+ * straddles and carries the curve the eye actually reads.
+ */
+const PANEL_RADII = {
+  borderTopLeftRadius: radii.lg,
+  borderTopRightRadius: radii.lg,
+  borderBottomLeftRadius: radii.panel,
+  borderBottomRightRadius: radii.panel,
+} as const;
+
+/**
  * Who this device is: a gradient band across the top, and the avatar straddling its bottom edge.
  *
  * The band is empty on purpose. Everything it used to carry — the screen title, the address, the
@@ -51,13 +66,25 @@ export function ProfileHeader({ address }: { readonly address: string | null }) 
 
   return (
     <View style={styles.wrapper}>
-      <LinearGradient
-        colors={gradients.profilePanel.colors}
-        end={{ x: 0.5, y: 1 }}
-        locations={gradients.profilePanel.locations}
-        start={{ x: 0.5, y: 0 }}
-        style={styles.panel}
-      />
+      {/* Two layers in a clipped box rather than one gradient with more stops: the base ramp
+          darkens downward and the glow lifts its bottom third back up, and a single set of stops
+          that reversed on itself would be impossible to adjust later. */}
+      <View style={styles.panel}>
+        <LinearGradient
+          colors={gradients.profilePanel.colors}
+          end={{ x: 0.5, y: 1 }}
+          locations={gradients.profilePanel.locations}
+          start={{ x: 0.5, y: 0 }}
+          style={StyleSheet.absoluteFill}
+        />
+        <LinearGradient
+          colors={gradients.profileGlow.colors}
+          end={{ x: 0.5, y: 1 }}
+          locations={gradients.profileGlow.locations}
+          start={{ x: 0.5, y: 0 }}
+          style={[StyleSheet.absoluteFill, styles.glow]}
+        />
+      </View>
 
       {/* A full-width slot rather than the disc positioning itself, so the centring comes from a
           flex container instead of from `alignSelf` on an absolutely positioned child. */}
@@ -86,18 +113,18 @@ const styles = StyleSheet.create({
   // Reserves the half of the disc that hangs below the band. This is what the overlap is made
   // of, so the disc needs no negative offset of its own.
   wrapper: { paddingBottom: AVATAR_SIZE / 2 + AVATAR_RING },
-  // Rounded on all four corners, so the band reads as one object rather than as a stripe that
-  // happens to be cut off at the top. The top pair is tighter than the bottom: those corners sit
-  // against the device's own rounding and a radius that competes with it looks like a mistake,
-  // while the bottom pair is the edge the disc straddles and carries the curve the eye reads.
+  // Clipped, so both gradient layers take the band's corners.
   panel: {
     height: PANEL_HEIGHT,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    borderBottomLeftRadius: radii.panel,
-    borderBottomRightRadius: radii.panel,
+    overflow: 'hidden',
     borderCurve: 'continuous',
+    ...PANEL_RADII,
   },
+  // Carries the corners itself as well as the parent's clip. An absolutely positioned child of a
+  // rounded, clipped View is the case Android is least reliable about clipping, and when it fails
+  // the layer paints square over the corners — which looks exactly like a radius that was never
+  // applied.
+  glow: PANEL_RADII,
   avatarSlot: {
     position: 'absolute',
     right: 0,

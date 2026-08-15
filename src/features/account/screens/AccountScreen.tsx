@@ -1,6 +1,6 @@
 import * as Application from 'expo-application';
-import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text } from 'react-native';
+import { useRef, useState } from 'react';
+import { Alert, Linking, StyleSheet, Text } from 'react-native';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
@@ -11,24 +11,21 @@ import { ProfileHeader } from '@/features/account/components/ProfileHeader';
 import {
   SettingsGroup,
   SettingsRow,
-  StatePill,
-  type StatePillTone,
 } from '@/features/account/components/SettingsList';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
+import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 import { colors, layout, motion, spacing, typography } from '@/theme/tokens';
 import {
   useTradingSession,
   type TradingSessionStatus,
 } from '@/wallet/trading/TradingSessionProvider';
 
-const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8_000;
-
-const PRIVACY_DISCLOSURE =
-  'Perpal never holds your signing keys or funds. Umbra can obscure the direct funding link, '
-  + 'while public Solana activity and the trading venue can still observe their respective '
-  + 'transactions and account activity.';
+/** Where support goes. Shown in full on the row, so nobody has to open a link to read it. */
+const SUPPORT_EMAIL = 'perpal.app@gmail.com';
+const X_HANDLE = '@PerpalApp';
+const X_URL = 'https://x.com/PerpalApp';
 
 /**
  * The private wallet's one action, per session state.
@@ -45,36 +42,26 @@ const PRIVATE_ACTIONS = {
 >;
 
 /**
- * Profile: who this device is, and the two wallets it holds.
+ * Profile: who this device is, the two wallets it holds, and how to reach us.
  *
- * A gradient panel at the top carrying the identity, and grouped settings surfaces below it. The
- * split is deliberate: the panel is the one place on the screen with any colour or curve to it,
- * and everything under it is a list, which is what a settings screen should read as.
+ * A gradient band at the top carrying the identity, and grouped settings surfaces below it. The
+ * split is deliberate: the band is the one place on the screen with any colour or curve to it, and
+ * everything under it is a list, which is what a settings screen should read as.
  *
  * Nothing here is placeholder. An earlier pass carried an experience counter and a level, both
  * derived from a store nothing wrote to, which meant a permanent row of zeroes dressed as
- * progress — the app has no learning modules, so it makes no claim about them. Every figure on
- * this screen comes from the wallet provisioning state, the trading session, or the build.
+ * progress. Every value on this screen comes from the wallet provisioning state, the trading
+ * session, or the build.
  */
 export function AccountScreen() {
   const auth = usePrivyAuth();
   const wallet = useWalletProvisioning();
   const session = useTradingSession();
+  const { showOnboardingIntro } = useAppPreferences();
+  const signOutInFlight = useRef(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [logoutRequested, setLogoutRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!logoutRequested || (auth.isReady && !auth.isAuthenticated)) return undefined;
-
-    const timer = setTimeout(() => {
-      setLogoutRequested(false);
-      setSigningOut(false);
-      setError('Sign out could not be confirmed. Try again.');
-    }, LOGOUT_CONFIRMATION_TIMEOUT_MS);
-
-    return () => clearTimeout(timer);
-  }, [auth.isAuthenticated, auth.isReady, logoutRequested]);
+  const version = Application.nativeApplicationVersion ?? 'Unavailable';
 
   const handlePrivateWallet = () => {
     switch (session.status) {
@@ -85,8 +72,8 @@ export function AccountScreen() {
         session.retryRestore();
         return;
       case 'ready':
-        // The preconditions are stated here, at the point of consent, rather than standing on
-        // the page: rotation is rare, and the row is not where that sentence earns its space.
+        // The preconditions are stated here, at the point of consent, rather than standing on the
+        // page: rotation is rare, and the row is not where that sentence earns its space.
         Alert.alert(
           'Rotate private wallet?',
           'Rotation proceeds only after balances, collateral, positions, orders, and pending '
@@ -102,27 +89,34 @@ export function AccountScreen() {
     }
   };
 
-  const handleSignOut = async () => {
-    setSigningOut(true);
-    setLogoutRequested(false);
-    setError(null);
+  const handleSignOut = () => {
+    if (signOutInFlight.current) return;
 
-    try {
-      await auth.logout();
-      setLogoutRequested(true);
-    } catch {
-      setSigningOut(false);
-      setError('Sign out could not be completed. Try again.');
-    }
+    signOutInFlight.current = true;
+    setSigningOut(true);
+    setError(null);
+    showOnboardingIntro();
+
+    void auth.logout()
+      .catch(() => setError('Sign out could not be completed. Try again.'))
+      .finally(() => {
+        signOutInFlight.current = false;
+        setSigningOut(false);
+      });
   };
 
   const publicFallback = publicWalletFallback(wallet.status);
-  const privateState = privateWalletState(session.status);
   const privateAction = readPrivateAction(session.status);
-  // A wallet still being derived has an address on its way, so its row shimmers. A wallet that
-  // is inactive or unrecoverable has none coming, and the state pill says so without a line of
-  // placeholder pretending otherwise.
+  // A wallet still being derived has an address on its way, so its row shimmers. A wallet that is
+  // inactive or unrecoverable has none coming, and the state on the right says so without a line
+  // of placeholder pretending otherwise.
   const privatePending = session.address === null && isDeriving(session.status);
+  // Only when something is off or in flight. A wallet that is simply working needs no word beside
+  // it — the address under the label is the proof, and a standing "Active" was one more thing to
+  // read on a screen that has nothing to report.
+  const privateState = session.status === 'ready'
+    ? undefined
+    : privateWalletState(session.status);
   const walletRetryable = wallet.status === 'error' || wallet.status === 'needs-recovery';
   const alerts = [
     session.recovery === null ? null : 'Private wallet recovery is required before trading.',
@@ -133,9 +127,9 @@ export function AccountScreen() {
   return (
     <AppScreen contentContainerStyle={styles.content}>
       {/* Every block carries the same layout spring, and it has to be every one of them:
-          Reanimated places a block further down at its final position on the frame after a
-          change, so animating only the one that resized leaves its neighbours snapping around
-          it. Shared physics for the same reason — two springs at different rates come apart. */}
+          Reanimated places a block further down at its final position on the frame after a change,
+          so animating only the one that resized leaves its neighbours snapping around it. Shared
+          physics for the same reason — two springs at different rates come apart. */}
       <RiseInView layout={layoutMorph()}>
         <ProfileHeader address={wallet.embeddedWalletAddress} />
       </RiseInView>
@@ -163,7 +157,9 @@ export function AccountScreen() {
             />
           ) : null}
           <SettingsRow
-            accessibilityLabel={`Private wallet, ${privateState.label}`}
+            accessibilityLabel={privateState === undefined
+              ? 'Private wallet'
+              : `Private wallet, ${privateState}`}
             icon="shield"
             label="Private wallet"
             subtitle={privatePending ? (
@@ -171,11 +167,13 @@ export function AccountScreen() {
             ) : session.address === null ? undefined : (
               <CopyableAddress
                 address={session.address}
-                fallback={privateState.label}
+                fallback={publicFallback}
                 subject="private wallet address"
               />
             )}
-            trailing={<StatePill label={privateState.label} tone={privateState.tone} />}
+            // Spread rather than passed directly: under `exactOptionalPropertyTypes` an optional
+            // prop will not accept an explicit `undefined`, and a working wallet has no state word.
+            {...(privateState === undefined ? {} : { value: privateState })}
           />
           {privateAction === null ? null : (
             <SettingsRow
@@ -189,34 +187,46 @@ export function AccountScreen() {
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.group}>
-        <SettingsGroup title="ACCOUNT">
+        <SettingsGroup title="SUPPORT">
+          {/* The address is printed on the row rather than hidden behind the label, so it can be
+              read and typed elsewhere when no mail client is set up on the device. */}
           <SettingsRow
-            accessibilityHint="Explains what Perpal, the trading venue, and public Solana activity can observe"
-            icon="lock"
-            label="Privacy and custody"
-            onPress={() => Alert.alert('Privacy and custody', PRIVACY_DISCLOSURE)}
+            accessibilityHint="Opens a new mail draft to Perpal support"
+            accessibilityLabel={`Email support at ${SUPPORT_EMAIL}`}
+            icon="mail"
+            label="Email support"
+            onPress={() => void openLink(mailtoUrl(version), 'Mail is unavailable on this device.')}
+            value={SUPPORT_EMAIL}
           />
           <SettingsRow
-            accessibilityHint="Ends the Privy session on this device"
-            icon="signOut"
-            iconTone="negative"
-            label={signingOut ? 'Signing out' : 'Sign out'}
-            onPress={signingOut ? null : () => void handleSignOut()}
-            tone="destructive"
+            accessibilityHint="Opens the Perpal account on X in your browser"
+            accessibilityLabel={`Perpal on X, ${X_HANDLE}`}
+            icon="x"
+            label="Perpal on X"
+            onPress={() => void openLink(X_URL, 'The link could not be opened.')}
+            value={X_HANDLE}
           />
         </SettingsGroup>
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger * 3} layout={layoutMorph()} style={styles.group}>
-        <SettingsGroup title="ABOUT">
-          {/* The build, where iOS keeps it: a row with the number on the right. It was a row
-              with the caption "Installed application version" under it, which is a sentence
-              explaining a version number. */}
+        <SettingsGroup title="ACCOUNT">
           <SettingsRow
-            icon="info"
-            label="Version"
-            value={Application.nativeApplicationVersion ?? 'Unavailable'}
+            accessibilityHint="Ends the Privy session on this device"
+            icon="signOut"
+            iconTone="negative"
+            label="Sign out"
+            loading={signingOut}
+            onPress={handleSignOut}
+            tone="destructive"
           />
+        </SettingsGroup>
+      </RiseInView>
+
+      <RiseInView delay={motion.rise.stagger * 4} layout={layoutMorph()} style={styles.group}>
+        <SettingsGroup title="ABOUT">
+          {/* The build, where iOS keeps it: a row with the number on the right. */}
+          <SettingsRow icon="info" label="Version" value={version} />
         </SettingsGroup>
       </RiseInView>
 
@@ -239,6 +249,32 @@ export function AccountScreen() {
   );
 }
 
+/**
+ * A support draft with the build already in its subject.
+ *
+ * Carried in the subject rather than asked for in the reply, because the version is the first
+ * thing any report needs and the reader should not have to go and find it. Encoded, since a
+ * subject travels in a query string and a bare space would truncate it on some clients.
+ */
+function mailtoUrl(version: string): string {
+  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`Perpal support (${version})`)}`;
+}
+
+/**
+ * Hands a URL to the platform, and says so plainly when nothing can take it.
+ *
+ * `openURL` rejects rather than returning false when there is no handler — a device with no mail
+ * client configured, most often — so a silent failure here would be a row that does nothing when
+ * pressed.
+ */
+async function openLink(url: string, unavailable: string): Promise<void> {
+  try {
+    await Linking.openURL(url);
+  } catch {
+    Alert.alert('Could not open', unavailable);
+  }
+}
+
 /** True while an address is genuinely on its way, which is the only state worth shimmering. */
 function isDeriving(status: TradingSessionStatus): boolean {
   return status === 'waiting-for-wallet'
@@ -254,29 +290,21 @@ function readPrivateAction(
     : null;
 }
 
-/**
- * The private wallet's state as one word.
- *
- * The word is the state; the tone only agrees with it. Violet for work in flight, green for a
- * usable wallet, red for something that needs attention, grey for a wallet that simply has not
- * been set up — which is not a fault and should not be coloured like one.
- */
-function privateWalletState(
-  status: TradingSessionStatus,
-): { readonly label: string; readonly tone: StatePillTone } {
+/** The private wallet's state as one word, for every state except a working one. */
+function privateWalletState(status: TradingSessionStatus): string {
   switch (status) {
-    case 'waiting-for-wallet': return { label: 'Waiting', tone: 'neutral' };
-    case 'restoring': return { label: 'Restoring', tone: 'accent' };
-    case 'inactive': return { label: 'Inactive', tone: 'neutral' };
-    case 'activating': return { label: 'Activating', tone: 'accent' };
-    case 'rotating': return { label: 'Checking', tone: 'accent' };
-    case 'ready': return { label: 'Active', tone: 'positive' };
-    case 'recovery-required': return { label: 'Recovery', tone: 'negative' };
-    case 'error': return { label: 'Unavailable', tone: 'negative' };
+    case 'waiting-for-wallet': return 'Waiting';
+    case 'restoring': return 'Restoring';
+    case 'inactive': return 'Inactive';
+    case 'activating': return 'Activating';
+    case 'rotating': return 'Checking';
+    case 'ready': return 'Active';
+    case 'recovery-required': return 'Recovery';
+    case 'error': return 'Unavailable';
   }
 }
 
-/** Stands in for the public address while there is none. A state, not a sentence. */
+/** Stands in for an address while there is none. A state, not a sentence. */
 function publicWalletFallback(
   status: ReturnType<typeof useWalletProvisioning>['status'],
 ): string {

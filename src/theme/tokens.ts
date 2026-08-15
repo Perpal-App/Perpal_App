@@ -20,9 +20,10 @@ export const colors = {
   accentSoft: '#C4B5FD',
   positive: POSITIVE,
   negative: NEGATIVE,
-  /** Rim shades for the order actions, one step under each gradient's base. */
+  /** Rim shades for the action materials, one step under each gradient's base. */
   longEdge: '#178F52',
   shortEdge: '#B03737',
+  accentEdge: '#6D28D9',
 
   /**
    * Fear and Greed bands, extreme fear through extreme greed.
@@ -183,6 +184,29 @@ export const gradients = {
     colors: ['#3E2C86', '#261B56', '#191138'],
     locations: [0, 0.55, 1],
   },
+  /**
+   * Glow rising from the bottom edge of the profile band, laid over the ramp above.
+   *
+   * A second layer rather than more stops on `profilePanel`, because the two do opposite things:
+   * that ramp darkens downward, and this lifts the last third of it back up. Folding both into one
+   * set of stops would mean a ramp that reverses on itself, which is impossible to reason about the
+   * next time either end needs adjusting.
+   *
+   * Transparent well past the midpoint so it never touches the top of the band, and built from the
+   * accent and its pastel rather than white — a white bloom on a violet surface desaturates as it
+   * brightens, and the glow would drift off the palette exactly where it is strongest.
+   *
+   * It also lights the edge the avatar straddles, which is the reason the disc reads as sitting in
+   * the band rather than in front of it.
+   */
+  profileGlow: {
+    colors: [
+      'rgba(139, 92, 246, 0)',
+      'rgba(139, 92, 246, 0.16)',
+      'rgba(167, 139, 250, 0.44)',
+    ],
+    locations: [0, 0.6, 1],
+  },
   onboardingCoolEdge: {
     colors: [
       'rgba(74, 72, 204, 0.62)',
@@ -221,6 +245,16 @@ export const gradients = {
   },
   shortAction: {
     colors: ['#F58585', '#D64545'],
+    locations: [0, 1],
+  },
+  /**
+   * The same material in the accent, for a control that is neither a buy nor a sell — a settings
+   * glyph's tile. Built to the order buttons' recipe rather than a flat fill of `accent`, so
+   * every raised control in the app catches light the same way, and paired with `accentEdge`
+   * below, which darkens its rim on all four sides.
+   */
+  accentAction: {
+    colors: ['#A78BFA', '#7C3AED'],
     locations: [0, 1],
   },
   /**

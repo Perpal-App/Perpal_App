@@ -1,4 +1,3 @@
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from 'expo-router';
 import {
   useCallback,
@@ -9,39 +8,50 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
+import { EmptyHistoryMark } from '@/assets/svg/EmptyHistoryMark';
+import { layoutMorph } from '@/components/motion/layoutMorph';
 import { PressableScale } from '@/components/ui/PressableScale';
+import {
+  ActivityFilters,
+  activityFilterLabel,
+  type ActivityFilter,
+} from '@/features/portfolio/components/ActivityFilters';
+import { ActivityRow } from '@/features/portfolio/components/ActivityRow';
+import {
+  matchesActivityQuery,
+  mergeActivity,
+} from '@/features/portfolio/components/activityItems';
 import {
   fetchPacificaActivity,
   type PacificaActivity,
-  type PacificaBalanceActivity,
-  type PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
 import {
   readInAppNotifications,
   subscribeInAppNotifications,
-  type InAppNotification,
 } from '@/storage/inAppNotifications';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 const REFRESH_INTERVAL_MS = 15_000;
-const MAX_VISIBLE_ITEMS = 40;
-
-type ActivityItem = {
-  readonly createdAtMs: number;
-  readonly detail: string;
-  readonly id: string;
-  readonly kind: 'trade' | 'funding' | 'withdrawal';
-  readonly outcome: 'success' | 'error' | 'info';
-  readonly title: string;
-  readonly value: string | null;
-};
 
 type RemoteState = {
   readonly data: PacificaActivity | null;
-  readonly status: 'loading' | 'ready' | 'stale' | 'error';
+  readonly status: 'error' | 'loading' | 'ready' | 'stale';
 };
 
+/**
+ * The account's history: trades from the venue, fund movements from the venue and from this device.
+ *
+ * Search and filters appear only once there is history to search. Handing a reader a filter strip
+ * and an empty box above an empty list is three controls that can only produce the state they are
+ * already looking at — so before the first event the section is just the illustration and a line
+ * saying what will land here.
+ *
+ * Two distinct empty states, and the difference matters: nothing yet gets the drawing, because it is
+ * a resting state and worth making pleasant, while nothing *matching* gets one line of text, because
+ * the reader is mid-task and an illustration would be in the way of narrowing the query.
+ */
 export function GlobalActivityTracker({
   account,
   apiOrigin,
@@ -55,19 +65,28 @@ export function GlobalActivityTracker({
     readInAppNotifications,
     readInAppNotifications,
   );
+  const [filter, setFilter] = useState<ActivityFilter>('all');
+  const [query, setQuery] = useState('');
+
   const items = useMemo(
     () => mergeActivity(remote.state.data, local),
     [local, remote.state.data],
   );
+  const visible = useMemo(
+    () => items.filter((item) => (
+      (filter === 'all' || item.kind === filter) && matchesActivityQuery(item, query)
+    )),
+    [filter, items, query],
+  );
+
   const remoteUnavailable = remote.state.status === 'error' || remote.state.status === 'stale';
+  const loading = remote.state.status === 'loading' && items.length === 0;
+  const narrowed = filter !== 'all' || query.trim().length > 0;
 
   return (
     <View style={styles.section}>
       <View style={styles.header}>
-        <View style={styles.headerCopy}>
-          <Text accessibilityRole="header" style={styles.heading}>Activity</Text>
-          <Text selectable style={styles.caption}>Trades and fund movements</Text>
-        </View>
+        <Text accessibilityRole="header" style={styles.heading}>Activity</Text>
         {remoteUnavailable ? (
           <PressableScale
             accessibilityLabel="Retry activity"
@@ -80,74 +99,78 @@ export function GlobalActivityTracker({
         ) : null}
       </View>
 
-      {remote.state.status === 'loading' && items.length === 0 ? (
-        <Text accessibilityLiveRegion="polite" style={styles.empty}>Loading activity…</Text>
-      ) : null}
+      {/* Always mounted, including on an empty history. Gating them on there being something to
+          search meant the controls appeared and disappeared as the first event landed, and a reader
+          could not see what the section is capable of until it already had contents. */}
+      <ActivityFilters
+        filter={filter}
+        onFilterChange={setFilter}
+        onQueryChange={setQuery}
+        query={query}
+      />
 
       {remoteUnavailable ? (
         <Text accessibilityRole="alert" selectable style={styles.error}>
-          Trade history is temporarily unavailable. Confirmed private fund events on this device remain visible.
+          Trade history is temporarily unavailable. Confirmed private fund events on this device
+          remain visible.
         </Text>
       ) : null}
 
-      {remote.state.status !== 'loading' && items.length === 0 ? (
-        <Text selectable style={styles.empty}>
-          No activity yet. Completed trades and fund movements will appear here.
-        </Text>
-      ) : null}
+      {/* The list resizes on every filter press and every keystroke, so it carries the app's layout
+          spring — and so does the section, because a box that grows while its neighbours snap around
+          it is worse than no animation at all. */}
+      <Animated.View layout={layoutMorph()} style={styles.list}>
+        {loading ? (
+          <Text accessibilityLiveRegion="polite" style={styles.status}>Loading activity…</Text>
+        ) : items.length === 0 ? (
+          <EmptyHistory />
+        ) : visible.length === 0 ? (
+          <Text accessibilityLiveRegion="polite" style={styles.status}>
+            {query.trim().length > 0
+              ? `No activity matches “${query.trim()}”.`
+              : 'No activity of this kind yet.'}
+          </Text>
+        ) : (
+          visible.map((item, index) => (
+            <ActivityRow item={item} key={item.id} last={index === visible.length - 1} />
+          ))
+        )}
+      </Animated.View>
 
-      {items.length > 0 ? (
-        <View style={styles.list}>
-          {items.map((item, index) => (
-            <ActivityRow
-              item={item}
-              key={item.id}
-              last={index === items.length - 1}
-            />
-          ))}
-        </View>
+      {/* Says what the list is showing without making the reader count rows, and names the filter —
+          which is the one thing lost by moving the options behind a button. Only once something is
+          actually narrowing, so a full history carries no tally. */}
+      {narrowed && visible.length > 0 ? (
+        <Text accessibilityLiveRegion="polite" style={styles.count}>
+          {filter === 'all'
+            ? `${visible.length} of ${items.length} events`
+            : `${activityFilterLabel(filter)} · ${visible.length} of ${items.length} events`}
+        </Text>
       ) : null}
     </View>
   );
 }
 
-function ActivityRow({ item, last }: {
-  readonly item: ActivityItem;
-  readonly last: boolean;
-}) {
-  const color = item.outcome === 'error'
-    ? colors.negative
-    : item.value?.startsWith('+$')
-      ? colors.positive
-      : item.value?.startsWith('-$')
-        ? colors.negative
-        : colors.textPrimary;
-
+/**
+ * The history before anything has happened.
+ *
+ * The illustration is hidden from assistive tech — it carries nothing the heading beneath it does not
+ * already state, so announcing it would only add noise.
+ */
+function EmptyHistory() {
   return (
-    <View style={[styles.row, last && styles.rowLast]}>
-      <View accessibilityElementsHidden style={styles.icon}>
-        <MaterialCommunityIcons
-          color={item.outcome === 'error' ? colors.negative : colors.textSecondary}
-          name={item.outcome === 'error'
-            ? 'alert-circle-outline'
-            : item.kind === 'trade'
-              ? 'chart-line'
-              : item.kind === 'funding'
-                ? 'arrow-down'
-                : 'arrow-up'}
-          size={20}
-        />
+    <View style={styles.empty}>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        pointerEvents="none"
+      >
+        <EmptyHistoryMark />
       </View>
-      <View style={styles.body}>
-        <View style={styles.rowTop}>
-          <Text numberOfLines={1} style={styles.title}>{item.title}</Text>
-          {item.value === null ? null : (
-            <Text selectable style={[styles.value, { color }]}>{item.value}</Text>
-          )}
-        </View>
-        <Text numberOfLines={2} selectable style={styles.detail}>{item.detail}</Text>
-        <Text selectable style={styles.time}>{formatTime(item.createdAtMs)}</Text>
-      </View>
+      <Text accessibilityRole="header" style={styles.emptyTitle}>No activity yet</Text>
+      <Text style={styles.emptyMessage}>
+        Completed trades, deposits, and withdrawals will appear here as they happen.
+      </Text>
     </View>
   );
 }
@@ -207,133 +230,19 @@ function usePacificaActivity(apiOrigin: string, account: string) {
   };
 }
 
-function mergeActivity(
-  remote: PacificaActivity | null,
-  local: readonly InAppNotification[],
-): readonly ActivityItem[] {
-  const items: ActivityItem[] = [
-    ...(remote?.trades.map(tradeItem) ?? []),
-    ...(remote?.balances.filter(isFundMovement).map(balanceItem) ?? []),
-    ...local.filter((item) => item.kind === 'funding' || item.kind === 'withdrawal').map(localItem),
-  ];
-
-  return items
-    .sort((left, right) => right.createdAtMs - left.createdAtMs || left.id.localeCompare(right.id))
-    .slice(0, MAX_VISIBLE_ITEMS);
-}
-
-function tradeItem(trade: PacificaTradeActivity): ActivityItem {
-  const direction = trade.side.endsWith('long') ? 'long' : 'short';
-  const opening = trade.side.startsWith('open');
-  const title = trade.cause === 'market_liquidation'
-    ? `${trade.symbol} liquidated`
-    : trade.cause === 'backstop_liquidation'
-      ? `${trade.symbol} backstop liquidation`
-      : trade.cause === 'settlement'
-        ? `${trade.symbol} settled`
-        : `${opening ? 'Opened' : 'Closed'} ${trade.symbol} ${direction}`;
-
-  return {
-    createdAtMs: trade.createdAtMs,
-    detail: `${trimDecimal(trade.amount)} ${trade.symbol} at ${usd(trade.price)} · Fee ${usd(trade.fee)}`,
-    id: `trade:${trade.historyId}`,
-    kind: 'trade',
-    outcome: trade.cause === 'normal' ? 'success' : 'info',
-    title,
-    value: opening ? null : signedUsd(trade.pnl),
-  };
-}
-
-function balanceItem(item: PacificaBalanceActivity): ActivityItem {
-  const kind = item.eventType === 'withdraw' ? 'withdrawal' : 'funding';
-  return {
-    createdAtMs: item.createdAtMs,
-    detail: `Private trading balance ${usd(item.balance)}`,
-    id: `balance:${item.createdAtMs}:${item.eventType}:${item.amount}:${item.balance}`,
-    kind,
-    outcome: 'success',
-    title: balanceTitle(item.eventType),
-    value: signedUsd(item.amount),
-  };
-}
-
-function localItem(item: InAppNotification): ActivityItem {
-  return {
-    createdAtMs: item.createdAtMs,
-    detail: item.message,
-    id: `local:${item.id}`,
-    kind: item.kind === 'withdrawal' ? 'withdrawal' : 'funding',
-    outcome: item.outcome,
-    title: item.title,
-    value: null,
-  };
-}
-
-function isFundMovement(item: PacificaBalanceActivity): boolean {
-  return !['trade', 'market_liquidation', 'backstop_liquidation', 'adl_liquidation']
-    .includes(item.eventType);
-}
-
-function balanceTitle(eventType: string): string {
-  switch (eventType) {
-    case 'deposit': return 'Trading funds deposited';
-    case 'deposit_release': return 'Deposit available';
-    case 'withdraw': return 'Trading funds withdrawn';
-    case 'funding': return 'Funding payment';
-    case 'payout': return 'Account payout';
-    case 'subaccount_transfer': return 'Balance transferred';
-    default: return eventType.split('_').map(capitalize).join(' ');
-  }
-}
-
-function capitalize(value: string): string {
-  return value.length === 0 ? value : `${value[0]?.toUpperCase()}${value.slice(1)}`;
-}
-
-function signedUsd(value: string): string {
-  if (/^-?0+(?:\.0+)?$/u.test(value)) return '$0';
-  return value.startsWith('-') ? `-${usd(value.slice(1))}` : `+${usd(value)}`;
-}
-
-function usd(value: string): string {
-  return `$${trimDecimal(value)}`;
-}
-
-function trimDecimal(value: string): string {
-  const [whole = '0', fraction = ''] = value.split('.');
-  const negative = whole.startsWith('-');
-  const digits = negative ? whole.slice(1) : whole;
-  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
-  const visibleFraction = fraction.replace(/0+$/u, '');
-  const body = visibleFraction.length === 0 ? grouped : `${grouped}.${visibleFraction}`;
-  return negative ? `-${body}` : body;
-}
-
-function formatTime(timeMs: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    month: 'short',
-  }).format(new Date(timeMs));
-}
-
 const styles = StyleSheet.create({
-  section: {
-    gap: spacing.md,
-    paddingTop: spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
+  // No top rule. The screen separates its blocks with its own gap, and a hairline above every section
+  // drew a line across a page that already has a card edge every few points.
+  section: { gap: spacing.sm },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
   },
-  headerCopy: { flex: 1, gap: spacing.xxs },
-  heading: { ...typography.heading, color: colors.textPrimary },
-  caption: { ...typography.caption, color: colors.textSecondary },
+  // `label`, matching the other section headings on this screen rather than the larger `heading` it
+  // used: one screen, one level of section title.
+  heading: { ...typography.label, flex: 1, color: colors.textPrimary },
   retry: {
     minWidth: 52,
     minHeight: 36,
@@ -343,33 +252,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
   retryText: { ...typography.label, color: colors.accentSoft },
-  empty: { ...typography.bodyCompact, color: colors.textSecondary, paddingVertical: spacing.md },
+  // Clipped, and that is what makes the morph read as a shape rather than a slide: the rows are laid
+  // out at their final size the instant a filter changes while the box is still travelling to meet
+  // them, so the overflow would otherwise spill past it for the length of the spring.
+  list: { overflow: 'hidden', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  status: { ...typography.bodyCompact, paddingVertical: spacing.md, color: colors.textSecondary },
   error: { ...typography.caption, color: colors.negative },
-  list: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+  count: { ...typography.caption, color: colors.textMuted },
+  empty: { alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xl },
+  emptyTitle: { ...typography.label, marginTop: spacing.xs, color: colors.textPrimary },
+  emptyMessage: {
+    ...typography.caption,
+    maxWidth: 260,
+    color: colors.textMuted,
+    textAlign: 'center',
   },
-  rowLast: { borderBottomWidth: 0 },
-  icon: {
-    width: 38,
-    height: 38,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceElevated,
-  },
-  body: { flex: 1, minWidth: 0, gap: 2 },
-  rowTop: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm },
-  title: { ...typography.label, flex: 1, color: colors.textPrimary },
-  value: { ...typography.label, fontVariant: ['tabular-nums'] },
-  detail: { ...typography.caption, color: colors.textSecondary },
-  time: { ...typography.caption, color: colors.textMuted },
 });
