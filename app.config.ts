@@ -56,13 +56,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Perpal',
   slug: 'perpal',
+  owner: 'perpal',
   version: '0.1.0',
   scheme: URL_SCHEME,
   orientation: 'default',
   userInterfaceStyle: 'dark',
   // New architecture is always enabled on SDK 57; the config key no longer exists.
   icon: './assets/icon.png',
-  assetBundlePatterns: ['**/*'],
   ios: {
     bundleIdentifier: IOS_BUNDLE_IDENTIFIER,
     supportsTablet: false,
@@ -77,6 +77,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       foregroundImage: './assets/adaptive-icon-foreground.png',
       backgroundColor: BACKGROUND,
     },
+  },
+  updates: {
+    url: 'https://u.expo.dev/0eadd12d-2151-4907-931e-774656309e72',
+  },
+  runtimeVersion: {
+    policy: 'fingerprint',
   },
   plugins: [
     'expo-router',
@@ -121,5 +127,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   experiments: {
     typedRoutes: true,
     reactCompiler: false,
+  },
+  extra: {
+    eas: {
+      projectId: '0eadd12d-2151-4907-931e-774656309e72',
+    },
   },
 });
