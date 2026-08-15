@@ -62,8 +62,17 @@ const snap = (point) => {
   );
   return { logical: point.logical, price: nearest };
 };
+/**
+ * The host's box, captured once when a drawing gesture starts.
+ *
+ * \`getBoundingClientRect\` forces the browser to settle pending layout, and calling it for every
+ * touchmove meant a synchronous layout read on every frame of every drag. The box cannot move
+ * while a finger is down, so reading it once per gesture is both cheaper and no less correct.
+ */
+let dragRect = null;
+
 const toPoint = (touch) => {
-  const rect = host.getBoundingClientRect();
+  const rect = dragRect || host.getBoundingClientRect();
   const logical = chart.timeScale().coordinateToLogical(touch.clientX - rect.left);
   const price = candles.coordinateToPrice(touch.clientY - rect.top);
   return logical === null || price === null ? null : snap({ logical: logical, price: price });
@@ -297,15 +306,69 @@ function render() {
   for (const shape of shapes) drawShape(shape, false);
   if (pending !== null) drawShape(pending, true);
 }
-// Price-scale changes emit no event, so a populated overlay repaints per frame
-// to stay glued to the axes. The loop stops when there is nothing to draw.
-const loop = () => {
-  render();
-  frame = shapes.length > 0 || pending !== null ? requestAnimationFrame(loop) : null;
+/**
+ * A fingerprint of the mapping from data to pixels: the prices at the top and bottom of the
+ * viewport, the visible logical range, and the canvas size. If none of those moved, every shape
+ * would redraw to exactly the same pixels.
+ *
+ * This exists because the price scale emits no change event, so there is no way to be told that a
+ * shape needs repainting — the only options are to poll or to be wrong. Polling a six-number
+ * comparison is orders of magnitude cheaper than clearing the canvas and re-projecting every
+ * anchor, which is what the previous version did unconditionally.
+ */
+const projection = () => {
+  const range = chart.timeScale().getVisibleLogicalRange();
+  return [
+    candles.coordinateToPrice(0),
+    candles.coordinateToPrice(host.clientHeight),
+    range === null ? 0 : range.from,
+    range === null ? 0 : range.to,
+    host.clientWidth,
+    host.clientHeight,
+  ].join(',');
 };
+
+/**
+ * Frames of stillness before the watcher stops. Half a second at 60Hz — long enough to cover an
+ * autoscale settling after the last gesture event, short enough that an idle chart costs nothing.
+ */
+const IDLE_FRAMES = 30;
+let signature = '';
+let idle = 0;
+
+/**
+ * Watches for the projection moving under the shapes, and stops once it has been still.
+ *
+ * The previous loop was the single worst thing on this screen: it re-entered
+ * \`requestAnimationFrame\` for as long as a single shape existed, so drawing one trend line put
+ * the WebView into a permanent 60fps clear-and-repaint of the whole canvas — for the life of the
+ * screen, whether or not anything had changed. That is the jitter and the battery drain.
+ */
+const step = () => {
+  const next = projection();
+
+  if (next !== signature) {
+    signature = next;
+    idle = 0;
+    render();
+  } else if (pending === null && gesture === null) {
+    idle += 1;
+  }
+
+  frame = idle < IDLE_FRAMES && (shapes.length > 0 || pending !== null)
+    ? requestAnimationFrame(step)
+    : null;
+};
+
+/** Paints now, and puts the watcher back to work if there is anything left for it to watch. */
 const wake = () => {
-  if (frame === null && (shapes.length > 0 || pending !== null)) frame = requestAnimationFrame(loop);
-  else render();
+  idle = 0;
+  signature = projection();
+  render();
+
+  if (frame === null && (shapes.length > 0 || pending !== null)) {
+    frame = requestAnimationFrame(step);
+  }
 };
 const syncOverlay = () => {
   overlay.style.pointerEvents = tool === 'none' ? 'none' : 'auto';
@@ -322,6 +385,7 @@ const finish = () => {
 
 overlay.addEventListener('touchstart', (event) => {
   if (tool === 'none' || event.touches.length !== 1) return;
+  dragRect = host.getBoundingClientRect();
   const point = toPoint(event.touches[0]);
   if (point === null) return;
   const needed = TOOL_ANCHORS[tool] || 0;
@@ -340,15 +404,26 @@ overlay.addEventListener('touchmove', (event) => {
   if (point === null) return;
   if (pending.kind === 'brush') pending.points.push(point);
   else pending.points[pending.points.length - 1] = point;
+  // Paints on the same frame as the move. The watcher only notices the projection changing, and
+  // dragging an anchor does not move it — the shape has to ask for this one itself.
+  wake();
   event.preventDefault();
 }, { passive: false });
 
 overlay.addEventListener('touchend', (event) => {
+  dragRect = null;
   if (pending === null) return;
   const needed = TOOL_ANCHORS[pending.kind] || 0;
   if (needed === 0 || pending.points.length >= needed) finish();
   event.preventDefault();
 }, { passive: false });
+
+overlay.addEventListener('touchcancel', () => {
+  // A cancelled touch must not leave a half-built shape armed, or the next tap continues it.
+  dragRect = null;
+  pending = null;
+  wake();
+});
 
 /** Returns true when the message belonged to the drawing layer. */
 function handleDrawingMessage(message) {
@@ -378,7 +453,7 @@ function handleDrawingMessage(message) {
   return false;
 }
 
-new ResizeObserver(() => { sizeOverlay(); render(); }).observe(host);
+new ResizeObserver(() => { sizeOverlay(); wake(); }).observe(host);
 sizeOverlay();
 window.addEventListener('message', receive);
 document.addEventListener('message', receive);

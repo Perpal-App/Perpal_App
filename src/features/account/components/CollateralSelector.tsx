@@ -53,7 +53,7 @@ export function CollateralSelector({
                   <Text style={styles.detail}>
                     {option.symbol === 'USDT'
                       ? 'Held in T; converts to USDC only when a trade needs it'
-                      : 'Held in private wallet T and accepted by Pacifica'}
+                      : 'Held in private wallet T and ready for trading'}
                   </Text>
                 </View>
                 <Text style={styles.state}>{selected ? 'Selected' : ''}</Text>

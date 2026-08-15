@@ -9,7 +9,6 @@ import {
 import {
   CHART_TOOL_GROUPS,
   chartToolGroupId,
-  chartToolLabel,
   type ChartTool,
 } from '@/features/trade/components/chartTools';
 import { TRADING_VIEW_CHART_HTML } from '@/features/trade/generated/tradingViewChartHtml';
@@ -259,11 +258,6 @@ export function TradingViewMarketChart({
         </View>
       </View>
 
-      <Text style={styles.hint}>
-        {tool === 'none'
-          ? 'Drag to pan · pinch to zoom · drag either axis to stretch it'
-          : `${chartToolLabel(tool)}: drag to place it${magnet ? ', snapping to candles' : ''}`}
-      </Text>
     </View>
   );
 }
@@ -418,6 +412,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     backgroundColor: colors.surfaceElevated,
   },
-  hint: { ...typography.caption, color: colors.textMuted },
   pressed: { opacity: 0.72 },
 });

@@ -1,43 +1,32 @@
-import { useEffect, useState } from 'react';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import * as Application from 'expo-application';
+import * as Clipboard from 'expo-clipboard';
+import { useEffect, useState, type ComponentProps, type ReactNode } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
-import { Button } from '@/components/ui/Button';
-import { StatusRow } from '@/components/ui/StatusRow';
-import { amountFromBaseUnits, formatAmount } from '@/domain/money/amount';
-import { PrivateFundingPanel } from '@/features/account/components/PrivateFundingPanel';
-import { useWalletBalances } from '@/features/account/hooks/useWalletBalances';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
-import { usePrivateFunding } from '@/integrations/umbra/PrivateFundingProvider';
-import type { PrivateFundingRecord } from '@/integrations/umbra/umbraSecureStorage';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
-import { colors, layout, spacing, typography } from '@/theme/tokens';
-import {
-  useTradingSession,
-  type TradingSessionStatus,
-} from '@/wallet/trading/TradingSessionProvider';
+import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 const LOGOUT_CONFIRMATION_TIMEOUT_MS = 8000;
+
+type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 export function AccountScreen() {
   const auth = usePrivyAuth();
   const walletProvisioning = useWalletProvisioning();
   const tradingSession = useTradingSession();
-  const funding = usePrivateFunding();
-  const walletBalances = useWalletBalances({
-    privateAddress: tradingSession.address,
-    publicAddress: walletProvisioning.embeddedWalletAddress,
-    signer: tradingSession.signer,
-  });
+  const [addressCopied, setAddressCopied] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [logoutRequested, setLogoutRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!logoutRequested || (auth.isReady && !auth.isAuthenticated)) {
-      return;
-    }
+    if (!logoutRequested || (auth.isReady && !auth.isAuthenticated)) return;
 
     const timer = setTimeout(() => {
       setLogoutRequested(false);
@@ -47,6 +36,42 @@ export function AccountScreen() {
 
     return () => clearTimeout(timer);
   }, [auth.isAuthenticated, auth.isReady, logoutRequested]);
+
+  const copyAddress = async () => {
+    const address = walletProvisioning.embeddedWalletAddress;
+    if (!address) return;
+
+    try {
+      await Clipboard.setStringAsync(address);
+      setAddressCopied(true);
+      setError(null);
+    } catch {
+      setError('The wallet address could not be copied. Please try again.');
+    }
+  };
+
+  const handlePrivateWallet = () => {
+    switch (tradingSession.status) {
+      case 'inactive':
+        void tradingSession.activate();
+        return;
+      case 'error':
+        tradingSession.retryRestore();
+        return;
+      case 'ready':
+        Alert.alert(
+          'Rotate private wallet?',
+          'Rotation proceeds only after balances, collateral, positions, orders, and pending private operations are confirmed empty.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Verify and rotate',
+              onPress: () => void tradingSession.rotate(),
+            },
+          ],
+        );
+    }
+  };
 
   const handleSignOut = async () => {
     setSigningOut(true);
@@ -62,183 +87,203 @@ export function AccountScreen() {
     }
   };
 
+  const privateWalletActionable =
+    tradingSession.status === 'inactive' ||
+    tradingSession.status === 'error' ||
+    tradingSession.status === 'ready';
+  const address = walletProvisioning.embeddedWalletAddress;
+
   return (
     <AppScreen>
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text accessibilityRole="header" style={styles.title}>
-            Wallet
-          </Text>
-          <Text style={styles.subtitle}>Fund and manage private trading</Text>
-        </View>
+        <Text accessibilityRole="header" style={styles.title}>
+          Profile
+        </Text>
 
-        <View style={styles.body}>
-          <View style={styles.section}>
-            <Text accessibilityRole="header" style={styles.walletTitle}>
-              Public wallet (M)
-            </Text>
-            {walletProvisioning.embeddedWalletAddress ? (
-              <StatusRow
-                label="Address"
-                selectable
-                value={walletProvisioning.embeddedWalletAddress}
-              />
-            ) : (
-              <Text accessibilityLiveRegion="polite" style={styles.walletStatus}>
-                {walletProvisioningLabel(walletProvisioning.status)}
-              </Text>
-            )}
-            {walletProvisioning.status === 'error' ? (
-              <Text accessibilityRole="alert" style={styles.error}>
-                Your Privy wallet could not be restored. Confirm you used the
-                same login, then retry.
-              </Text>
-            ) : null}
-            {walletProvisioning.status === 'error' ||
-            walletProvisioning.status === 'needs-recovery' ? (
-              <Button
-                label={walletProvisioning.status === 'needs-recovery'
-                  ? 'Retry wallet restore'
-                  : 'Retry Privy wallet'}
-                loading={walletProvisioning.isProvisioning}
-                onPress={() => void walletProvisioning.retry()}
-                variant="secondary"
-              />
-            ) : null}
-          </View>
-
-          <View style={styles.section}>
-            <Text accessibilityRole="header" style={styles.walletTitle}>
-              Private trading wallet (T)
-            </Text>
-            <Text style={styles.walletStatus}>
-              {tradingSessionMessage(tradingSession.status)}
-            </Text>
-            {tradingSession.address ? (
-              <StatusRow label="T address" selectable value={tradingSession.address} />
-            ) : null}
-            {tradingSession.recovery ? (
-              <View style={styles.notice}>
-                <StatusRow
-                  label="Recorded wallet"
-                  selectable
-                  value={tradingSession.recovery.recorded.address}
-                />
-                <StatusRow
-                  label="Recovered wallet"
-                  selectable
-                  value={tradingSession.recovery.derived.address}
-                />
-                <Text accessibilityRole="alert" style={styles.walletStatus}>
-                  Trading remains blocked until this identity mismatch is
-                  resolved safely.
-                </Text>
-              </View>
-            ) : null}
-            {tradingSession.error ? (
-              <Text accessibilityRole="alert" style={styles.error}>
-                {tradingSession.error}
-              </Text>
-            ) : null}
-            {tradingSession.status === 'inactive' ? (
-              <Button
-                label="Activate private trading"
-                onPress={() => void tradingSession.activate()}
-              />
-            ) : tradingSession.status === 'activating' ? (
-              <Button
-                label="Activating private trading"
-                loading
-                onPress={() => undefined}
-              />
-            ) : tradingSession.status === 'error' ? (
-              <Button
-                label="Retry secure restore"
-                onPress={tradingSession.retryRestore}
-                variant="secondary"
-              />
-            ) : tradingSession.status === 'rotating' ? (
-              <Button label="Verifying zero balances" loading onPress={() => undefined} />
-            ) : null}
-          </View>
-
-          {tradingSession.status === 'ready' ? (
-            <View style={styles.section}>
-              <Text accessibilityRole="header" style={styles.walletTitle}>
-                Funds location
-              </Text>
-              <StatusRow
-                label="Private funding"
-                value={privateFundingLocation(funding.record)}
-              />
-              {walletBalances.balances ? (
-                <>
-                  <StatusRow
-                    label="Public M"
-                    value={stablecoinBalances(walletBalances.balances.publicWallet)}
-                  />
-                  <StatusRow
-                    label="M fee balance"
-                    value={solBalance(walletBalances.balances.publicWallet.solLamports)}
-                  />
-                  <StatusRow
-                    label="Private T"
-                    value={stablecoinBalances(walletBalances.balances.privateWallet)}
-                  />
-                  <StatusRow
-                    label="T fee balance"
-                    value={solBalance(walletBalances.balances.privateWallet.solLamports)}
-                  />
-                </>
-              ) : (
-                <Text accessibilityLiveRegion="polite" style={styles.walletStatus}>
-                  {walletBalances.status === 'error'
-                    ? 'Balances unavailable. Retrying.'
-                    : 'Loading wallet balances.'}
-                </Text>
-              )}
-              <Text style={styles.walletStatus}>
-                Venue collateral appears in Portfolio only while allocated to a trade.
-              </Text>
-            </View>
-          ) : null}
-
-          {tradingSession.status === 'ready' ? (
-            <PrivateFundingPanel tradingReady />
-          ) : null}
-        </View>
-
-        <View style={styles.footer}>
-          {error ? (
-            <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.error}>
-              {error}
-            </Text>
-          ) : null}
-          {tradingSession.status === 'ready' ? (
-            <Button
-              label="Rotate private wallet"
-              onPress={() => Alert.alert(
-                'Rotate private wallet?',
-                'Rotation is allowed only after every balance, position, order, and pending private transfer is empty.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Verify and rotate', onPress: () => void tradingSession.rotate() },
-                ],
-              )}
-              variant="secondary"
+        <View style={styles.identity}>
+          <View accessibilityElementsHidden style={styles.avatar}>
+            <MaterialCommunityIcons
+              color={colors.accentSoft}
+              name="account-outline"
+              size={30}
             />
+          </View>
+          <View style={styles.identityCopy}>
+            <Text style={styles.identityLabel}>Public wallet</Text>
+            <Text
+              accessibilityLabel={address ?? walletProvisioningLabel(walletProvisioning.status)}
+              numberOfLines={1}
+              selectable={address !== null}
+              style={styles.address}
+            >
+              {address ? shortenAddress(address) : walletProvisioningLabel(walletProvisioning.status)}
+            </Text>
+          </View>
+          {address ? (
+            <PressableScale
+              accessibilityLabel={addressCopied ? 'Wallet address copied' : 'Copy wallet address'}
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => void copyAddress()}
+              style={styles.copyButton}
+            >
+              <MaterialCommunityIcons
+                color={addressCopied ? colors.positive : colors.textSecondary}
+                name={addressCopied ? 'check' : 'content-copy'}
+                size={20}
+              />
+            </PressableScale>
           ) : null}
-          <Button
-            disabled={signingOut}
-            label="Sign out"
-            loading={signingOut}
-            onPress={() => void handleSignOut()}
-            variant="secondary"
-          />
         </View>
+
+        {walletProvisioning.status === 'error' ||
+        walletProvisioning.status === 'needs-recovery' ? (
+          <ProfileGroup title="Wallet recovery">
+            <ProfileRow
+              detail="Reconnect the same Privy identity used on this device."
+              icon="wallet-outline"
+              onPress={() => void walletProvisioning.retry()}
+              title={walletProvisioning.isProvisioning ? 'Restoring wallet' : 'Retry wallet restore'}
+              trailing={walletProvisioning.isProvisioning ? 'Working' : null}
+            />
+          </ProfileGroup>
+        ) : null}
+
+        <ProfileGroup title="Settings">
+          <ProfileRow
+            detail={privateWalletDescription(tradingSession.status)}
+            icon="shield-key-outline"
+            onPress={privateWalletActionable ? handlePrivateWallet : null}
+            title={privateWalletTitle(tradingSession.status)}
+            trailing={privateWalletSettingLabel(tradingSession.status)}
+          />
+          <ProfileRow
+            detail="Lessons, quests, and earned progress will appear after the learning modules are built."
+            divided
+            icon="book-open-page-variant-outline"
+            onPress={null}
+            title="Learning and XP"
+            trailing="Planned"
+          />
+          <ProfileRow
+            detail="See what Perpal, the trading venue, and public Solana activity can observe."
+            divided
+            icon="shield-lock-outline"
+            onPress={() => Alert.alert(
+              'Privacy and custody',
+              'Perpal never holds your signing keys or funds. Umbra can obscure the direct funding link, while public Solana activity and the trading venue can still observe their respective transactions and account activity.',
+            )}
+            title="Privacy and custody"
+            trailing={null}
+          />
+          <ProfileRow
+            detail="Installed application version"
+            divided
+            icon="information-outline"
+            onPress={null}
+            title="App version"
+            trailing={Application.nativeApplicationVersion ?? 'Unavailable'}
+          />
+        </ProfileGroup>
+
+        <ProfileGroup title="Account">
+          <ProfileRow
+            destructive
+            detail="End the current Privy session on this device."
+            icon="logout-variant"
+            onPress={signingOut ? null : () => void handleSignOut()}
+            title={signingOut ? 'Signing out' : 'Sign out'}
+            trailing={null}
+          />
+        </ProfileGroup>
+
+        {tradingSession.recovery ? (
+          <Text accessibilityRole="alert" selectable style={styles.error}>
+            Private wallet recovery needs attention before trading can resume.
+          </Text>
+        ) : null}
+        {tradingSession.error ? (
+          <Text accessibilityRole="alert" selectable style={styles.error}>
+            {tradingSession.error}
+          </Text>
+        ) : null}
+        {error ? (
+          <Text accessibilityLiveRegion="polite" accessibilityRole="alert" selectable style={styles.error}>
+            {error}
+          </Text>
+        ) : null}
       </View>
     </AppScreen>
   );
+}
+
+function ProfileGroup({ children, title }: { readonly children: ReactNode; readonly title: string }) {
+  return (
+    <View style={styles.group}>
+      <Text accessibilityRole="header" style={styles.groupTitle}>
+        {title}
+      </Text>
+      <View style={styles.groupSurface}>{children}</View>
+    </View>
+  );
+}
+
+function ProfileRow({
+  destructive = false,
+  detail,
+  divided = false,
+  icon,
+  onPress,
+  title,
+  trailing,
+}: {
+  readonly destructive?: boolean;
+  readonly detail: string;
+  readonly divided?: boolean;
+  readonly icon: IconName;
+  readonly onPress: (() => void) | null;
+  readonly title: string;
+  readonly trailing: string | null;
+}) {
+  const content = (
+    <>
+      <View accessibilityElementsHidden style={styles.rowIcon}>
+        <MaterialCommunityIcons
+          color={destructive ? colors.negative : colors.accentSoft}
+          name={icon}
+          size={22}
+        />
+      </View>
+      <View style={styles.rowCopy}>
+        <Text style={[styles.rowTitle, destructive && styles.destructive]}>{title}</Text>
+        <Text style={styles.rowDetail}>{detail}</Text>
+      </View>
+      {trailing ? <Text style={styles.trailing}>{trailing}</Text> : null}
+      {onPress ? (
+        <MaterialCommunityIcons color={colors.textMuted} name="chevron-right" size={22} />
+      ) : null}
+    </>
+  );
+
+  if (onPress === null) {
+    return <View style={[styles.row, divided && styles.divided]}>{content}</View>;
+  }
+
+  return (
+    <PressableScale
+      accessibilityHint={detail}
+      accessibilityLabel={trailing ? `${title}. ${trailing}` : title}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={[styles.row, divided && styles.divided]}
+    >
+      {content}
+    </PressableScale>
+  );
+}
+
+function shortenAddress(address: string): string {
+  return address.length <= 16 ? address : `${address.slice(0, 8)}…${address.slice(-8)}`;
 }
 
 function walletProvisioningLabel(
@@ -248,51 +293,47 @@ function walletProvisioningLabel(
     case 'unauthenticated': return 'Signed out';
     case 'provisioning': return 'Creating or restoring';
     case 'ready': return 'Ready';
-    case 'needs-recovery': return 'Restoring on this device';
+    case 'needs-recovery': return 'Recovery required';
     case 'error': return 'Unavailable';
   }
 }
 
-function tradingSessionMessage(status: TradingSessionStatus): string {
+function privateWalletTitle(
+  status: ReturnType<typeof useTradingSession>['status'],
+): string {
   switch (status) {
-    case 'waiting-for-wallet':
-      return 'Waiting for your public wallet.';
-    case 'restoring':
-      return 'Restoring your private wallet securely.';
-    case 'inactive':
-      return 'Activate once. It restores automatically on this device afterward.';
-    case 'activating':
-      return 'Approve the one-time setup signature. It moves no funds.';
-    case 'rotating':
-      return 'Checking balances, positions, orders, and pending private transfers.';
-    case 'ready':
-      return 'Ready. Private funds stay in T until a trade allocates collateral.';
-    case 'recovery-required':
-      return 'The recovered identity differs from the recorded wallet, so trading is blocked.';
-    case 'error':
-      return 'The saved private trading wallet could not be verified.';
+    case 'inactive': return 'Activate private trading';
+    case 'ready': return 'Rotate private wallet';
+    case 'error': return 'Restore private trading';
+    default: return 'Private trading';
   }
 }
 
-function privateFundingLocation(record: PrivateFundingRecord | null): string {
-  if (record === null) return 'No private transfer';
-  if (record.providerDepositSignature !== null) {
-    return 'Legacy provider allocation — manual recovery required';
+function privateWalletSettingLabel(
+  status: ReturnType<typeof useTradingSession>['status'],
+): string {
+  switch (status) {
+    case 'waiting-for-wallet': return 'Waiting';
+    case 'restoring': return 'Restoring';
+    case 'inactive': return 'Inactive';
+    case 'activating': return 'Activating';
+    case 'rotating': return 'Checking';
+    case 'ready': return 'Active';
+    case 'recovery-required': return 'Recovery';
+    case 'error': return 'Unavailable';
   }
-  if (record.claimSignature !== null) return 'Private wallet T';
-  if (record.depositSignature !== null) return 'Umbra pool';
-  return 'Public wallet M';
 }
 
-function stablecoinBalances(balance: {
-  readonly usdcBaseUnits: bigint;
-  readonly usdtBaseUnits: bigint;
-}): string {
-  return `${formatAmount(amountFromBaseUnits(balance.usdcBaseUnits, 6))} USDC · ${formatAmount(amountFromBaseUnits(balance.usdtBaseUnits, 6))} USDT`;
-}
-
-function solBalance(lamports: bigint): string {
-  return `${formatAmount(amountFromBaseUnits(lamports, 9))} SOL`;
+function privateWalletDescription(
+  status: ReturnType<typeof useTradingSession>['status'],
+): string {
+  switch (status) {
+    case 'inactive': return 'Create or restore the device-held trading wallet.';
+    case 'ready': return 'Rotation is available only after every private and venue balance is empty.';
+    case 'error': return 'Retry the secure restore without creating a new identity.';
+    case 'recovery-required': return 'Resolve the saved identity mismatch before trading.';
+    default: return 'Secure wallet setup is in progress.';
+  }
 }
 
 const styles = StyleSheet.create({
@@ -301,28 +342,93 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: layout.maxContentWidth,
     alignSelf: 'center',
+    gap: spacing.xl,
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.lg,
-    // The floating tab bar draws over this screen, so the last row buys its own room.
     paddingBottom: TAB_BAR_CLEARANCE,
   },
-  header: { paddingVertical: spacing.sm },
   title: { ...typography.title, color: colors.textPrimary },
-  subtitle: {
-    ...typography.bodyCompact,
+  identity: {
+    minHeight: 84,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+  },
+  avatar: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceElevated,
+  },
+  identityCopy: { flex: 1, minWidth: 0 },
+  identityLabel: { ...typography.caption, color: colors.textMuted },
+  address: {
+    ...typography.label,
+    marginTop: spacing.xxs,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  copyButton: {
+    width: layout.minTouchTarget,
+    height: layout.minTouchTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+  },
+  group: { gap: spacing.xs },
+  groupTitle: {
+    ...typography.caption,
+    paddingHorizontal: spacing.xs,
+    color: colors.textMuted,
+  },
+  groupSurface: {
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+  },
+  row: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  divided: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  rowIcon: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceElevated,
+  },
+  rowCopy: { flex: 1, minWidth: 0 },
+  rowTitle: { ...typography.label, color: colors.textPrimary },
+  rowDetail: {
+    ...typography.caption,
     marginTop: spacing.xxs,
     color: colors.textSecondary,
   },
-  body: { flexGrow: 1, justifyContent: 'center', gap: spacing.lg },
-  section: {
-    gap: spacing.md,
-    paddingVertical: spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+  trailing: {
+    ...typography.caption,
+    maxWidth: 86,
+    color: colors.textMuted,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
   },
-  walletTitle: { ...typography.heading, color: colors.textPrimary },
-  walletStatus: { ...typography.bodyCompact, color: colors.textSecondary },
-  notice: { gap: spacing.sm },
-  footer: { gap: spacing.sm, paddingTop: spacing.lg },
-  error: { ...typography.bodyCompact, color: colors.textSecondary },
+  destructive: { color: colors.negative },
+  error: { ...typography.bodyCompact, color: colors.negative },
 });

@@ -26,7 +26,7 @@ export function PrivateWithdrawPanel() {
 
   const confirm = () => {
     if (collateral === null) {
-      setInputError('Provider collateral configuration is unavailable.');
+      setInputError('Withdrawal configuration is unavailable.');
       return;
     }
     try {
@@ -39,7 +39,7 @@ export function PrivateWithdrawPanel() {
       setInputError(null);
       Alert.alert(
         'Withdraw privately',
-        `${amount.trim()} ${collateral.symbol} will be withdrawn from Pacifica to T, then privately to ${destinationMode === 'privy' ? 'your Privy wallet' : 'the external wallet'}. Pacifica withdrawal fee: ${feeLabel()}. Umbra relayer fees are deducted from the private transfer.`,
+        `${amount.trim()} ${collateral.symbol} will move through private wallet T, then privately to ${destinationMode === 'privy' ? 'your public wallet' : 'the external wallet'}. Trading withdrawal fee: ${feeLabel()}. Umbra relayer fees are deducted from the private transfer.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -55,22 +55,23 @@ export function PrivateWithdrawPanel() {
 
   return (
     <View style={styles.panel}>
-      <Text accessibilityRole="header" style={styles.title}>Private withdrawal</Text>
-      <Text style={styles.note}>
-        Closed funds are collected automatically. One withdrawal sends them
-        privately to your wallet or another Solana wallet.
+      <Text accessibilityRole="header" style={styles.title}>Withdraw</Text>
+      <Text selectable style={styles.note}>
+        Closing a trade releases its collateral into your private balance. One
+        withdrawal moves the requested USDC through T and privately delivers it
+        to your public wallet or another Solana wallet.
       </Text>
       <View style={styles.buttons}>
         <View style={styles.button}>
           <Button
-            label="My Privy wallet"
+            label="My public wallet"
             onPress={() => setDestinationMode('privy')}
             variant={destinationMode === 'privy' ? 'primary' : 'secondary'}
           />
         </View>
         <View style={styles.button}>
           <Button
-            label="Another wallet"
+            label="Another Solana wallet"
             onPress={() => setDestinationMode('external')}
             variant={destinationMode === 'external' ? 'primary' : 'secondary'}
           />
@@ -88,7 +89,7 @@ export function PrivateWithdrawPanel() {
       />
       {destinationMode === 'external' ? (
         <TextInput
-          accessibilityLabel="External Solana wallet"
+          accessibilityLabel="Destination Solana wallet"
           autoCapitalize="none"
           editable={!privateExit.isRunning && !pending}
           onChangeText={setExternalAddress}
@@ -155,11 +156,6 @@ function exitStatus(phase: string): string {
 const styles = StyleSheet.create({
   panel: {
     gap: spacing.md,
-    padding: spacing.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
   },
   title: { ...typography.heading, color: colors.textPrimary },
   note: { ...typography.bodyCompact, color: colors.textSecondary },
@@ -175,5 +171,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     ...typography.body,
   },
-  error: { ...typography.bodyCompact, color: colors.textSecondary },
+  error: { ...typography.bodyCompact, color: colors.negative },
 });

@@ -210,9 +210,9 @@ export function PrivateFundingPanel({
       <Text accessibilityRole="header" style={styles.title}>
         Add funds
       </Text>
-      <Text style={styles.message}>
+      <Text selectable style={styles.message}>
         Funds move privately from your public wallet into private wallet T.
-        Trading allocates provider collateral only when needed.
+        Trading allocates only the collateral required for an order.
       </Text>
       {funding.record ? (
         <Text accessibilityLiveRegion="polite" style={styles.status}>
@@ -414,11 +414,6 @@ function runningMessage(phase: string | undefined): string {
 const styles = StyleSheet.create({
   panel: {
     gap: spacing.md,
-    padding: spacing.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
   },
   title: { ...typography.heading, color: colors.textPrimary },
   message: { ...typography.bodyCompact, color: colors.textSecondary },
@@ -451,5 +446,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     ...typography.body,
   },
-  error: { ...typography.bodyCompact, color: colors.textSecondary },
+  error: { ...typography.bodyCompact, color: colors.negative },
 });

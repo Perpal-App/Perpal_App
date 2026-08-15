@@ -84,7 +84,7 @@ const setSpan = (span, anchor, ratio) => {
   const safe = clampSpan(span, anchor);
   priceOverride = { max: anchor + safe * ratio, min: anchor - safe * (1 - ratio) };
   rescale();
-  render();
+  wake();
 };
 
 // ---- gesture plumbing ------------------------------------------------------
@@ -174,7 +174,7 @@ host.addEventListener('touchmove', (event) => {
     const travel = (localPoint(event.touches[0]).x - gesture.startX) / gesture.width;
     const next = Math.min(Math.max(gesture.barSpacing * (1 + travel * 2.5), 2), 120);
     chart.timeScale().applyOptions({ barSpacing: next });
-    render();
+    wake();
   }
 
   event.preventDefault();
@@ -193,9 +193,19 @@ let rows = [];
 let symbol = '';
 let timeframe = '';
 
-const format = (value) => value >= 1
-  ? value.toLocaleString(undefined, { maximumFractionDigits: 4 })
-  : value.toLocaleString(undefined, { maximumSignificantDigits: 6 });
+/**
+ * Legend precision, scaled to the size of the number.
+ *
+ * Four decimals on a four-figure price is noise that costs a whole line: ETH printed as
+ * "1,913.7849" four times wrapped the OHLC row onto a third line and pushed the legend over the
+ * candles. Two decimals past a hundred says everything the eye needs; small-cap prices keep their
+ * significant digits, where the decimals are the only thing distinguishing one bar from the next.
+ */
+const format = (value) => {
+  if (value >= 100) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (value >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  return value.toLocaleString(undefined, { maximumSignificantDigits: 5 });
+};
 const movingAverage = (values, period, exponential) => {
   if (values.length < period) return [];
   if (!exponential) {
@@ -233,7 +243,7 @@ const receive = (event) => {
       rescale();
       chart.timeScale().applyOptions({ barSpacing: 8 });
       chart.timeScale().fitContent();
-      render();
+      wake();
       return;
     }
     if (message.type !== 'market_data') return;
@@ -250,7 +260,7 @@ const receive = (event) => {
     ema.applyOptions({ visible: message.ema });
     showLegend(rows[rows.length - 1]);
     if (message.fit) chart.timeScale().fitContent();
-    render();
+    wake();
   } catch (error) {
     post({ type: 'chart_error' });
   }
@@ -261,5 +271,7 @@ chart.subscribeCrosshairMove((param) => {
   const row = candle || rows.find((item) => item.time === param.time) || rows[rows.length - 1];
   showLegend(row);
 });
-chart.timeScale().subscribeVisibleLogicalRangeChange(() => render());
+// \`wake\`, not \`render\`: panning also restarts the overlay's watcher, so shapes stay glued to the
+// axes through the momentum after the finger lifts. It puts itself back to sleep once still.
+chart.timeScale().subscribeVisibleLogicalRangeChange(() => wake());
 `;

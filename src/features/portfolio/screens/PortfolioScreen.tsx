@@ -6,8 +6,10 @@ import { SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { StatusRowSkeleton } from '@/components/ui/StatusRow';
 import { readAppConfig } from '@/config/appConfig';
+import { useWalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PacificaPortfolioContent } from '@/features/portfolio/components/PacificaPortfolioContent';
 import { usePacificaPortfolio } from '@/features/portfolio/hooks/usePacificaPortfolio';
+import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { layout, spacing } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
@@ -15,14 +17,20 @@ import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 export function PortfolioScreen() {
   const router = useRouter();
   const config = readAppConfig();
+  const publicWallet = useWalletProvisioning();
   const session = useTradingSession();
   const portfolio = usePacificaPortfolio(
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     session.status === 'ready' ? session.address : null,
   );
+  const walletBalances = useWalletBalances({
+    privateAddress: session.status === 'ready' ? session.address : null,
+    publicAddress: publicWallet.embeddedWalletAddress,
+    signer: session.status === 'ready' ? session.signer : null,
+  });
 
   if (!config.ok) {
-    return <PortfolioState title="Configuration required" message="The mainnet gateway or Pacifica configuration is invalid." />;
+    return <PortfolioState title="Configuration required" message="The mainnet wallet configuration is invalid." />;
   }
 
   if (session.status === 'waiting-for-wallet') {
@@ -58,15 +66,18 @@ export function PortfolioScreen() {
     return <PortfolioState title="Trading signer unavailable" message="Open Wallet and retry the secure restore." />;
   }
 
-  if (portfolio.status === 'error') {
-    return <PortfolioState title="Pacifica portfolio unavailable" message="The Pacifica account could not be read. The app will retry while this tab remains open." />;
-  }
-
-  if (portfolio.status === 'loading' || portfolio.snapshot === null) {
-    return <LoadingState label="Loading Pacifica portfolio" />;
-  }
-
-  return <PacificaPortfolioContent snapshot={portfolio.snapshot} />;
+  return (
+    <PacificaPortfolioContent
+      balances={walletBalances.balances}
+      balancesPending={walletBalances.status === 'loading'}
+      balancesUnavailable={walletBalances.status === 'error'}
+      portfolioPending={portfolio.status === 'loading'}
+      portfolioUnavailable={portfolio.status === 'error'}
+      privateAddress={session.address}
+      publicAddress={publicWallet.embeddedWalletAddress}
+      snapshot={portfolio.snapshot}
+    />
+  );
 }
 
 function PortfolioState({

@@ -8,6 +8,7 @@ export type ChartToolName =
   | 'fib'
   | 'position'
   | 'ruler'
+  | 'study'
   | 'brush'
   | 'magnet'
   | 'undo'
@@ -85,6 +86,17 @@ export function ChartToolIcon({
           <Rect {...common} height="6" rx="1" width="16" x="4" y="5" />
           <Rect {...common} height="6" rx="1" width="16" x="4" y="13" />
           <Line {...common} x1="2" x2="22" y1="12" y2="12" />
+        </>
+      ) : null}
+
+      {/* Three lines fanning from one anchor: the pitchfork's own construction, which also
+          reads as the regression channel's median and its two bands. */}
+      {name === 'study' ? (
+        <>
+          <Line {...common} x1="4" x2="20" y1="19" y2="6" />
+          <Line {...common} x1="4" x2="20" y1="19" y2="13" />
+          <Line {...common} x1="10" x2="20" y1="19" y2="19" />
+          <Circle {...common} cx="4" cy="19" r="1.8" />
         </>
       ) : null}
 

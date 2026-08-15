@@ -29,7 +29,7 @@ const TABS: readonly (GlassTabItem & { readonly href: string })[] = [
   { name: 'home', label: 'Home', icon: 'home', href: '/home' },
   { name: 'trade', label: 'Markets', icon: 'trade', href: '/trade' },
   { name: 'portfolio', label: 'Portfolio', icon: 'portfolio', href: '/portfolio' },
-  { name: 'account', label: 'Wallet', icon: 'account', href: '/account' },
+  { name: 'account', label: 'Profile', icon: 'account', href: '/account' },
 ];
 
 /**

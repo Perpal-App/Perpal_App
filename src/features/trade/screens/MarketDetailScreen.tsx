@@ -188,10 +188,12 @@ export function MarketDetailScreen() {
         <UnderlineTabs onSelect={setSection} options={SECTIONS} selectedId={section} />
       </RiseInView>
 
-      {/* Keyed on the section so switching tabs remounts the panel and fades the
-          new one in, rather than swapping content in place. */}
-      <FadeInView key={section}>
-      {section === 'chart' ? (
+      {/* The chart is hidden rather than unmounted when the other tab is showing. Keying a wrapper
+          on the section used to tear the WebView down and rebuild it, which means reloading the
+          inlined chart library, re-seeding four series and refitting the scale — a visible freeze
+          every time someone glanced at Market info and came back, and every drawing on the chart
+          lost with it. The info list is cheap to build, so that one still mounts on demand. */}
+      <View style={section === 'chart' ? undefined : styles.offstage}>
         <TradingViewMarketChart
           candles={history.candles}
           onExpand={() => router.push({
@@ -203,10 +205,12 @@ export function MarketDetailScreen() {
           symbol={`${market.baseAsset}/USD`}
           timeframe={timeframe}
         />
-      ) : (
-        <MarketInfoList market={market} snapshot={snapshot} />
+      </View>
+      {section === 'chart' ? null : (
+        <FadeInView>
+          <MarketInfoList market={market} snapshot={snapshot} />
+        </FadeInView>
       )}
-      </FadeInView>
     </AppScreen>
   );
 }
@@ -341,6 +345,9 @@ const styles = StyleSheet.create({
   // markets list makes the same trade at the same breakpoint.
   compactGutter: { paddingHorizontal: layout.screenPaddingCompact },
   centered: { flexGrow: 1, justifyContent: 'center' },
+  // Keeps the chart in the tree with no layout footprint, so the WebView holds its document, its
+  // series and the reader's drawings while another tab is on screen.
+  offstage: { display: 'none' },
   blocked: { ...typography.bodyCompact, color: colors.textSecondary },
   instrument: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   // Narrow by design: the chevron only needs this much ink, and `hitSlop` on the

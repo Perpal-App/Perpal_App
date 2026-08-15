@@ -44,14 +44,14 @@ export async function ensurePacificaCollateralInWallet(
     : shortfall;
   let pending = await read(input.account);
   if (pending !== null && BigInt(pending.amountBaseUnits) !== providerAmount) {
-    throw new Error('Resume the pending Pacifica withdrawal before changing the amount.');
+    throw new Error('Resume the pending trading withdrawal before changing the amount.');
   }
 
   if (pending === null) {
     const portfolio = await fetchPacificaPortfolio(input.apiOrigin, input.account, input.signal);
     const available = usdc(portfolio.availableToWithdraw);
     if (available < providerAmount + input.withdrawalFeeBaseUnits) {
-      throw new Error('Pacifica does not have enough withdrawable collateral for this private withdrawal and its fee.');
+      throw new Error('Your private balance does not have enough withdrawable USDC for this amount and its fee.');
     }
     pending = {
       version: 1,
@@ -77,7 +77,7 @@ export async function ensurePacificaCollateralInWallet(
       signal: input.signal,
     }));
     const batchNonce = String(response.batch_nonce ?? '');
-    if (batchNonce.length === 0) throw new Error('Pacifica returned an invalid withdrawal receipt.');
+    if (batchNonce.length === 0) throw new Error('The trading withdrawal receipt is invalid.');
     pending = { ...pending, batchNonce, updatedAtMs: Date.now() };
     await write(pending);
   }
@@ -89,7 +89,7 @@ export async function ensurePacificaCollateralInWallet(
     }
     await wait(POLL_INTERVAL_MS, input.signal);
   }
-  throw new Error('Pacifica withdrawal is pending. Retry resumes the same request without duplicating it.');
+  throw new Error('The trading withdrawal is pending. Retry resumes the same request without duplicating it.');
 }
 
 export async function hasPendingPacificaWithdrawal(account: string): Promise<boolean> {
@@ -128,7 +128,7 @@ async function read(account: string): Promise<PendingWithdrawal | null> {
     ) throw new Error('invalid');
     return record as unknown as PendingWithdrawal;
   } catch {
-    throw new Error('Stored Pacifica withdrawal recovery state is invalid.');
+    throw new Error('Stored trading-withdrawal recovery state is invalid.');
   }
 }
 
@@ -146,7 +146,7 @@ async function key(account: string): Promise<string> {
 }
 
 function usdc(value: string): bigint {
-  if (!/^\d+(?:\.\d{1,6})?$/u.test(value)) throw new Error('Pacifica USDC balance is invalid.');
+  if (!/^\d+(?:\.\d{1,6})?$/u.test(value)) throw new Error('The private USDC balance is invalid.');
   const [whole = '0', fraction = ''] = value.split('.');
   return BigInt(`${whole}${fraction.padEnd(6, '0')}`);
 }
@@ -159,7 +159,7 @@ function formatUsdc(value: bigint): string {
 
 function object(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Pacifica returned an invalid withdrawal response.');
+    throw new Error('The trading withdrawal response is invalid.');
   }
   return value as Record<string, unknown>;
 }
@@ -168,7 +168,7 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const abort = () => {
       clearTimeout(timer);
-      reject(new Error('Pacifica withdrawal cancelled.'));
+      reject(new Error('Trading withdrawal cancelled.'));
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', abort);

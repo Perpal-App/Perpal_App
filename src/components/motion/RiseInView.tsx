@@ -82,7 +82,14 @@ export function RiseInView({
     // The entrance is a transform and the layout transition is a frame change, so the two compose
     // instead of overwriting each other. The transition also cannot fire on the first frame —
     // there is no previous layout to travel from — so it never collides with the rise.
-    <Animated.View {...rest} layout={layout} style={[style, animatedStyle]}>
+    // `layout` is spread conditionally rather than passed directly: under
+    // `exactOptionalPropertyTypes` an optional prop will not accept an explicit `undefined`, so
+    // forwarding it unconditionally would hand the animated view a value it has no type for.
+    <Animated.View
+      {...rest}
+      {...(layout === undefined ? {} : { layout })}
+      style={[style, animatedStyle]}
+    >
       {children}
     </Animated.View>
   );

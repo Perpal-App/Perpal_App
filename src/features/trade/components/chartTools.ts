@@ -10,19 +10,27 @@ export type ChartTool =
   | 'ray'
   | 'xline'
   | 'arrow'
+  | 'trendangle'
   | 'hline'
   | 'hray'
   | 'vline'
+  | 'crossline'
   | 'plabel'
   | 'rect'
   | 'ellipse'
+  | 'triangle'
+  | 'arc'
   | 'channel'
   | 'fib'
+  | 'fibext'
+  | 'fibfan'
   | 'long'
   | 'short'
   | 'measure'
   | 'prange'
   | 'drange'
+  | 'pitchfork'
+  | 'regression'
   | 'brush';
 
 export type ChartToolGroup = {
@@ -56,6 +64,7 @@ export const CHART_TOOL_GROUPS: readonly ChartToolGroup[] = [
       { id: 'ray', label: 'Ray' },
       { id: 'xline', label: 'Extended line' },
       { id: 'arrow', label: 'Arrow' },
+      { id: 'trendangle', label: 'Trend angle' },
     ],
   },
   {
@@ -66,6 +75,7 @@ export const CHART_TOOL_GROUPS: readonly ChartToolGroup[] = [
       { id: 'hline', label: 'Horizontal line' },
       { id: 'hray', label: 'Horizontal ray' },
       { id: 'vline', label: 'Vertical line' },
+      { id: 'crossline', label: 'Cross line' },
       { id: 'plabel', label: 'Price label' },
     ],
   },
@@ -76,14 +86,20 @@ export const CHART_TOOL_GROUPS: readonly ChartToolGroup[] = [
     tools: [
       { id: 'rect', label: 'Rectangle' },
       { id: 'ellipse', label: 'Ellipse' },
+      { id: 'triangle', label: 'Triangle' },
+      { id: 'arc', label: 'Arc' },
       { id: 'channel', label: 'Parallel channel' },
     ],
   },
   {
     id: 'fib',
     icon: 'fib',
-    label: 'Fibonacci retracement',
-    tools: [{ id: 'fib', label: 'Fib retracement' }],
+    label: 'Fibonacci',
+    tools: [
+      { id: 'fib', label: 'Fib retracement' },
+      { id: 'fibext', label: 'Fib extension' },
+      { id: 'fibfan', label: 'Fib fan' },
+    ],
   },
   {
     id: 'positions',
@@ -102,6 +118,15 @@ export const CHART_TOOL_GROUPS: readonly ChartToolGroup[] = [
       { id: 'measure', label: 'Measure move and bars' },
       { id: 'prange', label: 'Price range' },
       { id: 'drange', label: 'Date range' },
+    ],
+  },
+  {
+    id: 'studies',
+    icon: 'study',
+    label: 'Studies',
+    tools: [
+      { id: 'pitchfork', label: 'Andrews pitchfork' },
+      { id: 'regression', label: 'Regression channel' },
     ],
   },
   {

@@ -7,11 +7,13 @@
  * output is a TypeScript module holding the document as a string; regenerate it
  * with `npm run generate:chart` after changing anything here or in ./chart.
  *
- * The runtime is split in two so neither source outgrows the file-size budget:
- * `chart/runtime.mjs` owns the series, legend and scale gestures, and
- * `chart/drawings.mjs` owns the tool layer. Both are concatenated into one
- * closure, so the drawing layer reads the chart handles directly instead of
- * through a bridge.
+ * The runtime is split in three so no source outgrows the file-size budget:
+ * `chart/runtime.mjs` owns the series, legend and scale gestures,
+ * `chart/drawings.mjs` owns the tool layer and its renderers, and
+ * `chart/tools.mjs` registers the remaining tools onto it. All three are
+ * concatenated into one closure, in that order, so the drawing layer reads the
+ * chart handles directly instead of through a bridge and the last file extends
+ * the tool tables in place.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -19,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import { DRAWING_RUNTIME } from './chart/drawings.mjs';
 import { CHART_RUNTIME } from './chart/runtime.mjs';
+import { EXTRA_TOOLS_RUNTIME } from './chart/tools.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const libraryPath = join(
@@ -73,6 +76,7 @@ const html = `<!doctype html>
     (() => {
       ${CHART_RUNTIME}
       ${DRAWING_RUNTIME}
+      ${EXTRA_TOOLS_RUNTIME}
     })();
   </script>
 </body>

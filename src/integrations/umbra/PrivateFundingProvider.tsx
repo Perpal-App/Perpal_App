@@ -264,7 +264,7 @@ export function PrivateFundingProvider({
         kind: 'funding',
         outcome: 'error',
         title: 'Private deposit needs attention',
-        message: 'Open Wallet to review and safely resume the deposit.',
+        message: 'Open Portfolio to review and safely resume the deposit.',
       });
     } finally {
       runningRef.current = false;
