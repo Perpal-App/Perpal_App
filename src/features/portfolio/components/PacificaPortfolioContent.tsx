@@ -138,7 +138,9 @@ export function PacificaPortfolioContent({
 
       <RiseInView delay={motion.rise.stagger * 3} layout={layoutMorph()} style={styles.section}>
         <Text accessibilityRole="header" style={styles.heading}>Funds</Text>
-        <Funds />
+        {/* The screen already polls both of these for the overview card above, so they are handed down
+            rather than fetched again inside the sheet — one owner per refresh. */}
+        <Funds balances={balances} snapshot={snapshot} />
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger * 4} layout={layoutMorph()}>
@@ -159,7 +161,13 @@ export function PacificaPortfolioContent({
  * sentence that used to sit above them explained which wallet each drew from; the sheet each one
  * opens states that at the point it matters.
  */
-function Funds() {
+function Funds({
+  balances,
+  snapshot,
+}: {
+  readonly balances: WalletBalances | null;
+  readonly snapshot: PacificaPortfolioSnapshot | null;
+}) {
   const [mode, setMode] = useState<FundsMode | null>(null);
 
   return (
@@ -179,7 +187,12 @@ function Funds() {
           tone="neutral"
         />
       </View>
-      <FundsSheet mode={mode} onClose={() => setMode(null)} />
+      <FundsSheet
+        balances={balances}
+        mode={mode}
+        onClose={() => setMode(null)}
+        snapshot={snapshot}
+      />
     </>
   );
 }

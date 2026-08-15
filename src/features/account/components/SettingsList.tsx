@@ -10,16 +10,24 @@ import {
 } from '@/features/account/components/ProfileGlyph';
 import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
-const TILE_SIZE = 30;
+/**
+ * Tile size.
+ *
+ * Up from the 29 iOS uses, because these rows are not iOS's: a wallet row carries a label over an
+ * address, so the tile is centred against two lines rather than one and at 29 it read as a small mark
+ * floating beside a taller block. 34 is a little over half the two-line block's height, which is the
+ * proportion that makes it read as the row's own mark rather than as decoration on it.
+ */
+const TILE_SIZE = 34;
 
 /**
  * Tile corner, held at the order buttons' proportion rather than their exact value.
  *
- * Those are 42pt tall on `radii.sm`, a touch under a quarter of their height. A 30pt tile on the
- * same token would be a third of its height, which starts to read as a pill; 8 keeps the ratio,
- * so the tile and the buy button look like the same material cut to different sizes.
+ * Those are 42pt tall on `radii.sm`, a touch under a quarter of their height. The same token on a tile
+ * this size would be closer to a third, which starts to read as a pill; 9 keeps the ratio, so the tile
+ * and the buy button look like the same material cut to different sizes.
  */
-const TILE_RADIUS = 8;
+const TILE_RADIUS = 9;
 
 const CHEVRON_SIZE = 16;
 
@@ -206,7 +214,7 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceTinted,
   },
   row: {
     flexDirection: 'row',

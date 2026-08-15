@@ -1,6 +1,6 @@
 import * as Application from 'expo-application';
 import { useRef, useState } from 'react';
-import { Alert, Linking, StyleSheet, Text } from 'react-native';
+import { Alert, Linking, StyleSheet, Text, View } from 'react-native';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
@@ -125,7 +125,11 @@ export function AccountScreen() {
   ].filter((message): message is string => message !== null);
 
   return (
-    <AppScreen contentContainerStyle={styles.content}>
+    // A plain tinted fill rather than a gradient: the band at the top is the gradient, and a second
+    // ramp under it would give the page a direction of its own to argue with. Mounted through
+    // `background`, so it sits outside the scroller and outside the safe area — the tint reaches the
+    // screen's edges instead of stopping where the content column does.
+    <AppScreen background={<View style={styles.page} />} contentContainerStyle={styles.content}>
       {/* Every block carries the same layout spring, and it has to be every one of them:
           Reanimated places a block further down at its final position on the frame after a change,
           so animating only the one that resized leaves its neighbours snapping around it. Shared
@@ -145,6 +149,7 @@ export function AccountScreen() {
                 address={wallet.embeddedWalletAddress}
                 fallback={publicFallback}
                 subject="public wallet address"
+                wide
               />
             )}
           />
@@ -169,6 +174,7 @@ export function AccountScreen() {
                 address={session.address}
                 fallback={publicFallback}
                 subject="private wallet address"
+                wide
               />
             )}
             // Spread rather than passed directly: under `exactOptionalPropertyTypes` an optional
@@ -318,6 +324,7 @@ function publicWalletFallback(
 }
 
 const styles = StyleSheet.create({
+  page: { flex: 1, backgroundColor: colors.backgroundTinted },
   // No horizontal padding and no top padding, which is what lets the gradient band run to the
   // edges of the content column and start flush against the safe area. The gutter moves down to
   // the groups instead, so only the band is full width.

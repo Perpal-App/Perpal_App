@@ -3,10 +3,16 @@ import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-na
 
 import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, gradients, radii, typography } from '@/theme/tokens';
+import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
-/** Compact by intent: tall enough to hit, short enough to leave the data room. */
-const HEIGHT = 42;
+/**
+ * Compact by intent: tall enough to hit, short enough to leave the data room.
+ *
+ * A floor rather than a fixed height. The button is sized by its own label plus the fill's padding and
+ * only falls back to this when that comes out shorter, which is every normal text size — so it
+ * measures exactly this today and grows rather than clips when the reader scales type up.
+ */
+const MIN_HEIGHT = 42;
 
 export type ActionButtonTone = 'accent' | 'negative' | 'neutral' | 'positive';
 
@@ -124,16 +130,27 @@ export function ActionButton({
 const MAX_TEXT_SCALE = 1.2;
 
 const styles = StyleSheet.create({
+  // A minimum rather than a fixed height, so the button grows with the reader's text size instead of
+  // clipping its own label. At normal scale the label's line plus the fill's padding comes to less
+  // than the minimum, so it still measures exactly `MIN_HEIGHT` and nothing on any existing screen
+  // moves — the flexibility only shows up where it is needed.
+  //
   // Clipped, so the ramp takes the corners. Rimmed at a full point rather than a hairline, which is
   // what makes the edge read as the side of a raised surface instead of an outline around it.
   button: {
-    height: HEIGHT,
+    minHeight: MIN_HEIGHT,
     overflow: 'hidden',
     borderWidth: 1,
     borderRadius: radii.sm,
     borderCurve: 'continuous',
   },
-  fill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  label: { ...typography.label },
+  fill: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  label: { ...typography.label, textAlign: 'center' },
   disabled: { opacity: 0.4 },
 });

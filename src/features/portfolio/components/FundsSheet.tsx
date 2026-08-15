@@ -20,8 +20,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { PressableScale } from '@/components/ui/PressableScale';
+import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
 import { PrivateWithdrawPanel } from '@/features/portfolio/components/PrivateWithdrawPanel';
+import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, layout, motion, radii, spacing } from '@/theme/tokens';
 
 export type FundsMode = 'deposit' | 'withdraw';
@@ -42,8 +44,17 @@ const DISMISS_RATIO = 0.34;
  */
 const FLICK_PROJECTION = 0.13;
 
-/** Stand-in until the first layout pass measures the sheet. Only ever one frame. */
-const HEIGHT_FALLBACK = 640;
+/**
+ * Backdrop left visible above the sheet at its tallest.
+ *
+ * A fixed gap rather than a share of the viewport, and it is what bounds the sheet: the dock reserves
+ * this much and the sheet shrinks into whatever is left. A percentage `maxHeight` was here before and
+ * did nothing at all — it resolves against its parent, and the animated wrapper the drag needs has no
+ * height of its own, so the constraint was silently dropped and the sheet grew past the screen.
+ *
+ * It sits inside the top safe area, so the gap is measured below the notch rather than under it.
+ */
+const BACKDROP_GAP = spacing.xxl;
 
 /**
  * The deposit and withdraw panels, in a sheet that can be dragged down to close.
@@ -63,11 +74,16 @@ const HEIGHT_FALLBACK = 640;
  * meant. It covers the full width and both rows, so the grabber is the affordance and not the target.
  */
 export function FundsSheet({
+  balances,
   mode,
   onClose,
+  snapshot,
 }: {
+  /** Forwarded so the withdraw panel lists the tokens actually held, not every supported one. */
+  readonly balances: WalletBalances | null;
   readonly mode: FundsMode | null;
   readonly onClose: () => void;
+  readonly snapshot: PacificaPortfolioSnapshot | null;
 }) {
   const reduceMotion = useReducedMotion();
   // `mounted` keeps the modal in the tree; `offset` is where the sheet sits. A dismissal has to finish
@@ -75,13 +91,17 @@ export function FundsSheet({
   const [mounted, setMounted] = useState(false);
   const [measured, setMeasured] = useState(0);
   const presented = useRef(false);
-  /** The sheet's own height. Every position is relative to it, never to the viewport. */
-  const height = useSharedValue(HEIGHT_FALLBACK);
+  /** The sheet's own measured height. Every position is relative to it, never to the viewport. */
+  const height = useSharedValue(0);
   /** Translation from resting: 0 is open, `height` is fully off the bottom. */
-  const offset = useSharedValue(HEIGHT_FALLBACK);
+  const offset = useSharedValue(0);
   const dragStart = useSharedValue(0);
 
   const visible = mode !== null;
+  // Held invisible for the one frame between mount and measurement. It replaces the guessed height
+  // this used to slide in from: the travel is the sheet's own height, so there is nothing to animate
+  // from until that is known, and a placeholder distance would start the slide in the wrong place.
+  const ready = measured > 0;
 
   useEffect(() => {
     if (visible) {
@@ -173,38 +193,53 @@ export function FundsSheet({
           onPress={requestClose}
           style={styles.scrim}
         />
-        <KeyboardAvoidingView behavior="padding" pointerEvents="box-none" style={styles.dock}>
-          <Animated.View onLayout={onSheetLayout} style={sheetStyle}>
-            <SafeAreaView accessibilityViewIsModal edges={['bottom']} style={styles.sheet}>
-              <GestureDetector gesture={drag}>
-                <View style={styles.header}>
-                  <View accessibilityElementsHidden style={styles.grabber} />
-                  <View style={styles.headerRow}>
-                    <PressableScale
-                      accessibilityLabel="Close"
-                      accessibilityRole="button"
-                      hitSlop={12}
-                      onPress={requestClose}
-                      style={styles.close}
-                    >
-                      <CloseIcon />
-                    </PressableScale>
+        {/* A modal renders outside the screen tree, so it is on its own for insets — this is one of
+            the few places besides AppScreen and the tab bar that reads them. Both edges, so the
+            backdrop gap starts below the notch and the sheet's own base clears the home indicator. */}
+        <SafeAreaView edges={['top', 'bottom']} pointerEvents="box-none" style={styles.safeArea}>
+          <KeyboardAvoidingView behavior="padding" pointerEvents="box-none" style={styles.dock}>
+            {/* Every box down this chain can shrink, which is what makes the sheet fit any device
+                without a single measurement: it is as tall as its content where there is room, and
+                compresses into whatever the dock leaves where there is not. The scroll view is last
+                to give way, so the overflow becomes scrolling rather than a clipped button. */}
+            <Animated.View
+              onLayout={onSheetLayout}
+              style={[styles.wrapper, !ready && styles.hidden, sheetStyle]}
+            >
+              <View accessibilityViewIsModal style={styles.sheet}>
+                <GestureDetector gesture={drag}>
+                  <View style={styles.header}>
+                    <View accessibilityElementsHidden style={styles.grabber} />
+                    <View style={styles.headerRow}>
+                      <PressableScale
+                        accessibilityLabel="Close"
+                        accessibilityRole="button"
+                        hitSlop={12}
+                        onPress={requestClose}
+                        style={styles.close}
+                      >
+                        <CloseIcon />
+                      </PressableScale>
+                    </View>
                   </View>
-                </View>
-              </GestureDetector>
+                </GestureDetector>
 
-              <ScrollView
-                contentContainerStyle={styles.content}
-                contentInsetAdjustmentBehavior="never"
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                {mode === 'deposit' ? <PrivateFundingPanel tradingReady /> : null}
-                {mode === 'withdraw' ? <PrivateWithdrawPanel /> : null}
-              </ScrollView>
-            </SafeAreaView>
-          </Animated.View>
-        </KeyboardAvoidingView>
+                <ScrollView
+                  contentContainerStyle={styles.content}
+                  contentInsetAdjustmentBehavior="never"
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  style={styles.scroll}
+                >
+                  {mode === 'deposit' ? <PrivateFundingPanel tradingReady /> : null}
+                  {mode === 'withdraw' ? (
+                    <PrivateWithdrawPanel balances={balances} snapshot={snapshot} />
+                  ) : null}
+                </ScrollView>
+              </View>
+            </Animated.View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </GestureHandlerRootView>
     </Modal>
   );
@@ -228,9 +263,17 @@ function CloseIcon() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   scrim: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim, opacity: 0.72 },
-  dock: { flex: 1, justifyContent: 'flex-end' },
+  safeArea: { flex: 1 },
+  // The gap is padding on the dock rather than a height on the sheet, so the bound is expressed as
+  // "leave this much backdrop" instead of "be this tall" — the same result on every device, with
+  // nothing to recompute per screen size.
+  dock: { flex: 1, justifyContent: 'flex-end', paddingTop: BACKDROP_GAP },
+  // Shrinkable and full width. Without `flexShrink` a sheet taller than the dock overflows the bottom
+  // of the screen instead of compressing, which is exactly how the action button came to be clipped.
+  wrapper: { width: '100%', flexShrink: 1 },
+  hidden: { opacity: 0 },
   sheet: {
-    maxHeight: '88%',
+    flexShrink: 1,
     overflow: 'hidden',
     borderTopLeftRadius: radii.panel,
     borderTopRightRadius: radii.panel,
@@ -238,6 +281,9 @@ const styles = StyleSheet.create({
     borderTopColor: colors.borderStrong,
     backgroundColor: colors.surface,
   },
+  // Last to give way, and the only box that may. The header keeps its full size so the grabber and
+  // the close control are never squeezed out of reach.
+  scroll: { flexShrink: 1 },
   // The pan's target: full width, both rows, so a finger anywhere in the head of the sheet can drag it.
   header: { paddingBottom: spacing.xxs },
   grabber: {

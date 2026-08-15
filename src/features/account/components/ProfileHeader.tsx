@@ -20,6 +20,15 @@ const AVATAR_SIZE = 112;
 const AVATAR_RING = 5;
 
 /**
+ * The ring's colour, which has to be the page's own rather than the app's default near-black.
+ *
+ * The ring works by cutting a hole in the band for the disc to sit in, and a hole is only invisible
+ * when it is filled with exactly what surrounds it. Against the tinted page a neutral black ring would
+ * read as a dark outline drawn around the avatar.
+ */
+const RING_COLOR = colors.backgroundTinted;
+
+/**
  * Height of the gradient band.
  *
  * A constant, because the band carries nothing and so has no content to measure. That is the one
@@ -140,7 +149,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: radii.pill,
     borderWidth: AVATAR_RING,
-    borderColor: colors.background,
+    borderColor: RING_COLOR,
     backgroundColor: colors.surfaceElevated,
   },
 });

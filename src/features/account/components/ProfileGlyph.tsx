@@ -8,7 +8,7 @@ import { colors } from '@/theme/tokens';
  * A little over half the tile, which is the proportion iOS uses: any larger and the mark crowds
  * the rounded square it sits in, any smaller and the tile reads as empty.
  */
-export const PROFILE_GLYPH_SIZE = 17;
+export const PROFILE_GLYPH_SIZE = 20;
 
 export type ProfileGlyphName =
   | 'info'

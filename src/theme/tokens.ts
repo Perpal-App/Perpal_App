@@ -10,6 +10,22 @@ export const colors = {
   background: '#07060B',
   surface: '#101116',
   surfaceElevated: '#171820',
+
+  /**
+   * Page and card for a screen that carries the ambient violet — the profile, today.
+   *
+   * The app's near-black `background` is deliberately almost hueless, which is right under a table of
+   * prices and wrong under a violet header: the band met the page at a hard line where the colour
+   * simply stopped. These two carry a little of that violet into the page instead, so the header
+   * resolves into the screen rather than ending on it.
+   *
+   * They come as a pair because one without the other does not work. `backgroundTinted` sits a step
+   * under the neutral `surface`, so a card in the old grey would still be visible on it — but visibly
+   * cooler than the page it sits on, which reads as a mismatch rather than as depth.
+   * `surfaceTinted` is the same card one step up in the same hue.
+   */
+  backgroundTinted: '#0C0916',
+  surfaceTinted: '#15121D',
   border: '#292A35',
   borderStrong: '#3A3B48',
   textPrimary: '#FFFFFF',

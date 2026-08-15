@@ -36,6 +36,8 @@ export type MenuAnchor = {
 export type MenuOption<Id extends string> = {
   readonly id: Id;
   readonly label: string;
+  /** Muted text on the right, before the tick: a balance, a count, whatever qualifies the option. */
+  readonly detail?: string;
 };
 
 /** Default width, for a menu whose control is narrower than its longest option. */
@@ -208,6 +210,9 @@ export function AnchoredMenu<Id extends string>({
                 >
                   {option.label}
                 </Text>
+                {option.detail === undefined ? null : (
+                  <Text numberOfLines={1} style={styles.detail}>{option.detail}</Text>
+                )}
                 {checked ? <TickGlyph /> : null}
               </Pressable>
             );
@@ -327,5 +332,11 @@ const styles = StyleSheet.create({
   },
   label: { ...typography.bodyCompact, flexShrink: 1, color: colors.textPrimary },
   labelChecked: { color: colors.accentSoft },
+  detail: {
+    ...typography.caption,
+    flexShrink: 0,
+    color: colors.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
   pressed: { backgroundColor: colors.surface },
 });

@@ -19,15 +19,19 @@ const COPIED_HOLD_MS = 1_600;
 const COPIED_FROM_SCALE = 0.4;
 
 /**
- * Characters kept either side of the ellipsis.
+ * Characters kept either side of the ellipsis, in two measures.
  *
- * One rule for the whole app rather than a per-screen choice: the same wallet is shown on
- * the home header and the profile screen, and two different truncations of one address read
- * as two different addresses. Six is what the narrowest row the app has — beside a 52pt
- * avatar with a 48pt control across from it — can carry at caption size.
+ * Two rather than one because the rows differ by more than a little: the home header carries
+ * this beside a 52pt avatar with a 48pt control across from it, while a settings row hands it
+ * most of the screen's width. One rule for both meant either a truncation that ellipsised on
+ * the header or one that wasted half a settings row — and a short address in a wide space is
+ * the worse of the two, because checking a wallet is mostly checking the characters you can see.
+ *
+ * Both are symmetric, and both are chosen to fit the narrowest device the app supports without
+ * ellipsising, so the shortening never depends on how wide the screen happens to be.
  */
-const HEAD_CHARS = 6;
-const TAIL_CHARS = 6;
+const COMPACT_CHARS = 6;
+const WIDE_CHARS = 10;
 
 /**
  * A wallet address, and copying it.
@@ -45,6 +49,7 @@ export function CopyableAddress({
   fallback,
   role = 'caption',
   subject,
+  wide = false,
 }: {
   /** Full address, copied verbatim. `null` renders `fallback` as plain text. */
   readonly address: string | null;
@@ -57,6 +62,8 @@ export function CopyableAddress({
   readonly role?: 'caption' | 'label';
   /** Named in the accessibility label and announcement, e.g. `public wallet address`. */
   readonly subject: string;
+  /** Keeps more of the address, for a row with the width to spend on it. */
+  readonly wide?: boolean;
 }) {
   const reduceMotion = useReducedMotion();
   const [copied, setCopied] = useState(false);
@@ -87,7 +94,7 @@ export function CopyableAddress({
     return <Text numberOfLines={1} style={[textStyle, styles.absent]}>{fallback}</Text>;
   }
 
-  const display = shortenAddress(address);
+  const display = shortenAddress(address, wide);
 
   const copy = () => {
     void Clipboard.setStringAsync(address).then(
@@ -117,10 +124,12 @@ export function CopyableAddress({
 }
 
 /** Shortened for the eye. Screen readers get the subject and the same shortened form. */
-export function shortenAddress(address: string): string {
-  return address.length <= HEAD_CHARS + TAIL_CHARS
+export function shortenAddress(address: string, wide = false): string {
+  const keep = wide ? WIDE_CHARS : COMPACT_CHARS;
+
+  return address.length <= keep * 2
     ? address
-    : `${address.slice(0, HEAD_CHARS)}…${address.slice(-TAIL_CHARS)}`;
+    : `${address.slice(0, keep)}…${address.slice(-keep)}`;
 }
 
 /** Confirmation only. Round caps and joins, so a 1.8pt tick does not end in two hard points. */

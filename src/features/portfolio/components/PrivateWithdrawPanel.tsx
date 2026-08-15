@@ -15,42 +15,76 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
+import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import {
   listTradingCollateralOptions,
   type ProviderCollateral,
 } from '@/integrations/perps/providerCollateral';
+import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { usePrivateExit } from '@/integrations/umbra/PrivateExitProvider';
-import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
 
 type CollateralSymbol = ProviderCollateral['symbol'];
 
-export function PrivateWithdrawPanel() {
+/**
+ * One token the account can actually withdraw, and how much of it there is.
+ *
+ * `baseUnits` is null while balances are still loading — which is different from zero, and has to be:
+ * zero means the token is not offered, and treating "not known yet" as zero would tell a reader they
+ * hold nothing a moment before the figures arrive.
+ */
+type WithdrawableToken = {
+  readonly collateral: ProviderCollateral;
+  readonly baseUnits: bigint | null;
+};
+
+export function PrivateWithdrawPanel({
+  balances,
+  snapshot,
+}: {
+  readonly balances: WalletBalances | null;
+  readonly snapshot: PacificaPortfolioSnapshot | null;
+}) {
   const privateExit = usePrivateExit();
   const [amount, setAmount] = useState('');
   const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>('privy');
   const [externalAddress, setExternalAddress] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
-  const [symbol, setSymbol] = useState<CollateralSymbol>('USDC');
+  const [chosen, setChosen] = useState<CollateralSymbol>('USDC');
 
   /**
-   * Every token this wallet can hold as collateral, which is the set that can be withdrawn.
+   * The tokens supported as collateral, which bounds what can be withdrawn.
    *
-   * Taken from the same list the deposit panel offers rather than from what the wallet happens to
-   * contain: the two are the same set by construction, and reading live holdings would offer a token
-   * the Umbra relayer may not route. Native SOL is deliberately absent — it is there to pay fees, not
-   * as deposited collateral, and it is not a mint the private transfer handles.
+   * Still the bound, even now that the list shown is filtered by balance: a token in the wallet that
+   * Umbra cannot route is not withdrawable, and offering every SPL account in T would produce options
+   * that fail at `assertRelayerSupportsMint`. Native SOL is absent for the same reason — it pays fees,
+   * it was never deposited as collateral, and it is not a mint the private transfer handles.
    */
-  const collateralOptions = useMemo<readonly ProviderCollateral[]>(() => {
+  const supported = useMemo<readonly ProviderCollateral[]>(() => {
     const config = readAppConfig();
     return config.ok
       ? listTradingCollateralOptions(config.value.perps.usdcMint, config.value.perps.usdtMint)
       : [];
   }, []);
-  const collateral = collateralOptions.find((option) => option.symbol === symbol) ?? null;
+
+  const withdrawable = useMemo(
+    () => readWithdrawable(supported, balances, snapshot),
+    [balances, snapshot, supported],
+  );
+
+  // Derived, not corrected in an effect. A balance can drop to zero while the panel is open, and the
+  // selection has to fall back within the same render — otherwise the amount field would keep
+  // describing a token that is no longer on the list.
+  const symbol = withdrawable.some((token) => token.collateral.symbol === chosen)
+    ? chosen
+    : withdrawable[0]?.collateral.symbol ?? chosen;
+  const collateral = withdrawable.find((token) => token.collateral.symbol === symbol)
+    ?.collateral ?? null;
   const pending = privateExit.record !== null && privateExit.record.phase !== 'complete';
+  const empty = withdrawable.length === 0;
   // The venue keeps its margin in USDC, so only a USDC withdrawal can pull from the trading account
   // and only a USDC withdrawal pays the venue's withdrawal fee. Anything else is already in T.
-  const collectsFromVenue = collateral?.symbol === 'USDC';
+  const collectsFromVenue = symbol === 'USDC';
 
   const confirm = () => {
     if (collateral === null) {
@@ -90,9 +124,11 @@ export function PrivateWithdrawPanel() {
     <View style={styles.panel}>
       <Text accessibilityRole="header" style={styles.title}>Withdraw</Text>
       <Text selectable style={styles.note}>
-        {collectsFromVenue
-          ? 'One withdrawal collects the USDC into your private wallet, then delivers it privately.'
-          : `${symbol} is already in your private wallet and is delivered privately in one step.`}
+        {empty
+          ? 'Nothing to withdraw yet. Deposited collateral and closed margin appear here.'
+          : collectsFromVenue
+            ? 'One withdrawal collects the USDC into your private wallet, then delivers it privately.'
+            : `${symbol} is already in your private wallet and is delivered privately in one step.`}
       </Text>
 
       <View style={styles.buttons}>
@@ -129,10 +165,12 @@ export function PrivateWithdrawPanel() {
           value={amount}
         />
         <TokenSelector
-          disabled={privateExit.isRunning || pending}
-          onSelect={setSymbol}
-          options={collateralOptions}
+          // Open even with a single token, because the menu is where the balance is shown and one
+          // token still has a figure worth reading. Only a run in flight or nothing at all locks it.
+          disabled={privateExit.isRunning || pending || empty}
+          onSelect={setChosen}
           symbol={symbol}
+          tokens={withdrawable}
         />
       </View>
 
@@ -173,7 +211,7 @@ export function PrivateWithdrawPanel() {
         />
       ) : (
         <ActionButton
-          disabled={collateral === null || privateExit.mainWalletAddress === null}
+          disabled={collateral === null || empty || privateExit.mainWalletAddress === null}
           label="Withdraw privately"
           loading={privateExit.isRunning}
           onPress={confirm}
@@ -195,22 +233,30 @@ export function PrivateWithdrawPanel() {
 function TokenSelector({
   disabled,
   onSelect,
-  options,
   symbol,
+  tokens,
 }: {
   readonly disabled: boolean;
   readonly onSelect: (symbol: CollateralSymbol) => void;
-  readonly options: readonly ProviderCollateral[];
   readonly symbol: CollateralSymbol;
+  readonly tokens: readonly WithdrawableToken[];
 }) {
   // A plain View, because the measurement has to come from a host view: `PressableScale` is an
   // animated component and its ref is not guaranteed to expose the native measure methods.
   const anchorRef = useRef<View>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const [open, setOpen] = useState(false);
+  // The balance rides each option, because "which token" and "how much of it" are the same question
+  // here: without it the reader picks a symbol and then finds out from an error whether they had any.
   const menuOptions = useMemo<readonly MenuOption<CollateralSymbol>[]>(
-    () => options.map((option) => ({ id: option.symbol, label: option.symbol })),
-    [options],
+    () => tokens.map((token) => ({
+      id: token.collateral.symbol,
+      label: token.collateral.symbol,
+      ...(token.baseUnits === null
+        ? {}
+        : { detail: formatAmount(amountFromBaseUnits(token.baseUnits, token.collateral.decimals)) }),
+    })),
+    [tokens],
   );
 
   // Above the control, and sized to it. This sits two rows from the bottom of a docked sheet, so a
@@ -279,6 +325,50 @@ function ChevronDown() {
   );
 }
 
+/**
+ * Which supported tokens the account actually holds, and how much.
+ *
+ * USDC counts what is in private wallet T *plus* what the venue reports as withdrawable, because one
+ * withdrawal collects the second into the first before delivering it. Counting only the wallet would
+ * hide USDC from a trader holding all of it as margin — which is most traders, most of the time — and
+ * leave them with no way to withdraw at all.
+ *
+ * Before balances arrive every supported token is listed with an unknown amount rather than filtered
+ * out. Filtering on absent data would empty the menu on open and refill it a moment later.
+ */
+function readWithdrawable(
+  supported: readonly ProviderCollateral[],
+  balances: WalletBalances | null,
+  snapshot: PacificaPortfolioSnapshot | null,
+): readonly WithdrawableToken[] {
+  if (balances === null) {
+    return supported.map((collateral) => ({ baseUnits: null, collateral }));
+  }
+
+  const wallet = balances.privateWallet;
+
+  return supported.flatMap((collateral) => {
+    const inWallet = collateral.symbol === 'USDC'
+      ? wallet.usdcBaseUnits
+      : wallet.usdtBaseUnits;
+    const onVenue = collateral.symbol === 'USDC' ? venueWithdrawable(snapshot) : 0n;
+    const total = inWallet + onVenue;
+
+    return total > 0n ? [{ baseUnits: total, collateral }] : [];
+  });
+}
+
+/** The venue's own withdrawable margin, in USDC base units. Unreadable or absent counts as none. */
+function venueWithdrawable(snapshot: PacificaPortfolioSnapshot | null): bigint {
+  if (snapshot === null) return 0n;
+
+  try {
+    return parseAmount(snapshot.availableToWithdraw, 6).baseUnits;
+  } catch {
+    return 0n;
+  }
+}
+
 function feeLabel(): string {
   const config = readAppConfig();
   if (!config.ok) return 'unavailable';
@@ -297,11 +387,17 @@ function exitStatus(phase: string): string {
   }
 }
 
-/** Shared height for the amount row, so the field and the token control cannot disagree. */
-const FIELD_HEIGHT = 46;
+/**
+ * Floor for a field's height.
+ *
+ * The row is `stretch`, so the field and the token control take whichever of them is taller and can
+ * never disagree — this only sets how short the pair may be when the text inside is small. It grows on
+ * its own with the reader's text size.
+ */
+const FIELD_MIN_HEIGHT = layout.minTouchTarget;
 
-/** Floor for the token menu: enough for the "TOKEN" caption and a symbol beside its tick. */
-const MIN_MENU_WIDTH = 148;
+/** Floor for the token menu: enough for a symbol, its balance, and the tick beside them. */
+const MIN_MENU_WIDTH = 196;
 
 const styles = StyleSheet.create({
   panel: { gap: spacing.md },
@@ -313,7 +409,7 @@ const styles = StyleSheet.create({
   // A hairline rim rather than a full point: an input is a recess, and a full-point edge belongs to a
   // raised surface. Height matched to the buttons above and below so the stack reads evenly.
   input: {
-    minHeight: FIELD_HEIGHT,
+    minHeight: FIELD_MIN_HEIGHT,
     paddingHorizontal: spacing.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderStrong,
@@ -326,7 +422,7 @@ const styles = StyleSheet.create({
   // The raised material, because this is a control rather than a field — the same neutral ramp the
   // activity filter button carries, so a dropdown looks the same wherever it appears.
   token: {
-    minHeight: FIELD_HEIGHT,
+    minHeight: FIELD_MIN_HEIGHT,
     flexShrink: 0,
     overflow: 'hidden',
     borderWidth: 1,
