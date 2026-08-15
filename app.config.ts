@@ -87,6 +87,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     'expo-router',
     'expo-asset',
+    'expo-image',
     'expo-secure-store',
     'expo-status-bar',
     [
