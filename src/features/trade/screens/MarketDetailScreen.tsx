@@ -5,19 +5,16 @@ import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-na
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { Skeleton } from '@/components/feedback/Skeleton';
 import { SkeletonText } from '@/components/feedback/Skeleton';
-import { MarketInfoList } from '@/features/trade/components/MarketInfoList';
 import { AppScreen } from '@/components/layout/AppScreen';
-import { FadeInView } from '@/components/motion/FadeInView';
 import { RiseInView } from '@/components/motion/RiseInView';
-import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import { readAppConfig } from '@/config/appConfig';
 import {
+  formatAmountWithCommas,
   formatCompactTokenPrice,
   formatCompactUsd,
 } from '@/domain/money/amount';
-import { OrderActionBar } from '@/features/trade/components/OrderActionBar';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
-import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
+import { PacificaTradingWorkspace } from '@/features/trade/components/PacificaTradingWorkspace';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
 import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
@@ -27,19 +24,13 @@ import { colors, fonts, layout, motion, radii, spacing, typography } from '@/the
 /** Placeholder shape shared with the markets table and the order ticket. */
 const UNAVAILABLE = '--.--';
 
-const SECTIONS: readonly UnderlineTabOption[] = [
-  { id: 'chart', label: 'Chart' },
-  { id: 'info', label: 'Market info' },
-];
-
 /**
  * One perpetual, in the order a trader reads it: what it is and what it costs,
- * the venue's headline figures, the chart, then the ticket.
+ * the venue's headline figures, then the trading or chart workspace.
  *
  * The instrument header and the figure strip stay put while the section below
- * swaps, so switching from the chart to market data never moves the price you
- * are watching. Order entry stays behind the Long and Short controls at the
- * bottom — nothing on this screen can submit without opening the ticket first.
+ * swaps, so moving between order entry and analysis never moves the price being
+ * watched. Every order still ends at the explicit review-and-sign boundary.
  */
 export function MarketDetailScreen() {
   const compact = useWindowDimensions().width < layout.compactWidth;
@@ -60,7 +51,6 @@ export function MarketDetailScreen() {
     [rawVenueRef, venue.markets],
   );
   const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
-  const [section, setSection] = useState('chart');
 
   const history = usePacificaMarketHistory(
     perps?.pacificaApiOrigin ?? '',
@@ -99,10 +89,7 @@ export function MarketDetailScreen() {
   const pending = snapshot === null;
 
   return (
-    <AppScreen
-      contentContainerStyle={[styles.content, compact && styles.compactGutter]}
-      footer={<OrderActionBar market={market} snapshot={snapshot} />}
-    >
+    <AppScreen contentContainerStyle={[styles.content, compact && styles.compactGutter]}>
       {/* Instrument, figures and the section below rise in one cascade, the same
           reveal the onboarding and sign-in screens use. Each layer already sits in
           its final slot, so the travel is composited and nothing reflows. */}
@@ -138,7 +125,7 @@ export function MarketDetailScreen() {
           ) : (
             <>
               <Text numberOfLines={1} selectable style={styles.price}>
-                {price === null ? UNAVAILABLE : formatCompactTokenPrice(price)}
+                {price === null ? UNAVAILABLE : `$${formatAmountWithCommas(price)}`}
               </Text>
               <Text numberOfLines={1} style={[styles.change, toneStyle(change)]}>
                 {formatChange(change)}
@@ -185,32 +172,20 @@ export function MarketDetailScreen() {
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger * 2}>
-        <UnderlineTabs onSelect={setSection} options={SECTIONS} selectedId={section} />
-      </RiseInView>
-
-      {/* The chart is hidden rather than unmounted when the other tab is showing. Keying a wrapper
-          on the section used to tear the WebView down and rebuild it, which means reloading the
-          inlined chart library, re-seeding four series and refitting the scale — a visible freeze
-          every time someone glanced at Market info and came back, and every drawing on the chart
-          lost with it. The info list is cheap to build, so that one still mounts on demand. */}
-      <View style={section === 'chart' ? undefined : styles.offstage}>
-        <TradingViewMarketChart
+        <PacificaTradingWorkspace
           candles={history.candles}
-          onExpand={() => router.push({
+          config={config.value}
+          historyStatus={history.status}
+          market={market}
+          onExpandChart={() => router.push({
             pathname: '/market-chart/[venueRef]',
             params: { venueRef: market.venueRef },
           })}
           onTimeframeChange={setTimeframe}
-          status={history.status}
-          symbol={`${market.baseAsset}/USD`}
+          snapshot={snapshot}
           timeframe={timeframe}
         />
-      </View>
-      {section === 'chart' ? null : (
-        <FadeInView>
-          <MarketInfoList market={market} snapshot={snapshot} />
-        </FadeInView>
-      )}
+      </RiseInView>
     </AppScreen>
   );
 }
@@ -335,7 +310,7 @@ function MarketDetailSkeleton({ compact }: { readonly compact: boolean }) {
 const styles = StyleSheet.create({
   content: {
     width: '100%',
-    maxWidth: layout.maxContentWidth,
+    maxWidth: 820,
     alignSelf: 'center',
     paddingHorizontal: layout.screenPadding,
     paddingVertical: spacing.md,
@@ -345,9 +320,6 @@ const styles = StyleSheet.create({
   // markets list makes the same trade at the same breakpoint.
   compactGutter: { paddingHorizontal: layout.screenPaddingCompact },
   centered: { flexGrow: 1, justifyContent: 'center' },
-  // Keeps the chart in the tree with no layout footprint, so the WebView holds its document, its
-  // series and the reader's drawings while another tab is on screen.
-  offstage: { display: 'none' },
   blocked: { ...typography.bodyCompact, color: colors.textSecondary },
   instrument: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   // Narrow by design: the chevron only needs this much ink, and `hitSlop` on the

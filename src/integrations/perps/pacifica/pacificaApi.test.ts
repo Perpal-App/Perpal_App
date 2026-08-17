@@ -7,7 +7,19 @@ import {
   formatPacificaRatePercent,
   parsePacificaPrices,
 } from '@/integrations/perps/pacifica/pacificaMarketData';
+import { preparePacificaMarketOrder } from '@/integrations/perps/pacifica/pacificaOrder';
 import { MARKET_TIMEFRAMES } from '@/integrations/perps/pacifica/pacificaHistory';
+import {
+  orderBookSpreadPercent,
+  parsePacificaFundingHistory,
+  parsePacificaOrderBook,
+  parsePacificaPublicTrades,
+  totalBookLiquidity,
+} from '@/integrations/perps/pacifica/pacificaPublicMarket';
+
+jest.mock('expo-crypto', () => ({
+  randomUUID: jest.fn(() => '00000000-0000-4000-8000-000000000001'),
+}));
 
 describe('Pacifica canonical signing payload', () => {
   it('sorts every object recursively without changing array order', () => {
@@ -19,6 +31,42 @@ describe('Pacifica canonical signing payload', () => {
     })).toBe(
       '{"data":{"amount":"0.01","symbol":"BTC","take_profit":{"limit_price":"69900","stop_price":"70000"}},"expiry_window":5000,"timestamp":123,"type":"create_market_order"}',
     );
+  });
+});
+
+describe('Pacifica market order intent', () => {
+  it('binds valid long TP/SL prices and the selected margin mode', async () => {
+    const plan = await preparePacificaMarketOrder({
+      action: 'open',
+      collateralBaseUnits: 100_000_000n,
+      leverage: 5,
+      marginMode: 'cross',
+      market: {
+        baseAsset: 'TEST', displayName: 'TEST', iconUrl: '', isolatedOnly: false,
+        lotSize: '0.001', maxLeverage: 20, maxOrderSize: '100', minOrderSize: '0.001',
+        symbol: 'TEST-PERP', tickSize: '0.1', venueRef: 'TEST',
+      },
+      portfolio: {
+        accountEquity: '100', availableToSpend: '100', availableToWithdraw: '100',
+        balance: '100', initialized: true, makerFee: '0.0002', orders: [], pendingBalance: '0',
+        positions: [], takerFee: '0.0007', totalMarginUsed: '0', updatedAtMs: Date.now(),
+      },
+      side: 'long',
+      snapshot: {
+        change24hBps: 0, fundingRate: '0', nextFundingRate: '0',
+        openInterest: { baseUnits: 0n, decimals: 10 },
+        oraclePrice: { baseUnits: 1_000_000_000_000n, decimals: 10 },
+        price: { baseUnits: 1_000_000_000_000n, decimals: 10 },
+        pricePublishedAtMs: Date.now(), priceStale: false,
+        venueRef: 'TEST', volume24h: { baseUnits: 0n, decimals: 10 },
+      },
+      stopLossPrice: '90',
+      takeProfitPrice: '110',
+    });
+
+    expect(plan.marginMode).toBe('cross');
+    expect(plan.takeProfit?.stopPrice).toBe('110');
+    expect(plan.stopLoss?.stopPrice).toBe('90');
   });
 });
 
@@ -41,6 +89,33 @@ describe('Pacifica public prices', () => {
       decimals: 10,
     });
     expect(formatPacificaRatePercent('0.0000125')).toBe('+0.0013%');
+  });
+});
+
+describe('Pacifica public market detail data', () => {
+  it('keeps book, trade, liquidation, and funding values exact', () => {
+    const book = parsePacificaOrderBook({
+      l: [
+        [{ a: '2', n: 3, p: '100' }],
+        [{ a: '1', n: 2, p: '101' }],
+      ],
+      li: 8,
+      s: 'BTC',
+      t: 1_765_006_315_306,
+    });
+    expect(totalBookLiquidity(book.bids).baseUnits).toBe(2_000_000_000_000n);
+    expect(totalBookLiquidity(book.asks).baseUnits).toBe(1_010_000_000_000n);
+    expect(orderBookSpreadPercent(book)).toBe('0.9950%');
+
+    expect(parsePacificaPublicTrades([{
+      amount: '0.001', cause: 'market_liquidation', created_at: 1_765_006_315_306,
+      price: '65000.25', side: 'close_long', symbol: 'BTC',
+    }], 'BTC')[0]).toMatchObject({ cause: 'market_liquidation', side: 'close_long' });
+
+    expect(parsePacificaFundingHistory([{
+      ask_impact_price: '65001', bid_impact_price: '64999', created_at: 1_765_006_315_306,
+      funding_rate: '-0.0000125', next_funding_rate: '0.0000100', oracle_price: '65000',
+    }])[0]?.fundingRateBaseUnits).toBe(-12_500_000n);
   });
 });
 

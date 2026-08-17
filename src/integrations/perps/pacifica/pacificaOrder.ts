@@ -19,6 +19,12 @@ const SLIPPAGE_PERCENT = '0.5';
 
 export type PacificaOrderAction = 'open' | 'close';
 export type PacificaOrderSide = 'long' | 'short';
+export type PacificaMarginMode = 'isolated' | 'cross';
+
+export type PacificaTriggerOrder = {
+  readonly clientOrderId: string;
+  readonly stopPrice: string;
+};
 
 export type PacificaMarketOrderPlan = {
   readonly action: PacificaOrderAction;
@@ -28,7 +34,7 @@ export type PacificaMarketOrderPlan = {
   readonly estimatedFeeBaseUnits: bigint;
   readonly expiresAtMs: number;
   readonly leverage: number;
-  readonly marginMode: 'isolated' | 'cross';
+  readonly marginMode: PacificaMarginMode;
   readonly markPrice: string;
   readonly notionalBaseUnits: bigint;
   readonly reduceOnly: boolean;
@@ -36,16 +42,21 @@ export type PacificaMarketOrderPlan = {
   readonly signedSide: 'bid' | 'ask';
   readonly slippagePercent: string;
   readonly symbol: string;
+  readonly stopLoss: PacificaTriggerOrder | null;
+  readonly takeProfit: PacificaTriggerOrder | null;
 };
 
 export async function preparePacificaMarketOrder(input: {
   readonly action: PacificaOrderAction;
   readonly collateralBaseUnits: bigint;
   readonly leverage: number;
+  readonly marginMode: PacificaMarginMode;
   readonly market: PacificaMarket;
   readonly portfolio: PacificaPortfolioSnapshot;
   readonly side: PacificaOrderSide;
   readonly snapshot: PacificaMarketSnapshot;
+  readonly stopLossPrice?: string;
+  readonly takeProfitPrice?: string;
 }): Promise<PacificaMarketOrderPlan> {
   if (input.snapshot.priceStale || input.snapshot.venueRef !== input.market.venueRef) {
     throw new Error('Pacifica price is stale. Refresh before preparing the order.');
@@ -63,9 +74,33 @@ export async function preparePacificaMarketOrder(input: {
   if (input.action === 'open' && input.collateralBaseUnits <= 0n) {
     throw new Error('Enter USDC collateral greater than zero.');
   }
+  if (input.action === 'open' && input.market.isolatedOnly && input.marginMode !== 'isolated') {
+    throw new Error(`${input.market.baseAsset} supports isolated margin only.`);
+  }
+  if (input.action === 'close' && (input.takeProfitPrice || input.stopLossPrice)) {
+    throw new Error('TP/SL can only be attached when opening a position.');
+  }
 
   const markBaseUnits = input.snapshot.price.baseUnits;
   if (markBaseUnits <= 0n) throw new Error('Pacifica mark price is invalid.');
+  const takeProfit = triggerOrder(
+    input.takeProfitPrice,
+    'Take-profit',
+    input.side,
+    'take-profit',
+    markBaseUnits,
+    input.market.tickSize,
+    input.snapshot.price.decimals,
+  );
+  const stopLoss = triggerOrder(
+    input.stopLossPrice,
+    'Stop-loss',
+    input.side,
+    'stop-loss',
+    markBaseUnits,
+    input.market.tickSize,
+    input.snapshot.price.decimals,
+  );
   const notionalBaseUnits = input.action === 'open'
     ? input.collateralBaseUnits * BigInt(leverage)
     : usdNotional(position!.amount, input.snapshot.price.baseUnits);
@@ -90,7 +125,7 @@ export async function preparePacificaMarketOrder(input: {
     estimatedFeeBaseUnits: (notionalBaseUnits * feeRate) / 100_000_000n,
     expiresAtMs: Date.now() + PLAN_LIFETIME_MS,
     leverage,
-    marginMode: input.market.isolatedOnly ? 'isolated' : 'cross',
+    marginMode: input.action === 'open' ? input.marginMode : position!.marginMode,
     markPrice: formatDecimal(markBaseUnits, input.snapshot.price.decimals),
     notionalBaseUnits,
     reduceOnly: input.action === 'close',
@@ -98,6 +133,8 @@ export async function preparePacificaMarketOrder(input: {
     signedSide: signedSide(input.action, input.side),
     slippagePercent: SLIPPAGE_PERCENT,
     symbol: input.market.venueRef,
+    stopLoss,
+    takeProfit,
   };
 }
 
@@ -123,16 +160,14 @@ export async function submitPacificaMarketOrder(input: {
   }
 
   if (input.plan.action === 'open') {
-    if (input.plan.marginMode === 'isolated') {
-      await pacificaPostSigned<unknown>({
-        account: input.account,
-        apiOrigin: input.apiOrigin,
-        operation: 'update_margin_mode',
-        payload: { is_isolated: true, symbol: input.plan.symbol },
-        signer: input.signer,
-        signal: input.signal,
-      });
-    }
+    await pacificaPostSigned<unknown>({
+      account: input.account,
+      apiOrigin: input.apiOrigin,
+      operation: 'update_margin_mode',
+      payload: { is_isolated: input.plan.marginMode === 'isolated', symbol: input.plan.symbol },
+      signer: input.signer,
+      signal: input.signal,
+    });
     await pacificaPostSigned<unknown>({
       account: input.account,
       apiOrigin: input.apiOrigin,
@@ -160,6 +195,18 @@ export async function submitPacificaMarketOrder(input: {
       side: input.plan.signedSide,
       slippage_percent: input.plan.slippagePercent,
       symbol: input.plan.symbol,
+      ...(input.plan.stopLoss === null ? {} : {
+        stop_loss: {
+          client_order_id: input.plan.stopLoss.clientOrderId,
+          stop_price: input.plan.stopLoss.stopPrice,
+        },
+      }),
+      ...(input.plan.takeProfit === null ? {} : {
+        take_profit: {
+          client_order_id: input.plan.takeProfit.clientOrderId,
+          stop_price: input.plan.takeProfit.stopPrice,
+        },
+      }),
     },
     signer: input.signer,
     signal: input.signal,
@@ -201,6 +248,28 @@ export async function cancelPacificaOrder(input: {
 function signedSide(action: PacificaOrderAction, side: PacificaOrderSide): 'bid' | 'ask' {
   if (action === 'open') return side === 'long' ? 'bid' : 'ask';
   return side === 'long' ? 'ask' : 'bid';
+}
+
+function triggerOrder(
+  value: string | undefined,
+  label: string,
+  side: PacificaOrderSide,
+  kind: 'take-profit' | 'stop-loss',
+  mark: bigint,
+  tickSize: string,
+  decimals: number,
+): PacificaTriggerOrder | null {
+  if (value === undefined || value.trim().length === 0) return null;
+  const price = parseDecimal(value.trim(), decimals);
+  const tick = parseDecimal(tickSize, decimals);
+  if (price <= 0n || tick <= 0n || price % tick !== 0n) {
+    throw new Error(`${label} must be a positive multiple of the ${tickSize} tick size.`);
+  }
+  const above = kind === 'take-profit' ? side === 'long' : side === 'short';
+  if ((above && price <= mark) || (!above && price >= mark)) {
+    throw new Error(`${label} must be ${above ? 'above' : 'below'} the current mark.`);
+  }
+  return { clientOrderId: Crypto.randomUUID(), stopPrice: formatDecimal(price, decimals) };
 }
 
 function outsideSlippage(mark: string, latest: PacificaMarketSnapshot): boolean {
