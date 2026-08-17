@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { MarketTrades } from '@/features/trade/components/PacificaDepthPanel';
+import { MarketTrades } from '@/features/trade/components/PacificaMarketTrades';
 import { usePacificaPublicMarket } from '@/features/trade/hooks/usePacificaPublicMarket';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 

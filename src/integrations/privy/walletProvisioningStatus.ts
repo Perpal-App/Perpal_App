@@ -12,7 +12,9 @@ export function shouldProvisionWallet(
   walletStatus: EmbeddedSolanaWalletStatus,
 ): boolean {
   return isAuthenticated &&
-    (walletStatus === 'needs-recovery' || walletStatus === 'error');
+    (walletStatus === 'not-created' ||
+      walletStatus === 'needs-recovery' ||
+      walletStatus === 'error');
 }
 
 export function resolveWalletProvisioningStatus({

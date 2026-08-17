@@ -1,10 +1,9 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
 import { Button } from '@/components/ui/Button';
-import { StatusRow } from '@/components/ui/StatusRow';
 import {
   AmountError,
   amountFromBaseUnits,
@@ -12,6 +11,14 @@ import {
   formatAmountWithCommas,
   parseAmount,
 } from '@/domain/money/amount';
+import {
+  Choice,
+  CollateralSlider,
+  Field,
+  PercentPresets,
+  TicketRow,
+  Toggle,
+} from '@/features/trade/components/OrderTicketControls';
 import { TradeCollateralStepView } from '@/features/trade/components/TradeCollateralStepView';
 import { PacificaOrderTypeFields } from '@/features/trade/components/PacificaOrderTypeFields';
 import { useTradeActionRecovery } from '@/features/trade/hooks/useTradeActionRecovery';
@@ -38,7 +45,7 @@ import {
 } from '@/integrations/perps/tradeCollateral';
 import { logTradeError } from '@/integrations/observability/tradeError';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Phase = 'idle' | 'preparing' | 'prepared' | 'submitting' | 'complete';
@@ -66,7 +73,12 @@ export function PacificaOrderTicket(props: {
   const [leverage, setLeverage] = useState(String(Math.min(5, props.market.maxLeverage)));
   const [limitPrice, setLimitPrice] = useState('');
   const [triggerPrice, setTriggerPrice] = useState('');
-  const [percentage, setPercentage] = useState(0);
+  // The two ways to size collateral are independent controls, so neither reads the other's
+  // state. `presetPercent` is the button that was last tapped and nothing else; the slider
+  // owns its handle and only hears about `sliderReset`, which returns it to rest when its
+  // claim is void — a new market, or an amount typed in by hand.
+  const [presetPercent, setPresetPercent] = useState<number | null>(null);
+  const [sliderReset, setSliderReset] = useState(0);
   const [tpSlEnabled, setTpSlEnabled] = useState(false);
   const [takeProfit, setTakeProfit] = useState('');
   const [stopLoss, setStopLoss] = useState('');
@@ -77,7 +89,6 @@ export function PacificaOrderTicket(props: {
   const [orderId, setOrderId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [railWidth, setRailWidth] = useState(0);
   const controller = useRef<AbortController | null>(null);
   const recovery = useTradeActionRecovery({
     owner: session.address,
@@ -100,7 +111,8 @@ export function PacificaOrderTicket(props: {
     reset();
     setCollateral('');
     setLimitPrice('');
-    setPercentage(0);
+    setPresetPercent(null);
+    setSliderReset((value) => value + 1);
     setTpSlEnabled(false);
     setTakeProfit('');
     setStopLoss('');
@@ -121,12 +133,12 @@ export function PacificaOrderTicket(props: {
     return () => abort.abort();
   }, [props.apiOrigin, props.market.venueRef, session.address, session.status]);
 
-  const setCollateralPercentage = (next: number) => {
+  /** Collateral as a share of what the account can spend. Both sizing controls end here. */
+  const applyPercentage = (next: number) => {
     if (portfolio === null) return;
     const percent = Math.max(0, Math.min(100, Math.round(next)));
     const available = parseAmount(portfolio.availableToSpend, 6).baseUnits;
     setCollateral(formatAmount(amountFromBaseUnits((available * BigInt(percent)) / 100n, 6)));
-    setPercentage(percent);
     reset();
   };
 
@@ -319,16 +331,26 @@ export function PacificaOrderTicket(props: {
   const stopOrder = orderType === 'stop-market' || orderType === 'stop-limit';
 
   return (
+    // No "Order" heading: the workspace's Trade tab already names this column, and in a
+    // half-width panel a title row costs a control's worth of height to repeat it.
     <View style={styles.panel}>
-      <Text accessibilityRole="header" style={styles.title}>Order</Text>
       <View style={styles.controls}>
         <Choice disabled={props.market.isolatedOnly} label="Cross" onPress={() => { reset(); setMarginMode('cross'); }} selected={marginMode === 'cross'} />
         <Choice label="Isolated" onPress={() => { reset(); setMarginMode('isolated'); }} selected={marginMode === 'isolated'} />
       </View>
-      <View style={styles.controls}>
-        <Field accessibilityLabel="Leverage" onChangeText={(value) => { reset(); setLeverage(value); }} suffix="×" value={leverage} />
-      </View>
+      {/* Leverage rides on the order-type row rather than a row of its own. On its own it
+          was a full-width box holding one digit and a multiplication sign, which read as
+          an unfinished control and cost the column a row it did not need. */}
       <PacificaOrderTypeFields
+        leverageField={
+          <Field
+            accessibilityLabel="Leverage"
+            align="right"
+            onChangeText={(value) => { reset(); setLeverage(value); }}
+            suffix="×"
+            value={leverage}
+          />
+        }
         limitPrice={limitPrice}
         markPrice={`$${formatAmountWithCommas(props.snapshot.price)}`}
         onLimitPriceChange={(value) => { reset(); setLimitPrice(value); }}
@@ -340,45 +362,75 @@ export function PacificaOrderTicket(props: {
         orderType={orderType}
         triggerPrice={triggerPrice}
       />
+      {/* One word each. `Buy BTC` and `Close short` both ran past a half-width button
+          and truncated mid-ticker, and the ticker is already on the header above and in
+          the confirmation before anything is signed. The full phrase is what a screen
+          reader gets. */}
       <View style={styles.controls}>
-        <Choice label={reduceOnly ? 'Close long' : `Buy ${props.market.baseAsset}`} onPress={() => { reset(); setSide('long'); }} selected={side === 'long'} tone="long" />
-        <Choice label={reduceOnly ? 'Close short' : `Sell ${props.market.baseAsset}`} onPress={() => { reset(); setSide('short'); }} selected={side === 'short'} tone="short" />
+        <Choice
+          accessibilityLabel={reduceOnly
+            ? `Close long ${props.market.baseAsset}`
+            : `Buy ${props.market.baseAsset}`}
+          label={reduceOnly ? 'Long' : 'Buy'}
+          onPress={() => { reset(); setSide('long'); }}
+          selected={side === 'long'}
+          tone="long"
+        />
+        <Choice
+          accessibilityLabel={reduceOnly
+            ? `Close short ${props.market.baseAsset}`
+            : `Sell ${props.market.baseAsset}`}
+          label={reduceOnly ? 'Short' : 'Sell'}
+          onPress={() => { reset(); setSide('short'); }}
+          selected={side === 'short'}
+          tone="short"
+        />
       </View>
       {reduceOnly ? null : (
         <>
-          <Field accessibilityLabel="USDC collateral" onChangeText={(value) => { reset(); setPercentage(0); setCollateral(value); }} placeholder="Collateral" suffix="USDC" value={collateral} />
-          <View style={styles.sliderRow}>
-            <Pressable
-              accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
-              accessibilityLabel="Collateral percentage"
-              accessibilityRole="adjustable"
-              accessibilityValue={{ min: 0, max: 100, now: percentage, text: `${percentage}%` }}
-              onAccessibilityAction={(event) => setCollateralPercentage(percentage + (event.nativeEvent.actionName === 'increment' ? 25 : -25))}
-              onLayout={(event) => setRailWidth(event.nativeEvent.layout.width)}
-              onPress={(event) => { if (railWidth > 0) setCollateralPercentage((event.nativeEvent.locationX / railWidth) * 100); }}
-              style={styles.rail}
-            >
-              <View style={[styles.railFill, { width: `${percentage}%` }]} />
-              <View style={[styles.thumb, { left: `${percentage}%` }]} />
-            </Pressable>
-            <View style={styles.percentValue}><Text style={styles.percentLabel}>{percentage}%</Text></View>
-          </View>
-          <View style={styles.presets}>
-            {[25, 50, 75, 100].map((value) => (
-              <Pressable accessibilityRole="button" key={value} onPress={() => setCollateralPercentage(value)} style={[styles.preset, value === percentage && styles.presetSelected]}>
-                <Text style={styles.presetLabel}>{value}%</Text>
-              </Pressable>
-            ))}
-          </View>
+          {/* Typing is the authority over both sizing controls: once an exact amount is in
+              the field, neither the handle's position nor a lit button describes it, so both
+              stand down. */}
+          <Field
+            accessibilityLabel="USDC collateral"
+            onChangeText={(value) => {
+              reset();
+              setPresetPercent(null);
+              setSliderReset((current) => current + 1);
+              setCollateral(value);
+            }}
+            placeholder="Collateral"
+            suffix="USDC"
+            value={collateral}
+          />
+          <CollateralSlider
+            onChange={(next) => { applyPercentage(next); setPresetPercent(null); }}
+            resetSignal={sliderReset}
+          />
+          {/* A button does not move the handle to its own value — that is the coupling this
+              split exists to remove — but it does stand the handle down, because a rail
+              parked at 30% beside a field holding 75% of the balance is a figure on screen
+              that describes nothing. At rest the slider is simply not the control in play. */}
+          <PercentPresets
+            onSelect={(next) => {
+              applyPercentage(next);
+              setPresetPercent(next);
+              setSliderReset((current) => current + 1);
+            }}
+            selected={presetPercent}
+          />
         </>
       )}
       <Toggle label="Reduce only" onChange={(value) => { reset(); setAction(value ? 'close' : 'open'); if (value) setTpSlEnabled(false); }} value={reduceOnly} />
       <Toggle disabled={reduceOnly || stopOrder} label="TP / SL" onChange={(value) => { reset(); setTpSlEnabled(value); }} value={tpSlEnabled} />
+      {/* Stacked, not side by side: `Take profit` and `Stop loss` are longer than a
+          quarter-screen input can show, and a clipped placeholder on a price field is the
+          one place in the ticket where a guess is expensive. */}
       {tpSlEnabled && !reduceOnly ? (
-        <View style={styles.controls}>
+        <>
           <Field accessibilityLabel="Take-profit price" onChangeText={(value) => { reset(); setTakeProfit(value); }} placeholder="Take profit" suffix="USD" value={takeProfit} />
           <Field accessibilityLabel="Stop-loss price" onChangeText={(value) => { reset(); setStopLoss(value); }} placeholder="Stop loss" suffix="USD" value={stopLoss} />
-        </View>
+        </>
       ) : null}
       {validationError !== null ? (
         <Text accessibilityRole="alert" selectable style={styles.validationError}>
@@ -389,12 +441,12 @@ export function PacificaOrderTicket(props: {
         <TradeCollateralStepView loading={phase === 'submitting'} onConfirm={() => void submitPreparation()} step={preparation} />
       ) : plan !== null ? (
         <View style={styles.summary}>
-          <StatusRow label="Order type" value={plan.orderType.replace('-', ' ')} />
-          {plan.triggerPrice === null ? null : <StatusRow label="Trigger" value={`$${priceText(plan.triggerPrice)}`} />}
-          {plan.orderPrice === null ? null : <StatusRow label="Limit" value={`$${priceText(plan.orderPrice)}`} />}
-          <StatusRow label="Size" value={`${plan.amount} ${props.market.baseAsset}`} />
-          <StatusRow label="Notional" value={usdc(plan.notionalBaseUnits)} />
-          <StatusRow label="Estimated fee" value={usdc(plan.estimatedFeeBaseUnits)} />
+          <TicketRow label="Type" screenReaderLabel="Order type" value={orderTypeText(plan.orderType)} />
+          {plan.triggerPrice === null ? null : <TicketRow label="Trigger" value={`$${priceText(plan.triggerPrice)}`} />}
+          {plan.orderPrice === null ? null : <TicketRow label="Limit" value={`$${priceText(plan.orderPrice)}`} />}
+          <TicketRow label="Size" value={`${plan.amount} ${props.market.baseAsset}`} />
+          <TicketRow label="Notional" value={usdc(plan.notionalBaseUnits)} />
+          <TicketRow label="Fee" screenReaderLabel="Estimated fee" value={usdc(plan.estimatedFeeBaseUnits)} />
           <ActionButton label="Review and confirm" loading={phase === 'submitting'} onPress={confirm} tone={side === 'long' ? 'positive' : 'negative'} />
         </View>
       ) : phase === 'complete' ? (
@@ -403,40 +455,23 @@ export function PacificaOrderTicket(props: {
         <ActionButton label={`Review ${reduceOnly ? 'close' : side}`} loading={phase === 'preparing'} onPress={() => void prepare()} tone={side === 'long' ? 'positive' : 'negative'} />
       )}
       <View style={styles.riskRows}>
-        <StatusRow label="Max slippage" value="0.5%" />
-        <StatusRow label="Liquidation price" value={position?.liquidationPrice ? `$${priceText(position.liquidationPrice)}` : '--'} />
-        <StatusRow label="Margin" value={reduceOnly ? decimalUsd(position?.margin) : decimalUsd(collateral)} />
-        <StatusRow label="Available" value={decimalUsd(portfolio?.availableToSpend)} />
+        <TicketRow label="Slippage" screenReaderLabel="Maximum slippage" value="0.5%" />
+        <TicketRow
+          label="Liq."
+          screenReaderLabel="Liquidation price"
+          value={position?.liquidationPrice ? `$${priceText(position.liquidationPrice)}` : '--'}
+        />
+        <TicketRow label="Margin" value={reduceOnly ? decimalUsd(position?.margin) : decimalUsd(collateral)} />
+        <TicketRow label="Available" value={decimalUsd(portfolio?.availableToSpend)} />
       </View>
       {error !== null ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
     </View>
   );
 }
 
-function Choice(props: { readonly disabled?: boolean; readonly label: string; readonly onPress: () => void; readonly selected: boolean; readonly tone?: 'long' | 'short' }) {
-  return (
-    <Pressable accessibilityRole="radio" accessibilityState={{ checked: props.selected, disabled: props.disabled }} disabled={props.disabled} onPress={props.onPress} style={[styles.choice, props.selected && styles.choiceSelected, props.tone === 'long' && props.selected && styles.longSelected, props.tone === 'short' && props.selected && styles.shortSelected, props.disabled && styles.disabled]}>
-      <Text numberOfLines={1} style={[styles.choiceLabel, props.tone === 'long' && props.selected && styles.longLabel, props.tone === 'short' && props.selected && styles.shortLabel]}>{props.label}</Text>
-    </Pressable>
-  );
-}
-
-function Field(props: { readonly accessibilityLabel: string; readonly onChangeText: (value: string) => void; readonly placeholder?: string; readonly suffix: string; readonly value: string }) {
-  return (
-    <View style={styles.field}>
-      <TextInput accessibilityLabel={props.accessibilityLabel} inputMode="decimal" onChangeText={props.onChangeText} placeholder={props.placeholder} placeholderTextColor={colors.textMuted} style={styles.input} value={props.value} />
-      <Text style={styles.suffix}>{props.suffix}</Text>
-    </View>
-  );
-}
-
-function Toggle(props: { readonly disabled?: boolean; readonly label: string; readonly onChange: (value: boolean) => void; readonly value: boolean }) {
-  return (
-    <View style={[styles.toggleRow, props.disabled && styles.disabled]}>
-      <Switch accessibilityLabel={props.label} disabled={props.disabled} onValueChange={props.onChange} thumbColor={props.value ? colors.accentSoft : colors.textMuted} trackColor={{ false: colors.borderStrong, true: colors.accent }} value={props.value} />
-      <Text style={styles.toggleLabel}>{props.label}</Text>
-    </View>
-  );
+function orderTypeText(value: PacificaOrderType): string {
+  const words = value.replace('-', ' ');
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
 function usdc(value: bigint): string {
@@ -456,33 +491,17 @@ const styles = StyleSheet.create({
   panel: { gap: spacing.xs, paddingVertical: spacing.xs },
   title: { ...typography.heading, color: colors.textPrimary },
   message: { ...typography.bodyCompact, color: colors.textSecondary },
-  controls: { flexDirection: 'row', gap: spacing.sm },
-  choice: { flex: 1, minWidth: 0, minHeight: 40, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
-  choiceSelected: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
-  longSelected: { borderColor: colors.positive },
-  shortSelected: { borderColor: colors.negative },
-  choiceLabel: { ...typography.bodyCompact, color: colors.textPrimary },
-  longLabel: { color: colors.positive },
-  shortLabel: { color: colors.negative },
-  field: { flex: 1, minWidth: 0, minHeight: 44, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
-  input: { flex: 1, minWidth: 0, minHeight: 42, paddingHorizontal: spacing.sm, color: colors.textPrimary, ...typography.bodyCompact },
-  suffix: { ...typography.caption, paddingRight: spacing.sm, color: colors.textMuted },
-  sliderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  rail: { flex: 1, height: 24, justifyContent: 'center' },
-  railFill: { height: 3, borderRadius: radii.pill, backgroundColor: colors.accent },
-  thumb: { position: 'absolute', width: 18, height: 18, marginLeft: -9, borderRadius: radii.pill, borderWidth: 2, borderColor: colors.accentSoft, backgroundColor: colors.surfaceElevated },
-  percentValue: { width: 58, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm },
-  percentLabel: { ...typography.bodyCompact, color: colors.textPrimary },
-  presets: { flexDirection: 'row', gap: spacing.xs },
-  preset: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm },
-  presetSelected: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
-  presetLabel: { ...typography.caption, color: colors.textPrimary },
-  toggleRow: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  toggleLabel: { ...typography.bodyCompact, color: colors.textSecondary },
-  summary: { gap: spacing.sm, paddingTop: spacing.xs },
-  riskRows: { gap: spacing.xs, paddingTop: spacing.xs, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  // `xs`, not `sm`: at half a phone's width the gap between two controls is width the
+  // labels inside them need more.
+  controls: { flexDirection: 'row', gap: spacing.xs },
+  summary: { gap: spacing.xxs, paddingTop: spacing.xs },
+  riskRows: {
+    gap: spacing.xxs,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
   success: { ...typography.bodyCompact, color: colors.positive },
   error: { ...typography.bodyCompact, color: colors.negative },
   validationError: { ...typography.caption, color: colors.negative },
-  disabled: { opacity: 0.45 },
 });

@@ -7,7 +7,8 @@ import {
   type MenuAnchor,
   type MenuOption,
 } from '@/components/ui/AnchoredMenu';
-import { StatusRow } from '@/components/ui/StatusRow';
+import { ChevronDown } from '@/components/ui/ChevronDown';
+import { TicketRow } from '@/features/trade/components/OrderTicketControls';
 import type { PacificaOrderType } from '@/integrations/perps/pacifica/pacificaOrder';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
@@ -17,6 +18,9 @@ const OPTIONS: readonly MenuOption<PacificaOrderType>[] = [
   { id: 'stop-market', label: 'Stop market' },
   { id: 'stop-limit', label: 'Stop limit' },
 ];
+
+/** Menu width when the trigger itself is narrower than its longest option. */
+const MIN_MENU_WIDTH = 168;
 
 export function PacificaOrderTypeFields(props: {
   readonly limitPrice: string;
@@ -36,13 +40,19 @@ export function PacificaOrderTypeFields(props: {
 
   const openMenu = () => {
     anchorRef.current?.measureInWindow((x, y, width, height) => {
-      setAnchor(anchorBelow(x, y, width, height, width));
+      // The menu is at least as wide as its trigger, and never narrower than its longest
+      // option needs — the trigger is half a phone and `Stop market` has to arrive whole.
+      setAnchor(anchorBelow(x, y, width, height, Math.max(width, MIN_MENU_WIDTH)));
       setMenuOpen(true);
     });
   };
 
   return (
     <View style={styles.fields}>
+      {/* The trigger owns its row outright. Sharing one with the leverage field left it
+          72pt wide, of which 30 went on the chevron and the insets around it — so `Market`
+          arrived as `Mark…` and `Stop market` never had a chance. A menu whose trigger
+          cannot say what is selected is not a menu. */}
       <View ref={anchorRef}>
         <Pressable
           accessibilityLabel={`Order type ${label}`}
@@ -52,10 +62,12 @@ export function PacificaOrderTypeFields(props: {
           style={({ pressed }) => [styles.selector, pressed && styles.pressed]}
         >
           <Text numberOfLines={1} style={styles.selectorLabel}>{label}</Text>
-          <Text accessibilityElementsHidden style={styles.chevron}>⌄</Text>
+          <ChevronDown />
         </Pressable>
       </View>
-      <StatusRow label="Live mark" value={props.markPrice} />
+      {/* `Mark` beside a six-figure price is all that fits in the ticket's column; the
+          full phrase goes to the screen reader. */}
+      <TicketRow label="Mark" screenReaderLabel="Live mark price" value={props.markPrice} />
       {needsTrigger ? (
         <PriceField
           accessibilityLabel="Trigger price"
@@ -112,11 +124,15 @@ function PriceField(props: {
 
 const styles = StyleSheet.create({
   fields: { width: '100%', minWidth: 0, gap: spacing.xs },
-  selector: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
-  selectorLabel: { ...typography.bodyCompact, color: colors.textPrimary },
-  chevron: { ...typography.bodyCompact, color: colors.textMuted },
+  // 40pt tall with an 8pt gutter, matching the ticket's other controls: these sit in a
+  // half-width column, and 12pt of inset on each side of a price is 12pt the price itself
+  // needs. The right inset is a step tighter still, because the chevron is drawn inside its
+  // own 14pt box with the stroke inset from its edges — matched paddings leave it looking
+  // adrift of the edge it belongs to.
+  selector: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xxs, paddingLeft: spacing.xs, paddingRight: spacing.xxs, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
+  selectorLabel: { ...typography.bodyCompact, flexShrink: 1, color: colors.textPrimary },
   pressed: { opacity: 0.72 },
-  priceField: { minWidth: 0, minHeight: 44, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
-  input: { flex: 1, minWidth: 0, minHeight: 42, paddingHorizontal: spacing.sm, color: colors.textPrimary, ...typography.bodyCompact },
-  suffix: { ...typography.caption, paddingRight: spacing.sm, color: colors.textMuted },
+  priceField: { minWidth: 0, minHeight: 40, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
+  input: { flex: 1, minWidth: 0, minHeight: 38, paddingHorizontal: spacing.xs, color: colors.textPrimary, ...typography.bodyCompact },
+  suffix: { ...typography.caption, paddingRight: spacing.xs, color: colors.textMuted },
 });

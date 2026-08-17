@@ -5,10 +5,8 @@ import { FadeInView } from '@/components/motion/FadeInView';
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import type { AppConfig } from '@/config/appConfig';
 import { MarketInfoList } from '@/features/trade/components/MarketInfoList';
-import {
-  PacificaDepthPanel,
-  PacificaTradesPanel,
-} from '@/features/trade/components/PacificaDepthPanel';
+import { PacificaDepthPanel } from '@/features/trade/components/PacificaDepthPanel';
+import { PacificaTradesPanel } from '@/features/trade/components/PacificaMarketTrades';
 import { PacificaFundingPanel } from '@/features/trade/components/PacificaFundingPanel';
 import { PacificaLiquidationsPanel } from '@/features/trade/components/PacificaLiquidationsPanel';
 import { PacificaOrderTicket } from '@/features/trade/components/PacificaOrderTicket';
@@ -86,6 +84,7 @@ export function PacificaTradingWorkspace(props: {
                 apiOrigin={apiOrigin}
                 symbol={props.market.venueRef}
                 tickSize={props.market.tickSize}
+                variant="split"
                 wsOrigin={wsOrigin}
               />
             </View>
@@ -150,10 +149,13 @@ function MarketPanelView(props: {
 const styles = StyleSheet.create({
   workspace: { width: '100%', minWidth: 0, gap: spacing.sm },
   tradeView: { width: '100%', minWidth: 0, gap: spacing.sm },
-  tradeGrid: { width: '100%', minWidth: 0, gap: spacing.xxs },
+  tradeGrid: { width: '100%', minWidth: 0, gap: spacing.xs },
   tradeGridWide: { flexDirection: 'row', alignItems: 'flex-start' },
   tradePanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', paddingHorizontal: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
-  bookPanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', paddingHorizontal: spacing.xxs, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
+  // No padding of its own: the book's rows, toolbar and footnote share one gutter that
+  // the panel inside sets, so the depth bars end on the same line as the numbers above
+  // them instead of on a second, narrower inset.
+  bookPanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
   waiting: { minHeight: 180, justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
   waitingTitle: { ...typography.heading, color: colors.textPrimary },
   waitingText: { ...typography.bodyCompact, color: colors.textSecondary },

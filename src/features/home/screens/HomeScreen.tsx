@@ -8,6 +8,7 @@ import { AmbientBackdrop } from '@/components/layout/AmbientBackdrop';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { layoutMorph } from '@/components/motion/layoutMorph';
 import { RiseInView } from '@/components/motion/RiseInView';
+import { SkeletonText } from '@/components/feedback/Skeleton';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
 import { readAppConfig } from '@/config/appConfig';
 import { formatSignedBpsPercent } from '@/domain/money/amount';
@@ -72,6 +73,20 @@ export function HomeScreen() {
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     tradingSession.status === 'ready' ? tradingSession.address : null,
   );
+  const tradingWalletPending = tradingSession.status === 'waiting-for-wallet'
+    || tradingSession.status === 'restoring'
+    || tradingSession.status === 'activating'
+    || tradingSession.status === 'rotating';
+  const publicWalletPending = publicWallet.status === 'provisioning';
+  const walletInputsReady = publicWallet.embeddedWalletAddress !== null
+    && tradingSession.address !== null
+    && tradingSession.signer !== null;
+  const balancesPending = publicWalletPending
+    || tradingWalletPending
+    || (walletInputsReady && (walletBalances.status === 'idle' || walletBalances.status === 'loading'));
+  const portfolioPending = tradingWalletPending
+    || (tradingSession.status === 'ready'
+      && (portfolio.status === 'idle' || portfolio.status === 'loading'));
 
   // Indexed, not scanned. Every price message hands back a new snapshot array, so this
   // runs at socket tick rate — and a `find` per market made that a full pass over the
@@ -122,11 +137,15 @@ export function HomeScreen() {
           </View>
           <View style={styles.headingCopy}>
             <Text accessibilityRole="header" style={styles.greeting}>{greeting()}</Text>
-            <CopyableAddress
-              address={publicWallet.embeddedWalletAddress}
-              fallback="Privy wallet unavailable"
-              subject="public wallet address"
-            />
+            {publicWallet.embeddedWalletAddress === null && publicWalletPending ? (
+              <SkeletonText role="caption" width={132} />
+            ) : (
+              <CopyableAddress
+                address={publicWallet.embeddedWalletAddress}
+                fallback="Privy wallet unavailable"
+                subject="public wallet address"
+              />
+            )}
           </View>
         </View>
         <NotificationsPanel
@@ -152,9 +171,9 @@ export function HomeScreen() {
       <RiseInView delay={motion.rise.stagger} layout={layoutMorph()} style={styles.summary}>
         <AccountOverviewCard
           balances={walletBalances.balances}
-          balancesPending={walletBalances.status === 'loading'}
+          balancesPending={balancesPending}
           portfolio={portfolio.snapshot}
-          portfolioPending={portfolio.status === 'loading'}
+          portfolioPending={portfolioPending}
         />
       </RiseInView>
 

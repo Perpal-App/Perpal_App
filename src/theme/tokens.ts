@@ -42,6 +42,22 @@ export const colors = {
   accentEdge: '#6D28D9',
 
   /**
+   * Depth behind an order-book row, and the two halves of its imbalance bar.
+   *
+   * Translucent by construction: the number sits on top of the fill, so it has to read
+   * as size at a glance and still leave the digits legible. Both are the `positive` and
+   * `negative` hues rather than new greens and reds, so a bid in the book is the same
+   * green as a rising price two rows above it.
+   *
+   * The bar carries more alpha than the row because it is a solid block with its own
+   * label rather than a wash behind live numbers.
+   */
+  depthBid: 'rgba(74, 222, 128, 0.15)',
+  depthAsk: 'rgba(239, 98, 98, 0.15)',
+  depthBidStrong: 'rgba(74, 222, 128, 0.24)',
+  depthAskStrong: 'rgba(239, 98, 98, 0.22)',
+
+  /**
    * Fear and Greed bands, extreme fear through extreme greed.
    *
    * The ends are the app's own loss and gain hues rather than new reds and greens, so the

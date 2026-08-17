@@ -308,17 +308,21 @@ function MarketDetailSkeleton({ compact }: { readonly compact: boolean }) {
 
 
 const styles = StyleSheet.create({
+  // This screen runs a tighter gutter than the reading screens, and deliberately: below the
+  // figure strip it is two panels of live numbers side by side, so every point spent on
+  // margin is taken off a price column. `layout.screenPadding` left 48pt of empty page on a
+  // phone and squeezed the order-type selector to 42pt of label — narrower than the word
+  // "Market". The dense screens are exactly what `screenPaddingCompact` is for.
   content: {
     width: '100%',
     maxWidth: 820,
     alignSelf: 'center',
-    paddingHorizontal: layout.screenPadding,
+    paddingHorizontal: layout.screenPaddingCompact,
     paddingVertical: spacing.md,
     gap: spacing.sm,
   },
-  // Below 360pt the figure row needs the margin more than the screen does; the
-  // markets list makes the same trade at the same breakpoint.
-  compactGutter: { paddingHorizontal: layout.screenPaddingCompact },
+  // Below 360pt the panels need the margin more than the page does.
+  compactGutter: { paddingHorizontal: spacing.xs },
   centered: { flexGrow: 1, justifyContent: 'center' },
   blocked: { ...typography.bodyCompact, color: colors.textSecondary },
   instrument: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },

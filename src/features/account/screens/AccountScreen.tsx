@@ -138,7 +138,9 @@ export function AccountScreen() {
             accessibilityLabel="Public wallet"
             icon="wallet"
             label="Public wallet"
-            subtitle={(
+            subtitle={wallet.status === 'provisioning' ? (
+              <SkeletonText role="eyebrow" width={124} />
+            ) : (
               <CopyableAddress
                 address={wallet.embeddedWalletAddress}
                 fallback={publicFallback}

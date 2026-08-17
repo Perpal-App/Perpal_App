@@ -34,6 +34,9 @@ export function PortfolioScreen() {
   }
 
   if (session.status === 'waiting-for-wallet') {
+    if (publicWallet.status !== 'error' && publicWallet.status !== 'needs-recovery') {
+      return <LoadingState label="Restoring wallets" />;
+    }
     return (
       <PortfolioState
         action={{ label: 'Open Wallet', onPress: () => router.push('/(tabs)/account') }}
@@ -43,7 +46,11 @@ export function PortfolioScreen() {
     );
   }
 
-  if (session.status === 'restoring' || session.status === 'activating') {
+  if (
+    session.status === 'restoring' ||
+    session.status === 'activating' ||
+    session.status === 'rotating'
+  ) {
     return <LoadingState label="Preparing private trading" />;
   }
 
@@ -69,8 +76,8 @@ export function PortfolioScreen() {
   return (
     <PacificaPortfolioContent
       balances={walletBalances.balances}
-      balancesPending={walletBalances.status === 'loading'}
-      portfolioPending={portfolio.status === 'loading'}
+      balancesPending={walletBalances.status !== 'ready' && walletBalances.status !== 'error'}
+      portfolioPending={portfolio.status !== 'ready' && portfolio.status !== 'error'}
       portfolioUnavailable={portfolio.status === 'error'}
       snapshot={portfolio.snapshot}
     />

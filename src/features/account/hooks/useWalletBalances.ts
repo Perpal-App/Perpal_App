@@ -45,6 +45,8 @@ type PriceBatch = {
 
 const PRICE_BATCH_SIZE = 50;
 const REFRESH_INTERVAL_MS = 30_000;
+const STARTUP_RETRY_LIMIT = 3;
+const STARTUP_RETRY_MS = 1_000;
 
 export function useWalletBalances(input: {
   readonly privateAddress: string | null;
@@ -82,6 +84,7 @@ export function useWalletBalances(input: {
       let active = true;
       let controller: AbortController | null = null;
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let startupFailures = 0;
 
       const load = async () => {
         controller?.abort();
@@ -108,18 +111,14 @@ export function useWalletBalances(input: {
             ),
           ]);
 
-          let pricing: PriceBatch | null = null;
-          try {
-            pricing = await fetchTokenPrices(
-              uniqueMints([...publicWallet.holdings, ...privateWallet.holdings]),
-              config.value.api.tokenPricesUrl,
-              controller.signal,
-            );
-          } catch {
-            // Raw balances stay usable when the independent display-price feed is unavailable.
-          }
+          const pricing = await fetchTokenPrices(
+            uniqueMints([...publicWallet.holdings, ...privateWallet.holdings]),
+            config.value.api.tokenPricesUrl,
+            controller.signal,
+          );
 
           if (active) {
+            startupFailures = 0;
             hasBalances.current = true;
             setBalances({
               publicWallet: withValuation(publicWallet, pricing),
@@ -127,12 +126,19 @@ export function useWalletBalances(input: {
             });
             setStatus('ready');
           }
-        } catch {
+        } catch (cause) {
           if (active && !controller.signal.aborted && !hasBalances.current) {
-            setStatus('error');
+            startupFailures += 1;
+            setStatus(startupFailures >= STARTUP_RETRY_LIMIT ? 'error' : 'loading');
+            logWalletBalanceFailure(cause, startupFailures);
           }
         } finally {
-          if (active) timer = setTimeout(() => void load(), REFRESH_INTERVAL_MS);
+          if (active) {
+            const delay = hasBalances.current || startupFailures >= STARTUP_RETRY_LIMIT
+              ? REFRESH_INTERVAL_MS
+              : STARTUP_RETRY_MS * startupFailures;
+            timer = setTimeout(() => void load(), delay);
+          }
         }
       };
 
@@ -146,6 +152,18 @@ export function useWalletBalances(input: {
   );
 
   return { balances, status };
+}
+
+function logWalletBalanceFailure(cause: unknown, attempt: number): void {
+  if (!__DEV__) return;
+  const value = typeof cause === 'object' && cause !== null
+    ? cause as { readonly code?: unknown; readonly name?: unknown }
+    : null;
+  console.warn('[Perpal wallet balances failed]', {
+    attempt,
+    errorCode: typeof value?.code === 'string' ? value.code : 'unknown',
+    errorName: cause instanceof Error ? cause.name : typeof value?.name === 'string' ? value.name : typeof cause,
+  });
 }
 
 async function readWalletBalance(
@@ -321,11 +339,9 @@ async function fetchPriceBatch(
 
 function withValuation(
   wallet: RawWalletBalance,
-  pricing: PriceBatch | null,
+  pricing: PriceBatch,
 ): WalletBalance {
   const { holdings, ...balance } = wallet;
-  if (pricing === null) return { ...balance, valuation: null };
-
   const valuation = valueTokenHoldingsUsd(holdings, pricing.prices);
   return {
     ...balance,

@@ -8,37 +8,57 @@ import {
   type MenuAnchor,
   type MenuOption,
 } from '@/components/ui/AnchoredMenu';
+import { ChevronDown } from '@/components/ui/ChevronDown';
+import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
 import {
-  amountFromBaseUnits,
-  formatAmount,
-  formatAmountWithCommas,
-  formatDetailedUsd,
-  parseAmount,
-  type Amount,
-} from '@/domain/money/amount';
-import { usePacificaPublicMarket } from '@/features/trade/hooks/usePacificaPublicMarket';
+  OrderBookTable,
+  orderBookTableHeight,
+  type OrderBookWidth,
+} from '@/features/trade/components/OrderBookTable';
 import {
-  orderBookSpreadPercent,
+  usePacificaPublicMarket,
+  type PacificaPublicMarketStatus,
+} from '@/features/trade/hooks/usePacificaPublicMarket';
+import {
   PACIFICA_BOOK_AGGREGATIONS,
-  totalBookLiquidity,
   type PacificaBookAggregation,
-  type PacificaOrderBook,
-  type PacificaOrderBookLevel,
-  type PacificaPublicTrade,
 } from '@/integrations/perps/pacifica/pacificaPublicMarket';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 type AggregationId = `${PacificaBookAggregation}`;
 
+/**
+ * Levels rendered per side, by how much room the panel has.
+ *
+ * Nine a side lands the split book's last row near the order ticket's, which is what
+ * makes the two columns read as one workspace instead of two unrelated lists. The wide
+ * tab can afford a few more.
+ */
+const DEPTH: Record<OrderBookWidth, number> = { full: 12, split: 9 };
+
+/** Width of the price-step menu, enough for the largest aggregated step. */
+const STEP_MENU_WIDTH = 148;
+
+/**
+ * Pacifica's order book.
+ *
+ * Price, cumulative size, and where the depth sits between the two sides — that is what a
+ * book is read for while an order is being sized, and beside the ticket that is all it
+ * shows. The venue's name and the snapshot's clock belong to the dedicated tab: a time
+ * ticking once a second next to a field the reader is typing into is just movement. A feed
+ * that is not live says so in words, in both places.
+ */
 export function PacificaDepthPanel({
   apiOrigin,
   symbol,
   tickSize,
+  variant = 'full',
   wsOrigin,
 }: {
   readonly apiOrigin: string;
   readonly symbol: string;
   readonly tickSize: string;
+  readonly variant?: OrderBookWidth;
   readonly wsOrigin: string;
 }) {
   const [aggregation, setAggregation] = useState<PacificaBookAggregation>(1);
@@ -57,10 +77,11 @@ export function PacificaDepthPanel({
   );
   const selectedId = String(aggregation) as AggregationId;
   const selectedStep = options.find((option) => option.id === selectedId)?.label ?? tickSize;
+  const depth = DEPTH[variant];
 
   const openMenu = () => {
     anchorRef.current?.measureInWindow((x, y, width, height) => {
-      setAnchor(anchorBelow(x, y, width, height, 148));
+      setAnchor(anchorBelow(x, y, width, height, STEP_MENU_WIDTH));
       setMenuOpen(true);
     });
   };
@@ -68,33 +89,41 @@ export function PacificaDepthPanel({
   return (
     <View style={styles.panel}>
       <View style={styles.toolbar}>
-        <View>
-          <Text style={styles.title}>Order book</Text>
-          <Text accessibilityLiveRegion="polite" style={styles.status}>
-            {statusLabel(market.status, book?.publishedAtMs ?? null)}
-          </Text>
-        </View>
+        <Text numberOfLines={1} style={styles.title}>Order book</Text>
         <View ref={anchorRef}>
           <Pressable
+            accessibilityHint="Groups the book by a larger price step"
             accessibilityLabel={`Price step ${selectedStep} USD`}
             accessibilityRole="button"
             accessibilityState={{ expanded: menuOpen }}
+            hitSlop={10}
             onPress={openMenu}
             style={({ pressed }) => [styles.stepButton, pressed && styles.pressed]}
           >
-            <Text style={styles.stepLabel}>Price step</Text>
-            <Text style={styles.stepValue}>{selectedStep}⌄</Text>
+            <Text numberOfLines={1} style={styles.stepValue}>{selectedStep}</Text>
+            <ChevronDown size={12} />
           </Pressable>
         </View>
       </View>
 
-      {book === null ? (
-        <Skeleton height={420} radius={radii.sm} />
-      ) : (
-        <OrderBookTable book={book} />
+      {market.status === 'live' || market.status === 'loading' ? null : (
+        <Text accessibilityLiveRegion="polite" style={styles.status}>
+          {statusLabel(market.status)}
+        </Text>
       )}
 
-      <Text style={styles.source}>Pacifica public order-book stream</Text>
+      {book === null ? (
+        <View style={styles.placeholder}>
+          <Skeleton height={orderBookTableHeight(depth)} radius={radii.xs} />
+        </View>
+      ) : (
+        <OrderBookTable book={book} depth={depth} width={variant} />
+      )}
+
+      {variant === 'full' && book !== null ? (
+        <Text style={styles.source}>{`Pacifica book · ${formatTime(book.publishedAtMs)}`}</Text>
+      ) : null}
+
       <AnchoredMenu
         anchor={anchor}
         onClose={() => setMenuOpen(false)}
@@ -111,215 +140,15 @@ export function PacificaDepthPanel({
   );
 }
 
-export function PacificaTradesPanel({
-  apiOrigin,
-  baseAsset,
-  symbol,
-  wsOrigin,
-}: {
-  readonly apiOrigin: string;
-  readonly baseAsset: string;
-  readonly symbol: string;
-  readonly wsOrigin: string;
-}) {
-  const market = usePacificaPublicMarket(apiOrigin, wsOrigin, symbol, 1, false);
-  return (
-    <View style={styles.panel}>
-      <Text accessibilityLiveRegion="polite" style={styles.status}>
-        {market.status === 'live' ? 'Live Pacifica executions' :
-          market.status === 'error' ? 'Market trades unavailable' : 'Connecting to Pacifica'}
-      </Text>
-      <MarketTrades baseAsset={baseAsset} trades={market.trades} />
-      <Text style={styles.source}>Pacifica public taker-trade stream</Text>
-    </View>
-  );
-}
-
-function OrderBookTable({ book }: { readonly book: PacificaOrderBook }) {
-  const asks = cumulativeRows(book.asks);
-  const bids = cumulativeRows(book.bids);
-  const maximum = [asks.at(-1)?.total.baseUnits ?? 0n, bids.at(-1)?.total.baseUnits ?? 0n]
-    .reduce((largest, value) => value > largest ? value : largest, 1n);
-  return (
-    <View style={styles.table}>
-      <TableHeader middle="Size (USD)" right="Total (USD)" />
-      {[...asks].reverse().map(({ level, total }, index) => (
-        <BookRow
-          key={`ask:${level.price.baseUnits}:${index}`}
-          level={level}
-          maximum={maximum}
-          side="ask"
-          total={total}
-        />
-      ))}
-      <View style={styles.spreadRow}>
-        <Text style={[styles.spreadLabel, styles.left]}>Spread</Text>
-        <Text selectable style={[styles.spreadValue, styles.middle]}>{spreadPrice(book)}</Text>
-        <Text selectable style={[styles.spreadValue, styles.right]}>
-          {orderBookSpreadPercent(book) ?? '--.--'}
-        </Text>
-      </View>
-      {bids.map(({ level, total }, index) => (
-        <BookRow
-          key={`bid:${level.price.baseUnits}:${index}`}
-          level={level}
-          maximum={maximum}
-          side="bid"
-          total={total}
-        />
-      ))}
-      <BookBalance book={book} />
-    </View>
-  );
-}
-
-function TableHeader({ middle, right }: { readonly middle: string; readonly right: string }) {
-  return (
-    <View style={styles.row}>
-      <Text style={[styles.header, styles.left]}>Price (USD)</Text>
-      <Text style={[styles.header, styles.middle]}>{middle}</Text>
-      <Text style={[styles.header, styles.right]}>{right}</Text>
-    </View>
-  );
-}
-
-function BookRow({
-  level,
-  maximum,
-  side,
-  total,
-}: {
-  readonly level: PacificaOrderBookLevel;
-  readonly maximum: bigint;
-  readonly side: 'bid' | 'ask';
-  readonly total: Amount;
-}) {
-  return (
-    <View style={styles.row}>
-      <View
-        pointerEvents="none"
-        style={[
-          styles.depthBar,
-          side === 'bid' ? styles.bidBar : styles.askBar,
-          { width: `${depthPercent(total.baseUnits, maximum)}%` },
-        ]}
-      />
-      <Text selectable style={[styles.cell, styles.left, side === 'bid' ? styles.bidText : styles.askText]}>
-        {formatAmountWithCommas(level.price)}
-      </Text>
-      <Text selectable style={[styles.cell, styles.middle]}>
-        {formatUsdNumber(level.notional)}
-      </Text>
-      <Text selectable style={[styles.cell, styles.right]}>
-        {formatUsdNumber(total)}
-      </Text>
-    </View>
-  );
-}
-
-export function MarketTrades({
-  baseAsset,
-  emptyText = 'Waiting for the next Pacifica trade.',
-  trades,
-  title = 'Market trades',
-}: {
-  readonly baseAsset: string;
-  readonly emptyText?: string;
-  readonly trades: readonly PacificaPublicTrade[];
-  readonly title?: string;
-}) {
-  return (
-    <View style={styles.trades}>
-      <Text style={styles.title}>{title}</Text>
-      <TableHeader middle={`Size (${baseAsset})`} right="Time" />
-      {trades.length === 0 ? (
-        <Text style={styles.empty}>{emptyText}</Text>
-      ) : trades.slice(0, 20).map((trade) => (
-        <View key={trade.key} style={styles.row}>
-          <Text selectable style={[
-            styles.cell,
-            styles.left,
-            trade.side.endsWith('long') ? styles.bidText : styles.askText,
-          ]}>
-            {formatAmountWithCommas(trade.price)}
-          </Text>
-          <View style={styles.middleStack}>
-            <Text numberOfLines={1} selectable style={styles.cell}>{formatAmountWithCommas(trade.amount)}</Text>
-            <Text numberOfLines={1} style={styles.orderCount}>{tradeLabel(trade)}</Text>
-          </View>
-          <Text selectable style={[styles.cell, styles.right]}>{formatTime(trade.publishedAtMs)}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function cumulativeRows(levels: readonly PacificaOrderBookLevel[]) {
-  let total = 0n;
-  return levels.map((level) => {
-    total += level.notional.baseUnits;
-    return { level, total: amountFromBaseUnits(total, level.notional.decimals) };
-  });
-}
-
-function BookBalance({ book }: { readonly book: PacificaOrderBook }) {
-  const bids = totalBookLiquidity(book.bids).baseUnits;
-  const asks = totalBookLiquidity(book.asks).baseUnits;
-  const total = bids + asks;
-  const bidTenths = total === 0n ? 500n : (bids * 1000n + total / 2n) / total;
-  const askTenths = 1000n - bidTenths;
-  return (
-    <View style={styles.balance}>
-      <View style={[styles.balanceBid, { flexGrow: Number(bidTenths) }]}>
-        <Text selectable style={styles.balanceBidText}>B {percentFromTenths(bidTenths)}</Text>
-      </View>
-      <View style={[styles.balanceAsk, { flexGrow: Number(askTenths) }]}>
-        <Text selectable style={styles.balanceAskText}>{percentFromTenths(askTenths)} A</Text>
-      </View>
-    </View>
-  );
-}
-
 function formatPriceStep(tickSize: string, aggregation: PacificaBookAggregation): string {
   const tick = parseAmount(tickSize, 10);
-  return formatAmount(amountFromBaseUnits(
-    tick.baseUnits * BigInt(aggregation),
-    tick.decimals,
-  ));
+  return formatAmount(amountFromBaseUnits(tick.baseUnits * BigInt(aggregation), tick.decimals));
 }
 
-function formatUsdNumber(value: Amount): string {
-  return formatDetailedUsd(value).replace('$', '');
-}
-
-function spreadPrice(book: PacificaOrderBook): string {
-  const bid = book.bids[0]?.price;
-  const ask = book.asks[0]?.price;
-  if (bid === undefined || ask === undefined || ask.baseUnits <= bid.baseUnits) return '--.--';
-  return formatAmountWithCommas(amountFromBaseUnits(
-    ask.baseUnits - bid.baseUnits,
-    ask.decimals,
-  ));
-}
-
-function depthPercent(value: bigint, maximum: bigint): number {
-  return Number((value * 1000n) / maximum) / 10;
-}
-
-function percentFromTenths(value: bigint): string {
-  return `${value / 10n}.${value % 10n}%`;
-}
-
-function statusLabel(status: string, publishedAtMs: number | null): string {
-  if (status === 'live' && publishedAtMs !== null) return `Live · ${formatTime(publishedAtMs)}`;
-  if (status === 'reconnecting') return 'Reconnecting to Pacifica';
+function statusLabel(status: PacificaPublicMarketStatus): string {
+  if (status === 'reconnecting') return 'Reconnecting · showing the last book';
   if (status === 'error') return 'Pacifica depth unavailable';
   return 'Loading Pacifica depth';
-}
-
-function tradeLabel(trade: PacificaPublicTrade): string {
-  const action = trade.side.replace('_', ' ');
-  return trade.cause === 'normal' ? action : `${action} · ${trade.cause.replaceAll('_', ' ')}`;
 }
 
 function formatTime(value: number): string {
@@ -331,51 +160,33 @@ function formatTime(value: number): string {
 }
 
 const styles = StyleSheet.create({
-  panel: { gap: spacing.sm, paddingTop: spacing.xs },
-  toolbar: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.xs },
-  title: { ...typography.bodyCompact, color: colors.textPrimary },
-  status: { ...typography.caption, color: colors.textMuted },
+  // The panel owns its own gutter rather than taking one from the container, so the
+  // toolbar, the rows and the footnote all sit on the same two edges.
+  panel: { paddingVertical: spacing.xs },
+  toolbar: { minHeight: 32, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: spacing.xs, rowGap: spacing.xxs, paddingHorizontal: spacing.xs, paddingBottom: spacing.xs },
+  title: { ...typography.label, flexShrink: 1, color: colors.textPrimary },
+  // One line, one value. The old control spelled "Price step" above the number, which cost
+  // the toolbar a second row on every phone to label a control that labels itself again on
+  // the way in.
+  //
+  // The hairline is what makes it a control: on its own the raised fill read as a shadow
+  // under the number rather than a button around it. The right inset is tighter than the
+  // left because the chevron is drawn inside its own box and brings padding with it.
   stepButton: {
-    minHeight: 40,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xs,
-    borderRadius: radii.sm,
-    backgroundColor: colors.surfaceElevated,
-  },
-  stepLabel: { ...typography.eyebrow, color: colors.textMuted },
-  stepValue: { ...typography.label, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
-  pressed: { opacity: 0.72 },
-  bidText: { color: colors.positive },
-  askText: { color: colors.negative },
-  table: { overflow: 'hidden', borderRadius: radii.sm },
-  trades: { gap: spacing.xxs, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  row: {
-    minHeight: 32,
-    position: 'relative',
+    minHeight: 28,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xxs,
-    paddingHorizontal: spacing.xxs,
+    paddingLeft: spacing.xs,
+    paddingRight: spacing.xxs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radii.xs,
+    backgroundColor: colors.surfaceElevated,
   },
-  depthBar: { position: 'absolute', top: 1, right: 0, bottom: 1 },
-  bidBar: { backgroundColor: 'rgba(20, 184, 128, 0.19)' },
-  askBar: { backgroundColor: 'rgba(239, 68, 96, 0.18)' },
-  header: { ...typography.eyebrow, color: colors.textMuted },
-  cell: { ...typography.caption, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
-  left: { width: '29%', textAlign: 'left' },
-  middle: { width: '34%', textAlign: 'right' },
-  middleStack: { width: '34%', alignItems: 'flex-end' },
-  right: { flex: 1, textAlign: 'right' },
-  orderCount: { ...typography.caption, color: colors.textMuted },
-  spreadRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs, paddingHorizontal: spacing.xxs, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-  spreadLabel: { ...typography.caption, color: colors.textMuted },
-  spreadValue: { ...typography.label, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
-  balance: { height: 28, flexDirection: 'row', overflow: 'hidden' },
-  balanceBid: { minWidth: 0, justifyContent: 'center', paddingLeft: spacing.xs, backgroundColor: 'rgba(20, 184, 128, 0.28)' },
-  balanceAsk: { minWidth: 0, alignItems: 'flex-end', justifyContent: 'center', paddingRight: spacing.xs, backgroundColor: 'rgba(239, 68, 96, 0.26)' },
-  balanceBidText: { ...typography.caption, color: colors.positive, fontVariant: ['tabular-nums'] },
-  balanceAskText: { ...typography.caption, color: colors.negative, fontVariant: ['tabular-nums'] },
-  empty: { ...typography.bodyCompact, paddingVertical: spacing.lg, color: colors.textMuted, textAlign: 'center' },
-  source: { ...typography.caption, color: colors.textMuted },
+  stepValue: { ...typography.caption, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+  pressed: { opacity: 0.72 },
+  status: { ...typography.caption, paddingHorizontal: spacing.xs, color: colors.textSecondary },
+  placeholder: { paddingHorizontal: spacing.xs },
+  source: { ...typography.caption, paddingTop: spacing.xs, paddingHorizontal: spacing.xs, color: colors.textMuted },
 });
