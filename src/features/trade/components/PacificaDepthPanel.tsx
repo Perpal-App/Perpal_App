@@ -26,7 +26,7 @@ import {
   type PacificaOrderBookLevel,
   type PacificaPublicTrade,
 } from '@/integrations/perps/pacifica/pacificaPublicMarket';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 type AggregationId = `${PacificaBookAggregation}`;
 
@@ -331,12 +331,12 @@ function formatTime(value: number): string {
 }
 
 const styles = StyleSheet.create({
-  panel: { gap: spacing.md, paddingTop: spacing.xs },
-  toolbar: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
-  title: { ...typography.heading, color: colors.textPrimary },
+  panel: { gap: spacing.sm, paddingTop: spacing.xs },
+  toolbar: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.xs },
+  title: { ...typography.bodyCompact, color: colors.textPrimary },
   status: { ...typography.caption, color: colors.textMuted },
   stepButton: {
-    minHeight: layout.minTouchTarget,
+    minHeight: 40,
     alignItems: 'flex-end',
     justifyContent: 'center',
     paddingHorizontal: spacing.xs,
@@ -351,24 +351,24 @@ const styles = StyleSheet.create({
   table: { overflow: 'hidden', borderRadius: radii.sm },
   trades: { gap: spacing.xxs, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   row: {
-    minHeight: 42,
+    minHeight: 32,
     position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.xs,
+    gap: spacing.xxs,
+    paddingHorizontal: spacing.xxs,
   },
   depthBar: { position: 'absolute', top: 1, right: 0, bottom: 1 },
   bidBar: { backgroundColor: 'rgba(20, 184, 128, 0.19)' },
   askBar: { backgroundColor: 'rgba(239, 68, 96, 0.18)' },
   header: { ...typography.eyebrow, color: colors.textMuted },
-  cell: { ...typography.bodyCompact, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+  cell: { ...typography.caption, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   left: { width: '29%', textAlign: 'left' },
   middle: { width: '34%', textAlign: 'right' },
   middleStack: { width: '34%', alignItems: 'flex-end' },
   right: { flex: 1, textAlign: 'right' },
   orderCount: { ...typography.caption, color: colors.textMuted },
-  spreadRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.xs, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  spreadRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs, paddingHorizontal: spacing.xxs, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   spreadLabel: { ...typography.caption, color: colors.textMuted },
   spreadValue: { ...typography.label, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   balance: { height: 28, flexDirection: 'row', overflow: 'hidden' },

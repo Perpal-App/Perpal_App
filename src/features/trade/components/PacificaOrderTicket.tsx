@@ -6,21 +6,26 @@ import { ActionButton } from '@/components/ui/ActionButton';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
 import {
+  AmountError,
   amountFromBaseUnits,
   formatAmount,
   formatAmountWithCommas,
   parseAmount,
 } from '@/domain/money/amount';
 import { TradeCollateralStepView } from '@/features/trade/components/TradeCollateralStepView';
+import { PacificaOrderTypeFields } from '@/features/trade/components/PacificaOrderTypeFields';
 import { useTradeActionRecovery } from '@/features/trade/hooks/useTradeActionRecovery';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
 import {
-  preparePacificaMarketOrder,
-  submitPacificaMarketOrder,
+  preparePacificaOrder,
+  submitPacificaOrder,
+  validatePacificaOrderDraft,
+  PacificaOrderValidationError,
   type PacificaMarginMode,
-  type PacificaMarketOrderPlan,
+  type PacificaOrderPlan,
   type PacificaOrderAction,
   type PacificaOrderSide,
+  type PacificaOrderType,
 } from '@/integrations/perps/pacifica/pacificaOrder';
 import {
   fetchPacificaPortfolio,
@@ -55,19 +60,23 @@ export function PacificaOrderTicket(props: {
   const session = useTradingSession();
   const [action, setAction] = useState<PacificaOrderAction>('open');
   const [side, setSide] = useState<PacificaOrderSide>(props.initialSide ?? 'long');
+  const [orderType, setOrderType] = useState<PacificaOrderType>('market');
   const [marginMode, setMarginMode] = useState<PacificaMarginMode>(props.market.isolatedOnly ? 'isolated' : 'cross');
   const [collateral, setCollateral] = useState('');
   const [leverage, setLeverage] = useState(String(Math.min(5, props.market.maxLeverage)));
+  const [limitPrice, setLimitPrice] = useState('');
+  const [triggerPrice, setTriggerPrice] = useState('');
   const [percentage, setPercentage] = useState(0);
   const [tpSlEnabled, setTpSlEnabled] = useState(false);
   const [takeProfit, setTakeProfit] = useState('');
   const [stopLoss, setStopLoss] = useState('');
   const [portfolio, setPortfolio] = useState<PacificaPortfolioSnapshot | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [plan, setPlan] = useState<PacificaMarketOrderPlan | null>(null);
+  const [plan, setPlan] = useState<PacificaOrderPlan | null>(null);
   const [preparation, setPreparation] = useState<TradeCollateralStep | null>(null);
   const [orderId, setOrderId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [railWidth, setRailWidth] = useState(0);
   const controller = useRef<AbortController | null>(null);
   const recovery = useTradeActionRecovery({
@@ -83,16 +92,19 @@ export function PacificaOrderTicket(props: {
     setPreparation(null);
     setOrderId(null);
     setError(null);
+    setValidationError(null);
     setPhase('idle');
   };
 
   useEffect(() => {
     reset();
     setCollateral('');
+    setLimitPrice('');
     setPercentage(0);
     setTpSlEnabled(false);
     setTakeProfit('');
     setStopLoss('');
+    setTriggerPrice('');
     setMarginMode(props.market.isolatedOnly ? 'isolated' : 'cross');
     setLeverage(String(Math.min(5, props.market.maxLeverage)));
     if (session.status !== 'ready' || session.address === null) return;
@@ -123,6 +135,16 @@ export function PacificaOrderTicket(props: {
       setError('Activate private trading before preparing an order.');
       return;
     }
+    try {
+      validatePacificaOrderDraft({
+        action, collateral, leverage, market: props.market, orderPrice: limitPrice, orderType, side,
+        snapshot: props.snapshot, stopLossPrice: stopLoss, takeProfitPrice: takeProfit,
+        tpSlEnabled, triggerPrice,
+      });
+    } catch (cause) {
+      setValidationError(cause instanceof Error ? cause.message : 'Review the order inputs.');
+      return;
+    }
     const abort = new AbortController();
     controller.current?.abort();
     controller.current = abort;
@@ -130,6 +152,7 @@ export function PacificaOrderTicket(props: {
     setPlan(null);
     setPreparation(null);
     setError(null);
+    setValidationError(null);
     try {
       if (await recovery.reconcile(abort.signal) === 'pending') {
         throw new Error('A previous collateral transaction is still confirming.');
@@ -158,16 +181,19 @@ export function PacificaOrderTicket(props: {
       }
       const latestPortfolio = await fetchPacificaPortfolio(props.apiOrigin, session.address, abort.signal);
       setPortfolio(latestPortfolio);
-      const nextPlan = await preparePacificaMarketOrder({
+      const nextPlan = await preparePacificaOrder({
         action,
         collateralBaseUnits,
         leverage: action === 'open' ? Number(leverage) : 1,
         marginMode,
         market: props.market,
+        orderPrice: limitPrice,
+        orderType,
         portfolio: latestPortfolio,
         side,
         snapshot: props.snapshot,
         ...(tpSlEnabled ? { stopLossPrice: stopLoss, takeProfitPrice: takeProfit } : {}),
+        triggerPrice,
       });
       if (!abort.signal.aborted) {
         setPlan(nextPlan);
@@ -175,8 +201,12 @@ export function PacificaOrderTicket(props: {
       }
     } catch (cause) {
       if (!abort.signal.aborted) {
-        logTradeError('pacifica', 'preparation', cause);
-        setError(cause instanceof Error ? cause.message : 'Pacifica order preview failed.');
+        if (cause instanceof AmountError || cause instanceof PacificaOrderValidationError) {
+          setValidationError(cause.message);
+        } else {
+          logTradeError('pacifica', 'preparation', cause);
+          setError(cause instanceof Error ? cause.message : 'Pacifica order preview failed.');
+        }
         setPhase('idle');
       }
     }
@@ -221,12 +251,12 @@ export function PacificaOrderTicket(props: {
     }
   };
 
-  const submit = async (confirmed: PacificaMarketOrderPlan) => {
+  const submit = async (confirmed: PacificaOrderPlan) => {
     if (session.address === null || session.signer === null) return;
     setPhase('submitting');
     setError(null);
     try {
-      const result = await submitPacificaMarketOrder({
+      const result = await submitPacificaOrder({
         account: session.address,
         apiOrigin: props.apiOrigin,
         intentStartedAtMs: performance.now(),
@@ -268,8 +298,11 @@ export function PacificaOrderTicket(props: {
   const confirm = () => plan && Alert.alert(
     `${plan.action === 'open' ? 'Open' : 'Close'} ${plan.side} ${props.market.baseAsset}?`,
     [
+      `Order type ${plan.orderType.replace('-', ' ')}`,
       `Size ${plan.amount} ${props.market.baseAsset}`,
       `Mark $${priceText(plan.markPrice)}`,
+      plan.triggerPrice === null ? null : `Trigger $${priceText(plan.triggerPrice)}`,
+      plan.orderPrice === null ? null : `Limit $${priceText(plan.orderPrice)}`,
       `Notional ${usdc(plan.notionalBaseUnits)}`,
       `Estimated fee ${usdc(plan.estimatedFeeBaseUnits)}`,
       `Leverage ${plan.leverage}× · ${plan.marginMode}`,
@@ -283,6 +316,7 @@ export function PacificaOrderTicket(props: {
     ],
   );
   const reduceOnly = action === 'close';
+  const stopOrder = orderType === 'stop-market' || orderType === 'stop-limit';
 
   return (
     <View style={styles.panel}>
@@ -292,16 +326,23 @@ export function PacificaOrderTicket(props: {
         <Choice label="Isolated" onPress={() => { reset(); setMarginMode('isolated'); }} selected={marginMode === 'isolated'} />
       </View>
       <View style={styles.controls}>
-        <StaticControl label="Market" />
         <Field accessibilityLabel="Leverage" onChangeText={(value) => { reset(); setLeverage(value); }} suffix="×" value={leverage} />
       </View>
+      <PacificaOrderTypeFields
+        limitPrice={limitPrice}
+        markPrice={`$${formatAmountWithCommas(props.snapshot.price)}`}
+        onLimitPriceChange={(value) => { reset(); setLimitPrice(value); }}
+        onOrderTypeChange={(value) => {
+          reset(); setOrderType(value); setLimitPrice(''); setTriggerPrice('');
+          if (value === 'stop-market' || value === 'stop-limit') setTpSlEnabled(false);
+        }}
+        onTriggerPriceChange={(value) => { reset(); setTriggerPrice(value); }}
+        orderType={orderType}
+        triggerPrice={triggerPrice}
+      />
       <View style={styles.controls}>
         <Choice label={reduceOnly ? 'Close long' : `Buy ${props.market.baseAsset}`} onPress={() => { reset(); setSide('long'); }} selected={side === 'long'} tone="long" />
         <Choice label={reduceOnly ? 'Close short' : `Sell ${props.market.baseAsset}`} onPress={() => { reset(); setSide('short'); }} selected={side === 'short'} tone="short" />
-      </View>
-      <View style={styles.readonlyField}>
-        <Text selectable style={styles.priceValue}>${formatAmountWithCommas(props.snapshot.price)}</Text>
-        <Text style={styles.suffix}>USD</Text>
       </View>
       {reduceOnly ? null : (
         <>
@@ -332,17 +373,25 @@ export function PacificaOrderTicket(props: {
         </>
       )}
       <Toggle label="Reduce only" onChange={(value) => { reset(); setAction(value ? 'close' : 'open'); if (value) setTpSlEnabled(false); }} value={reduceOnly} />
-      <Toggle disabled={reduceOnly} label="TP / SL" onChange={(value) => { reset(); setTpSlEnabled(value); }} value={tpSlEnabled} />
+      <Toggle disabled={reduceOnly || stopOrder} label="TP / SL" onChange={(value) => { reset(); setTpSlEnabled(value); }} value={tpSlEnabled} />
       {tpSlEnabled && !reduceOnly ? (
         <View style={styles.controls}>
           <Field accessibilityLabel="Take-profit price" onChangeText={(value) => { reset(); setTakeProfit(value); }} placeholder="Take profit" suffix="USD" value={takeProfit} />
           <Field accessibilityLabel="Stop-loss price" onChangeText={(value) => { reset(); setStopLoss(value); }} placeholder="Stop loss" suffix="USD" value={stopLoss} />
         </View>
       ) : null}
+      {validationError !== null ? (
+        <Text accessibilityRole="alert" selectable style={styles.validationError}>
+          {validationError}
+        </Text>
+      ) : null}
       {preparation !== null ? (
         <TradeCollateralStepView loading={phase === 'submitting'} onConfirm={() => void submitPreparation()} step={preparation} />
       ) : plan !== null ? (
         <View style={styles.summary}>
+          <StatusRow label="Order type" value={plan.orderType.replace('-', ' ')} />
+          {plan.triggerPrice === null ? null : <StatusRow label="Trigger" value={`$${priceText(plan.triggerPrice)}`} />}
+          {plan.orderPrice === null ? null : <StatusRow label="Limit" value={`$${priceText(plan.orderPrice)}`} />}
           <StatusRow label="Size" value={`${plan.amount} ${props.market.baseAsset}`} />
           <StatusRow label="Notional" value={usdc(plan.notionalBaseUnits)} />
           <StatusRow label="Estimated fee" value={usdc(plan.estimatedFeeBaseUnits)} />
@@ -381,10 +430,6 @@ function Field(props: { readonly accessibilityLabel: string; readonly onChangeTe
   );
 }
 
-function StaticControl({ label }: { readonly label: string }) {
-  return <View style={styles.staticControl}><Text style={styles.choiceLabel}>{label}</Text></View>;
-}
-
 function Toggle(props: { readonly disabled?: boolean; readonly label: string; readonly onChange: (value: boolean) => void; readonly value: boolean }) {
   return (
     <View style={[styles.toggleRow, props.disabled && styles.disabled]}>
@@ -408,23 +453,20 @@ function priceText(value: string): string {
 }
 
 const styles = StyleSheet.create({
-  panel: { gap: spacing.sm, paddingVertical: spacing.sm },
+  panel: { gap: spacing.xs, paddingVertical: spacing.xs },
   title: { ...typography.heading, color: colors.textPrimary },
   message: { ...typography.bodyCompact, color: colors.textSecondary },
   controls: { flexDirection: 'row', gap: spacing.sm },
-  choice: { flex: 1, minWidth: 0, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
+  choice: { flex: 1, minWidth: 0, minHeight: 40, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
   choiceSelected: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
   longSelected: { borderColor: colors.positive },
   shortSelected: { borderColor: colors.negative },
   choiceLabel: { ...typography.bodyCompact, color: colors.textPrimary },
   longLabel: { color: colors.positive },
   shortLabel: { color: colors.negative },
-  staticControl: { flex: 1, minHeight: 50, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
-  readonlyField: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
-  priceValue: { ...typography.heading, color: colors.textPrimary },
-  field: { flex: 1, minWidth: 0, minHeight: 50, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
-  input: { flex: 1, minWidth: 0, minHeight: 48, paddingHorizontal: spacing.md, color: colors.textPrimary, ...typography.bodyCompact },
-  suffix: { ...typography.caption, paddingRight: spacing.md, color: colors.textMuted },
+  field: { flex: 1, minWidth: 0, minHeight: 44, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
+  input: { flex: 1, minWidth: 0, minHeight: 42, paddingHorizontal: spacing.sm, color: colors.textPrimary, ...typography.bodyCompact },
+  suffix: { ...typography.caption, paddingRight: spacing.sm, color: colors.textMuted },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   rail: { flex: 1, height: 24, justifyContent: 'center' },
   railFill: { height: 3, borderRadius: radii.pill, backgroundColor: colors.accent },
@@ -441,5 +483,6 @@ const styles = StyleSheet.create({
   riskRows: { gap: spacing.xs, paddingTop: spacing.xs, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   success: { ...typography.bodyCompact, color: colors.positive },
   error: { ...typography.bodyCompact, color: colors.negative },
+  validationError: { ...typography.caption, color: colors.negative },
   disabled: { opacity: 0.45 },
 });

@@ -124,6 +124,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         faceIDPermission: 'Perpal uses device authentication to protect private trading actions.',
       },
     ],
+    // Android release size and shrinking. It has to be a plugin rather than an edit to
+    // `android/gradle.properties`: that directory is gitignored and rewritten by every prebuild, so
+    // settings placed there survive until the next clean build and no further.
+    './plugins/withAndroidReleaseTuning',
   ],
   experiments: {
     typedRoutes: true,

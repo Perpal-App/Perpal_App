@@ -86,6 +86,7 @@ export async function pacificaPostSigned<T>(input: {
 export type PacificaOperation =
   | 'create_market_order'
   | 'create_order'
+  | 'create_stop_order'
   | 'cancel_order'
   | 'update_leverage'
   | 'update_margin_mode'
@@ -153,6 +154,7 @@ function operationPath(operation: PacificaOperation): string {
   switch (operation) {
     case 'create_market_order': return 'orders/create_market';
     case 'create_order': return 'orders/create';
+    case 'create_stop_order': return 'orders/stop/create';
     case 'cancel_order': return 'orders/cancel';
     case 'update_leverage': return 'account/leverage';
     case 'update_margin_mode': return 'account/margin';

@@ -12,6 +12,7 @@ import {
 import { PacificaFundingPanel } from '@/features/trade/components/PacificaFundingPanel';
 import { PacificaLiquidationsPanel } from '@/features/trade/components/PacificaLiquidationsPanel';
 import { PacificaOrderTicket } from '@/features/trade/components/PacificaOrderTicket';
+import { PacificaTradeAccountPanel } from '@/features/trade/components/PacificaTradeAccountPanel';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import type { MarketHistoryStatus } from '@/features/trade/hooks/usePacificaMarketHistory';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
@@ -45,7 +46,10 @@ export function PacificaTradingWorkspace(props: {
 }) {
   const [view, setView] = useState<WorkspaceView>('trade');
   const [panel, setPanel] = useState<MarketPanel>('orderbook');
-  const wide = useWindowDimensions().width >= 700;
+  // React Native reports logical points, not screenshot pixels. A phone that is
+  // 700+ physical pixels wide is normally 360-430 points, so 700 could never
+  // activate the requested split layout in portrait.
+  const wide = useWindowDimensions().width >= 340;
   const apiOrigin = props.config.perps.pacificaApiOrigin;
   const wsOrigin = props.config.perps.pacificaWsOrigin;
 
@@ -54,36 +58,39 @@ export function PacificaTradingWorkspace(props: {
       <UnderlineTabs onSelect={setView} options={VIEWS} selectedId={view} />
 
       {view === 'trade' ? (
-        <FadeInView style={[styles.tradeGrid, wide && styles.tradeGridWide]}>
-          <View style={styles.tradePanel}>
-            {props.snapshot !== null && !props.snapshot.priceStale ? (
-              <PacificaOrderTicket
+        <FadeInView style={styles.tradeView}>
+          <View style={[styles.tradeGrid, wide && styles.tradeGridWide]}>
+            <View style={styles.tradePanel}>
+              {props.snapshot !== null && !props.snapshot.priceStale ? (
+                <PacificaOrderTicket
+                  apiOrigin={apiOrigin}
+                  centralState={props.config.perps.pacificaCentralState}
+                  market={props.market}
+                  programId={props.config.perps.pacificaProgramId}
+                  rpcUrl={props.config.api.rpcUrl}
+                  snapshot={props.snapshot}
+                  swapBuildUrl={props.config.api.swapBuildUrl}
+                  usdcMint={props.config.perps.usdcMint}
+                  usdtMint={props.config.perps.usdtMint}
+                  vault={props.config.perps.pacificaVault}
+                />
+              ) : (
+                <View style={styles.waiting}>
+                  <Text accessibilityLiveRegion="polite" style={styles.waitingTitle}>Trade unavailable</Text>
+                  <Text style={styles.waitingText}>Waiting for a current Pacifica mark price.</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.bookPanel}>
+              <PacificaDepthPanel
                 apiOrigin={apiOrigin}
-                centralState={props.config.perps.pacificaCentralState}
-                market={props.market}
-                programId={props.config.perps.pacificaProgramId}
-                rpcUrl={props.config.api.rpcUrl}
-                snapshot={props.snapshot}
-                swapBuildUrl={props.config.api.swapBuildUrl}
-                usdcMint={props.config.perps.usdcMint}
-                usdtMint={props.config.perps.usdtMint}
-                vault={props.config.perps.pacificaVault}
+                symbol={props.market.venueRef}
+                tickSize={props.market.tickSize}
+                wsOrigin={wsOrigin}
               />
-            ) : (
-              <View style={styles.waiting}>
-                <Text accessibilityLiveRegion="polite" style={styles.waitingTitle}>Trade unavailable</Text>
-                <Text style={styles.waitingText}>Waiting for a current Pacifica mark price.</Text>
-              </View>
-            )}
+            </View>
           </View>
-          <View style={styles.bookPanel}>
-            <PacificaDepthPanel
-              apiOrigin={apiOrigin}
-              symbol={props.market.venueRef}
-              tickSize={props.market.tickSize}
-              wsOrigin={wsOrigin}
-            />
-          </View>
+          <PacificaTradeAccountPanel apiOrigin={apiOrigin} />
         </FadeInView>
       ) : null}
 
@@ -141,11 +148,12 @@ function MarketPanelView(props: {
 }
 
 const styles = StyleSheet.create({
-  workspace: { gap: spacing.sm },
-  tradeGrid: { gap: spacing.sm },
+  workspace: { width: '100%', minWidth: 0, gap: spacing.sm },
+  tradeView: { width: '100%', minWidth: 0, gap: spacing.sm },
+  tradeGrid: { width: '100%', minWidth: 0, gap: spacing.xxs },
   tradeGridWide: { flexDirection: 'row', alignItems: 'flex-start' },
-  tradePanel: { flex: 1, minWidth: 0, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
-  bookPanel: { flex: 1, minWidth: 0, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
+  tradePanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', paddingHorizontal: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
+  bookPanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', paddingHorizontal: spacing.xxs, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
   waiting: { minHeight: 180, justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
   waitingTitle: { ...typography.heading, color: colors.textPrimary },
   waitingText: { ...typography.bodyCompact, color: colors.textSecondary },

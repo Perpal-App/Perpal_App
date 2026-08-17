@@ -7,7 +7,7 @@ import {
   formatPacificaRatePercent,
   parsePacificaPrices,
 } from '@/integrations/perps/pacifica/pacificaMarketData';
-import { preparePacificaMarketOrder } from '@/integrations/perps/pacifica/pacificaOrder';
+import { preparePacificaOrder } from '@/integrations/perps/pacifica/pacificaOrder';
 import { MARKET_TIMEFRAMES } from '@/integrations/perps/pacifica/pacificaHistory';
 import {
   orderBookSpreadPercent,
@@ -36,7 +36,7 @@ describe('Pacifica canonical signing payload', () => {
 
 describe('Pacifica market order intent', () => {
   it('binds valid long TP/SL prices and the selected margin mode', async () => {
-    const plan = await preparePacificaMarketOrder({
+    const plan = await preparePacificaOrder({
       action: 'open',
       collateralBaseUnits: 100_000_000n,
       leverage: 5,
@@ -46,6 +46,8 @@ describe('Pacifica market order intent', () => {
         lotSize: '0.001', maxLeverage: 20, maxOrderSize: '100', minOrderSize: '0.001',
         symbol: 'TEST-PERP', tickSize: '0.1', venueRef: 'TEST',
       },
+      orderPrice: '99',
+      orderType: 'limit',
       portfolio: {
         accountEquity: '100', availableToSpend: '100', availableToWithdraw: '100',
         balance: '100', initialized: true, makerFee: '0.0002', orders: [], pendingBalance: '0',
@@ -62,9 +64,12 @@ describe('Pacifica market order intent', () => {
       },
       stopLossPrice: '90',
       takeProfitPrice: '110',
+      triggerPrice: undefined,
     });
 
     expect(plan.marginMode).toBe('cross');
+    expect(plan.orderPrice).toBe('99');
+    expect(plan.orderType).toBe('limit');
     expect(plan.takeProfit?.stopPrice).toBe('110');
     expect(plan.stopLoss?.stopPrice).toBe('90');
   });
