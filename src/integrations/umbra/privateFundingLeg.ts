@@ -17,6 +17,12 @@ import {
   PrivateFundingError,
 } from '@/integrations/umbra/privateFundingErrors';
 import {
+  PRIVATE_FUNDING_RELAY_POLL_INTERVAL_MS,
+  PRIVATE_FUNDING_RELAY_TIMEOUT_MS,
+  pollPrivateFundingRelay,
+  privateFundingRelayFailure,
+} from '@/integrations/umbra/privateFundingRelayer';
+import {
   matchingPrivateFundingNotes,
   privateFundingNoteId,
   type PrivateFundingNote,
@@ -25,8 +31,7 @@ import { seedScanBoundary } from '@/integrations/umbra/privateFundingScanBoundar
 import type { UmbraGatewayDependencies } from '@/integrations/umbra/umbraGateway';
 
 const SCAN_ATTEMPTS = 60;
-const RELAY_POLL_ATTEMPTS = 100;
-const POLL_INTERVAL_MS = 3_000;
+const SCAN_POLL_INTERVAL_MS = 3_000;
 
 export type PrivateFundingLegPhase =
   | 'depositing'
@@ -78,9 +83,11 @@ export async function runPrivateFundingLeg(input: {
   }
 
   if (state.relayRequestId !== null) {
-    await resumeRelay(state.relayRequestId, input.relayer, async (signature) => {
-      await save({ claimSignature: signature }, 'relaying');
-    });
+    const signature = await pollPrivateFundingRelay(
+      input.relayer,
+      state.relayRequestId,
+    );
+    await save({ claimSignature: signature }, 'relaying');
     return state;
   }
 
@@ -202,10 +209,16 @@ export async function runPrivateFundingLeg(input: {
     client: input.client,
   });
   let matches: readonly PrivateFundingNote[] = [];
+  const scanLoopStartedAtMs = performance.now();
 
   for (let attempt = 0; attempt < SCAN_ATTEMPTS; attempt += 1) {
     matches = matchingPrivateFundingNotes(
-      await scanWithDiagnostics(scanner, 'deposit'),
+      await scanWithDiagnostics(
+        scanner,
+        'deposit',
+        attempt + 1,
+        scanLoopStartedAtMs,
+      ),
       state,
     ).filter(
       (note) => !state.excludedNoteIds.includes(privateFundingNoteId(note)),
@@ -215,7 +228,9 @@ export async function runPrivateFundingLeg(input: {
       break;
     }
 
-    await wait(POLL_INTERVAL_MS);
+    if (attempt + 1 < SCAN_ATTEMPTS) {
+      await wait(SCAN_POLL_INTERVAL_MS);
+    }
   }
 
   if (matches.length !== 1 || matches[0]?.kind !== 'self-burnable') {
@@ -254,8 +269,8 @@ export async function runPrivateFundingLeg(input: {
         getRelayerAddress: input.relayer.getRelayerAddress,
       },
       awaitCompletion: true,
-      pollingIntervalMs: POLL_INTERVAL_MS,
-      timeoutMs: RELAY_POLL_ATTEMPTS * POLL_INTERVAL_MS,
+      pollingIntervalMs: PRIVATE_FUNDING_RELAY_POLL_INTERVAL_MS,
+      timeoutMs: PRIVATE_FUNDING_RELAY_TIMEOUT_MS,
       hooks: {
         onBatchSubmitted: async ({ requestId }) => {
           await save({ relayRequestId: requestId }, 'relaying');
@@ -273,40 +288,14 @@ export async function runPrivateFundingLeg(input: {
     batch.failureReason != null ||
     batch.txSignature === undefined
   ) {
-    throw new PrivateFundingError(
-      'Umbra relayer did not complete the private claim.',
-      'relay_failed',
+    throw privateFundingRelayFailure(
+      batch?.failureReason,
+      batch?.status ?? 'missing_batch',
     );
   }
 
   await save({ claimSignature: batch.txSignature }, 'relaying');
   return state;
-}
-
-async function resumeRelay(
-  requestId: string,
-  relayer: UmbraRelayer,
-  onComplete: (signature: string) => Promise<void>,
-): Promise<void> {
-  for (let attempt = 0; attempt < RELAY_POLL_ATTEMPTS; attempt += 1) {
-    const status = await relayer.pollClaimStatus(requestId);
-
-    if (status.status === 'completed' && status.txSignature !== undefined) {
-      await onComplete(status.txSignature);
-      return;
-    }
-
-    if (['failed', 'timed_out', 'refunded'].includes(status.status)) {
-      throw new PrivateFundingError(
-        'Umbra relayer did not complete the private claim.',
-        'relay_failed',
-      );
-    }
-
-    await wait(POLL_INTERVAL_MS);
-  }
-
-  throw new PrivateFundingError('Umbra relayer is still processing.', 'relay_pending');
 }
 
 function wait(ms: number): Promise<void> {
@@ -327,7 +316,7 @@ async function captureScanBoundary(
     );
   }
 
-  const startedAtMs = Date.now();
+  const startedAtMs = performance.now();
   console.info('[Perpal Umbra deposit]', JSON.stringify({
     event: 'scan_boundary_started',
   }));
@@ -338,7 +327,7 @@ async function captureScanBoundary(
   );
 
   console.info('[Perpal Umbra deposit]', JSON.stringify({
-    durationMs: Date.now() - startedAtMs,
+    durationMs: Math.round(performance.now() - startedAtMs),
     event: 'scan_boundary_completed',
     treeCount: boundary.length,
   }));
@@ -388,9 +377,15 @@ function rpcDiagnostic(cause: unknown): {
 async function scanWithDiagnostics<T>(
   scanner: () => Promise<T>,
   stage: 'recovery' | 'deposit',
+  attempt?: number,
+  loopStartedAtMs?: number,
 ): Promise<T> {
-  const startedAtMs = Date.now();
+  const startedAtMs = performance.now();
   console.info('[Perpal Umbra deposit]', JSON.stringify({
+    attempt: attempt ?? null,
+    elapsedMs: loopStartedAtMs === undefined
+      ? null
+      : Math.round(startedAtMs - loopStartedAtMs),
     event: 'scan_started',
     stage,
   }));
@@ -398,7 +393,8 @@ async function scanWithDiagnostics<T>(
   try {
     const result = await scanner();
     console.info('[Perpal Umbra deposit]', JSON.stringify({
-      durationMs: Date.now() - startedAtMs,
+      attempt: attempt ?? null,
+      durationMs: Math.round(performance.now() - startedAtMs),
       event: 'scan_completed',
       stage,
     }));
@@ -416,7 +412,8 @@ async function scanWithDiagnostics<T>(
         }
       : null;
     console.error('[Perpal Umbra deposit]', JSON.stringify({
-      durationMs: Date.now() - startedAtMs,
+      attempt: attempt ?? null,
+      durationMs: Math.round(performance.now() - startedAtMs),
       event: 'scan_error',
       errorCode: directErrorCode(cause),
       errorName: safeDiagnosticLabel(details?.name),

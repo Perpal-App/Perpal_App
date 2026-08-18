@@ -14,6 +14,7 @@ export async function ensurePrivateFundingRegistration(input: {
   readonly config: AppConfig;
   readonly dependencies: UmbraGatewayDependencies;
 }): Promise<void> {
+  const startedAtMs = performance.now();
   console.info('[Perpal Umbra registration]', JSON.stringify({
     event: 'ensure_started',
   }));
@@ -77,6 +78,7 @@ export async function ensurePrivateFundingRegistration(input: {
   });
 
   console.info('[Perpal Umbra registration]', JSON.stringify({
+    durationMs: Math.round(performance.now() - startedAtMs),
     event: 'ensure_completed',
     submittedTransactions: signatures.length,
   }));

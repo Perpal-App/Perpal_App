@@ -152,8 +152,14 @@ export async function assertRelayerSupportsMint(
   mint: string,
 ): Promise<void> {
   const supported = await relayer.getSupportedMints();
+  assertRelayerSupportsMints(supported.mints, [mint]);
+}
 
-  if (!supported.mints.includes(mint)) {
+export function assertRelayerSupportsMints(
+  supportedMints: readonly string[],
+  requiredMints: readonly string[],
+): void {
+  if (requiredMints.some((mint) => !supportedMints.includes(mint))) {
     throw new PrivateFundingError(
       'Umbra relayer does not support a required private-funding mint.',
       'mint_unsupported',

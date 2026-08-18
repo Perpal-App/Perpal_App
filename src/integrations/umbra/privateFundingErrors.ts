@@ -9,6 +9,10 @@ export class PrivateFundingError extends Error {
 }
 
 export function classifyPrivateFundingFailure(cause: unknown): string {
+  if (isGroth16ProofVerificationFailure(cause)) {
+    return 'proof_verification_failed';
+  }
+
   if (cause instanceof PrivateFundingError) {
     return cause.code;
   }
@@ -40,14 +44,6 @@ export function classifyPrivateFundingFailure(cause: unknown): string {
 
   const serialized = safeErrorText(cause).toLowerCase();
 
-  if (
-    serialized.includes('unabletoverifygroth16proof') ||
-    serialized.includes('14005') ||
-    serialized.includes('0x36b5')
-  ) {
-    return 'proof_verification_failed';
-  }
-
   if (serialized.includes('proof') || serialized.includes('zkey')) {
     return 'proof_failed';
   }
@@ -57,6 +53,28 @@ export function classifyPrivateFundingFailure(cause: unknown): string {
   }
 
   return 'private_funding_failed';
+}
+
+export function isGroth16ProofVerificationFailure(cause: unknown): boolean {
+  const serialized = safeErrorText(cause).toLowerCase();
+  return (
+    serialized.includes('unabletoverifygroth16proof') ||
+    /\b0x36b5\b/u.test(serialized) ||
+    /\berror\s+number\s*:?\s*14005\b/u.test(serialized) ||
+    /\bcustom\s+program\s+error\s*:?\s*14005\b/u.test(serialized) ||
+    hasStructuredCustomError(cause, 14_005)
+  );
+}
+
+export function privateFundingFailureDiagnostic(cause: unknown): string | null {
+  const diagnostic = safeErrorText(cause)
+    .replace(/https?:\/\/[^\s]+/giu, '[url]')
+    .replace(/[1-9A-HJ-NP-Za-km-z]{32,44}/gu, '[address]')
+    .replace(/[a-z0-9+/=_-]{64,}/giu, '[data]')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 240);
+  return diagnostic.length === 0 ? null : diagnostic;
 }
 
 export function privateFundingUserMessage(code: string): string {
@@ -138,4 +156,28 @@ function safeErrorText(value: unknown, depth = 0): string {
   }
 
   return String(value);
+}
+
+function hasStructuredCustomError(
+  value: unknown,
+  expectedCode: number,
+  depth = 0,
+): boolean {
+  if (depth > 5 || typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  if (value instanceof Error) {
+    return hasStructuredCustomError(value.cause, expectedCode, depth + 1);
+  }
+
+  return Object.entries(value as Record<string, unknown>).some(([key, entry]) => {
+    if (
+      key.toLowerCase() === 'custom' &&
+      (entry === expectedCode || entry === String(expectedCode))
+    ) {
+      return true;
+    }
+    return hasStructuredCustomError(entry, expectedCode, depth + 1);
+  });
 }

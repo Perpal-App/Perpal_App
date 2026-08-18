@@ -1,6 +1,5 @@
 import * as Crypto from 'expo-crypto';
 import { NATIVE_MINT } from '@solana/spl-token';
-import { getUmbraRelayer } from '@umbra-privacy/sdk/relayer';
 
 import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
@@ -14,7 +13,7 @@ import {
   privateFundingUserMessage,
 } from '@/integrations/umbra/privateFundingErrors';
 import {
-  assertRelayerSupportsMint,
+  assertRelayerSupportsMints,
   createPrivateFundingClient,
 } from '@/integrations/umbra/privateFundingClient';
 import {
@@ -23,6 +22,7 @@ import {
   type PrivateFundingLegState,
 } from '@/integrations/umbra/privateFundingLeg';
 import { ensurePrivateFundingRegistration } from '@/integrations/umbra/privateFundingRegistration';
+import { createPrivateFundingRelayer } from '@/integrations/umbra/privateFundingRelayer';
 import {
   assertPrivateFundingPreflight,
   preparePrivateFundingPreflight,
@@ -199,6 +199,7 @@ async function runPrivateFunding(
   input: PrivateFundingInput,
   onRecord: (record: PrivateFundingRecord) => void,
 ): Promise<PrivateFundingRecord> {
+  const operationStartedAtMs = performance.now();
   let record: PrivateFundingRecord = {
     ...initialRecord,
     errorCode: null,
@@ -242,12 +243,13 @@ async function runPrivateFunding(
       dependencies,
     });
     await save({ ...record, phase: 'depositing', updatedAtMs: Date.now() });
-    const relayer = getUmbraRelayer({
-      apiEndpoint: input.config.privacy.umbraRelayerUrl,
-    });
-    await Promise.all([
-      assertRelayerSupportsMint(relayer, record.mint),
-      assertRelayerSupportsMint(relayer, NATIVE_MINT.toBase58()),
+    const relayer = createPrivateFundingRelayer(
+      input.config.privacy.umbraRelayerUrl,
+    );
+    const supported = await relayer.getSupportedMints();
+    assertRelayerSupportsMints(supported.mints, [
+      record.mint,
+      NATIVE_MINT.toBase58(),
     ]);
 
     await runPrivateFundingLeg({
@@ -277,6 +279,10 @@ async function runPrivateFunding(
       errorCode: null,
       updatedAtMs: Date.now(),
     });
+    console.info('[Perpal Umbra deposit]', JSON.stringify({
+      durationMs: Math.round(performance.now() - operationStartedAtMs),
+      event: 'funding_completed',
+    }));
     return record;
   } catch (cause) {
     const classifiedCode = classifyPrivateFundingFailure(cause);
@@ -284,6 +290,12 @@ async function runPrivateFunding(
       ? `${record.provider}_deposit_simulation_failed`
       : classifiedCode;
     await save({ ...record, errorCode: code, updatedAtMs: Date.now() });
+    console.error('[Perpal Umbra deposit]', JSON.stringify({
+      durationMs: Math.round(performance.now() - operationStartedAtMs),
+      errorCode: code,
+      event: 'funding_failed',
+      phase: record.phase,
+    }));
     throw cause instanceof PrivateFundingError
       ? cause
       : new PrivateFundingError(privateFundingUserMessage(code), code);

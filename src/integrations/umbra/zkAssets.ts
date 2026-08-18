@@ -6,6 +6,8 @@ export type UmbraCircuit =
   | 'claimDepositIntoPublicAmount:n1';
 
 export const UMBRA_RN_ZK_ASSET_VERSION = 'v5';
+const MANIFEST_TIMEOUT_MS = 15_000;
+const ASSET_DOWNLOAD_TIMEOUT_MS = 300_000;
 export const UMBRA_ZKEY_SPECS: Record<
   UmbraCircuit,
   { readonly bytes: number; readonly path: string }
@@ -42,7 +44,15 @@ export async function getUmbraZkey(
   options?: { readonly refresh?: boolean },
 ): Promise<{ readonly source: 'cache' | 'network'; readonly uri: string }> {
   const asset = UMBRA_ZKEY_SPECS[circuit];
+  const manifestStartedAtMs = performance.now();
   await verifyManifest(baseUrl, circuit, asset.path);
+  console.info('[Perpal Umbra proof]', JSON.stringify({
+    circuit,
+    durationMs: Math.round(performance.now() - manifestStartedAtMs),
+    event: 'manifest_verified',
+    manifestVersion: UMBRA_RN_ZK_ASSET_VERSION,
+  }));
+  const assetStartedAtMs = performance.now();
 
   const directory = new Directory(
     Paths.document,
@@ -55,7 +65,7 @@ export async function getUmbraZkey(
   }
 
   if (file.exists && file.size === asset.bytes) {
-    logAssetReady(circuit, asset.bytes, 'cache');
+    logAssetReady(circuit, asset.bytes, 'cache', assetStartedAtMs);
     return { source: 'cache', uri: file.uri };
   }
 
@@ -67,7 +77,26 @@ export async function getUmbraZkey(
     await file.delete();
   }
 
-  await File.downloadFileAsync(`${baseUrl}/${asset.path}`, file);
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    ASSET_DOWNLOAD_TIMEOUT_MS,
+  );
+
+  try {
+    await File.downloadFileAsync(`${baseUrl}/${asset.path}`, file, {
+      signal: controller.signal,
+    });
+  } catch (cause) {
+    if (file.exists) {
+      await file.delete();
+    }
+    throw controller.signal.aborted
+      ? new UmbraAssetError('Umbra proving asset download timed out.')
+      : cause;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!file.exists || file.size !== asset.bytes) {
     if (file.exists) {
@@ -76,7 +105,7 @@ export async function getUmbraZkey(
     throw new UmbraAssetError('Umbra proving asset failed its byte-count check.');
   }
 
-  logAssetReady(circuit, asset.bytes, 'network');
+  logAssetReady(circuit, asset.bytes, 'network', assetStartedAtMs);
   return { source: 'network', uri: file.uri };
 }
 
@@ -84,10 +113,12 @@ function logAssetReady(
   circuit: UmbraCircuit,
   bytes: number,
   source: 'cache' | 'network',
+  startedAtMs: number,
 ): void {
   console.info('[Perpal Umbra proof]', JSON.stringify({
     bytes,
     circuit,
+    durationMs: Math.round(performance.now() - startedAtMs),
     event: 'asset_ready',
     manifestVersion: UMBRA_RN_ZK_ASSET_VERSION,
     source,
@@ -99,9 +130,22 @@ async function verifyManifest(
   circuit: UmbraCircuit,
   expectedPath: string,
 ): Promise<void> {
-  const response = await fetch(
-    `${baseUrl}/${UMBRA_RN_ZK_ASSET_VERSION}/manifest.json?t=${Date.now()}`,
-  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MANIFEST_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch(
+      `${baseUrl}/${UMBRA_RN_ZK_ASSET_VERSION}/manifest.json?t=${Date.now()}`,
+      { signal: controller.signal },
+    );
+  } catch (cause) {
+    throw controller.signal.aborted
+      ? new UmbraAssetError('Umbra proving manifest request timed out.')
+      : cause;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     throw new UmbraAssetError('Umbra proving manifest is unavailable.');

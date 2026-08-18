@@ -23,12 +23,18 @@ export function createNativeUmbraProver(
 ): NativeUmbraProver {
   return {
     prove: async (inputs) => {
+      const initializationStartedAtMs = performance.now();
       initialization ??= uniffiInitAsync();
       await initialization;
+      console.info('[Perpal Umbra proof]', JSON.stringify({
+        circuit,
+        durationMs: Math.round(performance.now() - initializationStartedAtMs),
+        event: 'native_ready',
+      }));
       const asset = await getUmbraZkey(assetBaseUrl, circuit);
 
       try {
-        return proveWithFallback(asset.uri, inputs);
+        return proveWithFallback(asset.uri, inputs, circuit);
       } catch (cause) {
         if (
           asset.source !== 'cache' ||
@@ -49,7 +55,7 @@ export function createNativeUmbraProver(
           refresh: true,
         });
         try {
-          const proof = proveWithFallback(refreshed.uri, inputs);
+          const proof = proveWithFallback(refreshed.uri, inputs, circuit);
           console.info('[Perpal Umbra proof]', JSON.stringify({
             circuit,
             event: 'asset_refresh_recovered',
@@ -67,18 +73,19 @@ export function createNativeUmbraProver(
 function proveWithFallback(
   uri: string,
   inputs: unknown,
+  circuit: UmbraCircuit,
 ): Readonly<Groth16ProofBytes> {
   const path = uri.replace(/^file:\/\//u, '');
   let rapidsnarkFailure: unknown;
 
   try {
-    return proveAndVerify(path, inputs, ProofLib.Rapidsnark);
+    return proveAndVerify(path, inputs, ProofLib.Rapidsnark, circuit);
   } catch (cause) {
     rapidsnarkFailure = cause;
   }
 
   try {
-    return proveAndVerify(path, inputs, ProofLib.Arkworks);
+    return proveAndVerify(path, inputs, ProofLib.Arkworks, circuit);
   } catch (cause) {
     throw new UmbraNativeProofError(rapidsnarkFailure, cause);
   }
@@ -161,18 +168,71 @@ function proveAndVerify(
   path: string,
   inputs: unknown,
   backend: ProofLib,
+  circuit: UmbraCircuit,
 ): Readonly<Groth16ProofBytes> {
-  const proofResult = Zk.mopro.generateCircomProof(
-    path,
-    serializeUmbraCircuitInputs(inputs),
-    backend,
-  );
+  const startedAtMs = performance.now();
+  let proofResult: ReturnType<typeof Zk.mopro.generateCircomProof>;
 
-  if (!Zk.mopro.verifyCircomProof(path, proofResult, backend)) {
+  try {
+    proofResult = Zk.mopro.generateCircomProof(
+      path,
+      serializeUmbraCircuitInputs(inputs),
+      backend,
+    );
+  } catch (cause) {
+    console.error('[Perpal Umbra proof]', JSON.stringify({
+      backend: backendLabel(backend),
+      circuit,
+      durationMs: Math.round(performance.now() - startedAtMs),
+      event: 'generation_failed',
+    }));
+    throw cause;
+  }
+  const generatedAtMs = performance.now();
+
+  let verified: boolean;
+  try {
+    verified = Zk.mopro.verifyCircomProof(path, proofResult, backend);
+  } catch (cause) {
+    console.error('[Perpal Umbra proof]', JSON.stringify({
+      backend: backendLabel(backend),
+      circuit,
+      durationMs: Math.round(performance.now() - generatedAtMs),
+      event: 'verification_failed',
+      outcome: 'native_error',
+    }));
+    throw cause;
+  }
+  const verifiedAtMs = performance.now();
+
+  if (!verified) {
+    console.error('[Perpal Umbra proof]', JSON.stringify({
+      backend: backendLabel(backend),
+      circuit,
+      durationMs: Math.round(verifiedAtMs - generatedAtMs),
+      event: 'verification_failed',
+      outcome: 'invalid',
+    }));
     throw new Error('Native Umbra proof failed local verification.');
   }
+  console.info('[Perpal Umbra proof]', JSON.stringify({
+    backend: backendLabel(backend),
+    circuit,
+    durationMs: Math.round(generatedAtMs - startedAtMs),
+    event: 'proof_generated',
+  }));
+  console.info('[Perpal Umbra proof]', JSON.stringify({
+    backend: backendLabel(backend),
+    circuit,
+    durationMs: Math.round(verifiedAtMs - generatedAtMs),
+    event: 'proof_verified',
+  }));
 
   return convertNativeProofToBytes(proofResult.proof);
+}
+
+function backendLabel(backend: ProofLib): 'arkworks' | 'rapidsnark' {
+  return backend === ProofLib.Rapidsnark ? 'rapidsnark' : 'arkworks';
 }
 
 export class UmbraNativeProofError extends Error {

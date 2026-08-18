@@ -1,4 +1,4 @@
-import { parseFearGreedIndex } from './fearGreed';
+import { parseFearGreedIndex } from '@/integrations/market-data/fearGreed';
 
 it('validates the CoinMarketCap Fear and Greed response', () => {
   expect(parseFearGreedIndex({

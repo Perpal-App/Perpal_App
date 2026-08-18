@@ -30,6 +30,11 @@ import {
   type PrivateFundingPreflightInput,
 } from '@/integrations/umbra/privateFundingPreflight';
 import {
+  nextPrivateFundingRelayRecoveryAttempt,
+  privateFundingRelayRecoveryKey,
+  recoverSubmittedPrivateFundingRelay,
+} from '@/integrations/umbra/privateFundingRelayRecovery';
+import {
   readPrivateFundingRecord,
   type PrivateFundingRecord,
 } from '@/integrations/umbra/umbraSecureStorage';
@@ -81,17 +86,24 @@ export function PrivateFundingProvider({
   const [error, setError] = useState<string | null>(null);
   const runningRef = useRef(false);
   const preflightRef = useRef<AbortController | null>(null);
+  const passiveRecoveryAbortRef = useRef<AbortController | null>(null);
+  const passiveRecoveryRef = useRef<string | null>(null);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         setActiveRefresh((value) => value + 1);
+      } else {
+        passiveRecoveryAbortRef.current?.abort();
       }
     });
     return () => subscription.remove();
   }, []);
 
   useEffect(() => {
+    passiveRecoveryAbortRef.current?.abort();
+    passiveRecoveryAbortRef.current = null;
+    passiveRecoveryRef.current = null;
     setRecord(null);
     setPreflight(null);
     setPreflightError(null);
@@ -119,6 +131,64 @@ export function PrivateFundingProvider({
       cancelled = true;
     };
   }, [mainWalletAddress]);
+
+  useEffect(() => {
+    const recoveryKey = privateFundingRelayRecoveryKey(record);
+    const attemptKey = nextPrivateFundingRelayRecoveryAttempt({
+      activeRefresh,
+      isRunning,
+      lastAttemptKey: passiveRecoveryRef.current,
+      recoveryKey,
+    });
+
+    if (record === null || attemptKey === null) {
+      return;
+    }
+
+    const config = readAppConfig();
+    if (!config.ok) {
+      return;
+    }
+
+    passiveRecoveryRef.current = attemptKey;
+    const controller = new AbortController();
+    passiveRecoveryAbortRef.current = controller;
+    void recoverSubmittedPrivateFundingRelay({
+      apiEndpoint: config.value.privacy.umbraRelayerUrl,
+      onRecord: setRecord,
+      record,
+      signal: controller.signal,
+    }).then((next) => {
+      if (!controller.signal.aborted && next.phase === 'complete') {
+        publishInAppNotification({
+          kind: 'funding',
+          outcome: 'success',
+          title: 'Private deposit completed',
+          message: 'Funds are available in private wallet T.',
+        });
+      }
+    }).catch((cause) => {
+      const errorCode = classifyPrivateFundingFailure(cause);
+      if (
+        !controller.signal.aborted &&
+        errorCode !== 'relay_cancelled' &&
+        errorCode !== 'relay_pending'
+      ) {
+        console.error('[Perpal private funding]', JSON.stringify({
+          event: 'passive_recovery_failed',
+          errorCode,
+        }));
+        setError(`${privateFundingUserMessage(errorCode)} Error reference: ${errorCode}.`);
+      }
+    });
+
+    return () => {
+      controller.abort();
+      if (passiveRecoveryAbortRef.current === controller) {
+        passiveRecoveryAbortRef.current = null;
+      }
+    };
+  }, [activeRefresh, isRunning, record]);
 
   const check = useCallback(async (
     input: BalanceCheckInput,
@@ -233,6 +303,8 @@ export function PrivateFundingProvider({
       return;
     }
 
+    passiveRecoveryAbortRef.current?.abort();
+    passiveRecoveryRef.current = null;
     runningRef.current = true;
     setIsRunning(true);
     setError(null);
