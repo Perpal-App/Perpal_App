@@ -53,6 +53,7 @@
     "@solana/webcrypto-ed25519-polyfill": "^7.0.0",
     "@umbra-privacy/rn-zk-prover": "5.0.0",
     "@umbra-privacy/sdk": "5.0.0-rc.6",
+    "@velocity-exchange/sdk": "0.13.0",
     "buffer": "6.0.3",
     "events": "3.3.0",
     "expo": "~57.0.13",

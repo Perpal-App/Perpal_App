@@ -16,30 +16,20 @@ import {
   TICK_RADIUS,
 } from '@/features/home/components/SentimentGauge';
 import type { FearGreedState } from '@/features/home/hooks/useFearGreed';
+import type { FearGreedClassification } from '@/integrations/market-data/fearGreed';
 import { colors, fonts, gradients, motion, radii, spacing, typography } from '@/theme/tokens';
 
-/**
- * The five bands, in order, with CoinMarketCap's own boundaries.
- *
- * A band runs up to but not including its `upTo`, which is what makes 40 the first point of
- * Neutral rather than the last of Fear — the venue classifies it that way, and a card whose
- * colour disagreed with the label printed on it would be worse than an uncoloured one.
- */
-const BANDS = [
-  { upTo: 20, mood: 'extreme-fear', tone: colors.sentimentExtremeFear },
-  { upTo: 40, mood: 'fear', tone: colors.sentimentFear },
-  { upTo: 60, mood: 'neutral', tone: colors.sentimentNeutral },
-  { upTo: 80, mood: 'greed', tone: colors.sentimentGreed },
-  {
-    upTo: Number.POSITIVE_INFINITY,
-    mood: 'extreme-greed',
-    tone: colors.sentimentExtremeGreed,
-  },
-] as const satisfies readonly {
-  readonly upTo: number;
+/** Match the provider's explicit classification instead of inventing score boundaries. */
+const PRESENTATION: Record<FearGreedClassification, {
   readonly mood: SentimentMood;
   readonly tone: string;
-}[];
+}> = {
+  'Extreme Fear': { mood: 'extreme-fear', tone: colors.sentimentExtremeFear },
+  Fear: { mood: 'fear', tone: colors.sentimentFear },
+  Neutral: { mood: 'neutral', tone: colors.sentimentNeutral },
+  Greed: { mood: 'greed', tone: colors.sentimentGreed },
+  'Extreme Greed': { mood: 'extreme-greed', tone: colors.sentimentExtremeGreed },
+};
 
 const FACE_SIZE = 18;
 
@@ -80,11 +70,7 @@ const BADGE_HEIGHT = Math.max(FACE_SIZE, typography.label.lineHeight) + BADGE_PA
  * block could carry.
  */
 export function FearGreedCard({ data, status }: FearGreedState) {
-  // Derived from the reading rather than matched against the venue's label text, so a wording
-  // change upstream cannot leave the card uncoloured.
-  const band = data === null
-    ? null
-    : BANDS[BANDS.findIndex((candidate) => data.value < candidate.upTo)] ?? null;
+  const band = data === null ? null : PRESENTATION[data.classification];
   const tone = band?.tone ?? colors.textMuted;
 
   return (
@@ -145,6 +131,7 @@ export function FearGreedCard({ data, status }: FearGreedState) {
           >
             <SentimentGauge tone={tone} value={data.value} />
           </View>
+          <Text style={styles.source}>Source: {data.source}</Text>
         </>
       )}
     </View>
@@ -208,6 +195,7 @@ const styles = StyleSheet.create({
   },
   // Takes the leftover width so a long classification never squeezes the title.
   title: { ...typography.label, flex: 1, minWidth: 0, color: colors.textPrimary },
+  source: { ...typography.caption, color: colors.textMuted },
   // Clipped, so the three material layers take the badge's corners and none of them needs to
   // repeat the radius. Padding is symmetric: a capsule needed more room on its flat side than
   // its curved one, but a rounded box has two flat sides, and the optical difference between a

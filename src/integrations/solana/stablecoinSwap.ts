@@ -26,6 +26,7 @@ const JUPITER_PROGRAM_ID = new PublicKey(
   'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
 );
 const MAX_COMPUTE_UNITS = 1_400_000;
+const TOKEN_ACCOUNT_BYTES = 165;
 
 type EncodedInstruction = {
   readonly programId: string;
@@ -70,9 +71,15 @@ type SwapBuildResponse = {
 };
 
 export type StablecoinSwapPlan = {
+  readonly createsTokenAccount: boolean;
   readonly expectedOutputBaseUnits: bigint;
+  readonly feeLamports: bigint;
+  readonly inputMint: string;
   readonly minimumOutputBaseUnits: bigint;
   readonly outputTokenAccount: string;
+  readonly rentLamports: bigint;
+  readonly requiredSolLamports: bigint;
+  readonly solBalanceLamports: bigint;
   readonly transaction: VersionedTransaction;
 };
 
@@ -123,6 +130,33 @@ export async function prepareStablecoinSwap(input: {
     owner,
     MAX_COMPUTE_UNITS,
   );
+  const [previewFee, solBalance, tokenAccountRent] = await Promise.all([
+    signedSolanaRpc<{ readonly value: number | null }>({
+      method: 'getFeeForMessage',
+      params: [base64.encode(simulationTransaction.message.serialize()), { commitment: 'confirmed' }],
+      rpcUrl: input.rpcUrl,
+      signer: input.signer,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
+    signedSolanaRpc<{ readonly value: number }>({
+      method: 'getBalance',
+      params: [input.owner, { commitment: 'confirmed' }],
+      rpcUrl: input.rpcUrl,
+      signer: input.signer,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
+    decoded.createsTokenAccount
+      ? signedSolanaRpc<number>({
+          method: 'getMinimumBalanceForRentExemption',
+          params: [TOKEN_ACCOUNT_BYTES, { commitment: 'confirmed' }],
+          rpcUrl: input.rpcUrl,
+          signer: input.signer,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        })
+      : Promise.resolve(0),
+  ]);
+
+  assertStablecoinSwapSolFunding(previewFee.value, solBalance.value, tokenAccountRent);
   const simulation = await signedSolanaRpc<{
     readonly value: {
       readonly err: unknown;
@@ -135,7 +169,7 @@ export async function prepareStablecoinSwap(input: {
       {
         commitment: 'confirmed',
         encoding: 'base64',
-        replaceRecentBlockhash: false,
+        replaceRecentBlockhash: true,
         sigVerify: false,
       },
     ],
@@ -162,12 +196,65 @@ export async function prepareStablecoinSwap(input: {
     Math.ceil(simulation.value.unitsConsumed * 1.15),
   );
 
+  const transaction = buildTransaction(decoded, owner, computeUnits);
+  const fee = await signedSolanaRpc<{ readonly value: number | null }>({
+    method: 'getFeeForMessage',
+    params: [base64.encode(transaction.message.serialize()), { commitment: 'confirmed' }],
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+
+  const feeLamports = fee.value;
+  assertStablecoinSwapSolFunding(feeLamports, solBalance.value, tokenAccountRent);
+  const requiredSolLamports = BigInt(feeLamports) + BigInt(tokenAccountRent);
+
   return {
+    createsTokenAccount: decoded.createsTokenAccount,
     expectedOutputBaseUnits: decoded.expectedOutputBaseUnits,
+    feeLamports: BigInt(feeLamports),
+    inputMint: input.inputMint,
     minimumOutputBaseUnits: decoded.minimumOutputBaseUnits,
     outputTokenAccount: decoded.outputTokenAccount.toBase58(),
-    transaction: buildTransaction(decoded, owner, computeUnits),
+    rentLamports: BigInt(tokenAccountRent),
+    requiredSolLamports,
+    solBalanceLamports: BigInt(solBalance.value),
+    transaction,
   };
+}
+
+export function assertStablecoinSwapSolFunding(
+  feeLamports: number | null,
+  solBalanceLamports: number,
+  rentLamports: number,
+): asserts feeLamports is number {
+  if (
+    feeLamports === null ||
+    !Number.isSafeInteger(feeLamports) ||
+    feeLamports < 0 ||
+    !Number.isSafeInteger(solBalanceLamports) ||
+    solBalanceLamports < 0 ||
+    !Number.isSafeInteger(rentLamports) ||
+    rentLamports < 0
+  ) {
+    throw new StablecoinSwapError('The network fee could not be verified.', 'fee_invalid');
+  }
+  if (solBalanceLamports < feeLamports + rentLamports) {
+    throw new StablecoinSwapError(
+      rentLamports > 0
+        ? 'Private wallet T needs more SOL for the network fee and first-time token-account rent.'
+        : 'Private wallet T needs more SOL for the network fee.',
+      'insufficient_sol',
+    );
+  }
+}
+
+export function hasValidSwapRouteWeights(
+  routePlan: readonly { readonly bps: number }[],
+): boolean {
+  return routePlan.length > 0 && routePlan.every(
+    ({ bps }) => Number.isInteger(bps) && bps > 0 && bps <= 10_000,
+  );
 }
 
 export async function readTokenBalance(input: {
@@ -225,6 +312,7 @@ export async function readTokenBalance(input: {
 
 type DecodedBuild = {
   readonly blockhash: string;
+  readonly createsTokenAccount: boolean;
   readonly expectedOutputBaseUnits: bigint;
   readonly instructions: readonly TransactionInstruction[];
   readonly lookupTables: readonly AddressLookupTableAccount[];
@@ -243,7 +331,6 @@ function decodeBuildResponse(
 ): DecodedBuild {
   const expected = unsignedAmount(response.outAmount);
   const minimum = unsignedAmount(response.otherAmountThreshold);
-  const routeBps = response.routePlan.reduce((sum, step) => sum + step.bps, 0);
 
   if (
     response.inputMint !== input.inputMint ||
@@ -254,8 +341,7 @@ function decodeBuildResponse(
     expected <= 0n ||
     minimum <= 0n ||
     minimum > expected ||
-    response.routePlan.length === 0 ||
-    routeBps !== 10_000 ||
+    !hasValidSwapRouteWeights(response.routePlan) ||
     response.cleanupInstruction !== null ||
     response.otherInstructions.length !== 0 ||
     response.tipInstruction !== null
@@ -302,6 +388,9 @@ function decodeBuildResponse(
 
   return {
     blockhash: decodeBlockhash(response.blockhashWithMetadata.blockhash),
+    createsTokenAccount: setup.some((instruction) =>
+      instruction.keys.some((account) => account.pubkey.equals(outputTokenAccount)),
+    ),
     expectedOutputBaseUnits: expected,
     instructions: [...compute, ...setup, swap],
     lookupTables: decodeLookupTables(response.addressesByLookupTableAddress),

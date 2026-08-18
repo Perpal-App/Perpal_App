@@ -17,6 +17,7 @@ import { MarketLogo } from '@/features/trade/components/MarketLogo';
 import { PacificaTradingWorkspace } from '@/features/trade/components/PacificaTradingWorkspace';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
+import { VelocityMarketDetailScreen } from '@/features/trade/screens/VelocityMarketDetailScreen';
 import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
 import { colors, fonts, layout, motion, radii, spacing, typography } from '@/theme/tokens';
@@ -34,9 +35,14 @@ const UNAVAILABLE = '--.--';
  */
 export function MarketDetailScreen() {
   const params = useLocalSearchParams<{
+    provider?: string | string[];
     venueRef?: string | string[];
   }>();
   const venueRef = Array.isArray(params.venueRef) ? params.venueRef[0] : params.venueRef;
+  const provider = Array.isArray(params.provider) ? params.provider[0] : params.provider;
+  if (provider === 'velocity') {
+    return <VelocityMarketDetailScreen venueRef={venueRef ?? ''} />;
+  }
   return <PacificaMarketDetailScreen venueRef={venueRef ?? ''} />;
 }
 

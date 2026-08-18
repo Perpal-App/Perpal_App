@@ -24,6 +24,7 @@ import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 type Props = {
   readonly balances: WalletBalances | null;
   readonly balancesPending: boolean;
+  readonly onBalancesChanged: () => void;
   readonly portfolioPending: boolean;
   readonly portfolioUnavailable: boolean;
   readonly snapshot: PacificaPortfolioSnapshot | null;
@@ -45,6 +46,7 @@ type Props = {
 export function PacificaPortfolioContent({
   balances,
   balancesPending,
+  onBalancesChanged,
   portfolioPending,
   portfolioUnavailable,
   snapshot,
@@ -140,7 +142,7 @@ export function PacificaPortfolioContent({
         <Text accessibilityRole="header" style={styles.heading}>Funds</Text>
         {/* The screen already polls both of these for the overview card above, so they are handed down
             rather than fetched again inside the sheet — one owner per refresh. */}
-        <Funds balances={balances} snapshot={snapshot} />
+        <Funds balances={balances} onBalancesChanged={onBalancesChanged} snapshot={snapshot} />
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger * 4} layout={layoutMorph()}>
@@ -163,9 +165,11 @@ export function PacificaPortfolioContent({
  */
 function Funds({
   balances,
+  onBalancesChanged,
   snapshot,
 }: {
   readonly balances: WalletBalances | null;
+  readonly onBalancesChanged: () => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
 }) {
   const [mode, setMode] = useState<FundsMode | null>(null);
@@ -180,6 +184,13 @@ function Funds({
           style={styles.action}
         />
         <ActionButton
+          accessibilityHint="Opens the private wallet swap panel"
+          label="Swap"
+          onPress={() => setMode('swap')}
+          style={styles.action}
+          tone="neutral"
+        />
+        <ActionButton
           accessibilityHint="Opens the withdrawal panel"
           label="Withdraw"
           onPress={() => setMode('withdraw')}
@@ -191,6 +202,7 @@ function Funds({
         balances={balances}
         mode={mode}
         onClose={() => setMode(null)}
+        onBalancesChanged={onBalancesChanged}
         snapshot={snapshot}
       />
     </>

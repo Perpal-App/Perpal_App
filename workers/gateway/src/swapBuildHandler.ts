@@ -43,7 +43,6 @@ export async function handleSwapBuildRequest(input: {
   const url = new URL('/swap/v2/build', input.config.origin);
   url.search = new URLSearchParams({
     amount: payload.amount,
-    blockhashSlotsToExpiry: '300',
     computeUnitPricePercentile: 'medium',
     inputMint: payload.inputMint,
     maxAccounts: '64',

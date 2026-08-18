@@ -54,7 +54,9 @@ export function useWalletBalances(input: {
 }) {
   const [balances, setBalances] = useState<WalletBalances | null>(null);
   const [status, setStatus] = useState<BalanceStatus>('idle');
+  const [refreshRevision, setRefreshRevision] = useState(0);
   const hasBalances = useRef(false);
+  const refresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
 
   useEffect(() => {
     hasBalances.current = false;
@@ -153,10 +155,10 @@ export function useWalletBalances(input: {
         controller?.abort();
         if (timer !== undefined) clearTimeout(timer);
       };
-    }, [input.privateAddress, input.publicAddress, input.signer]),
+    }, [input.privateAddress, input.publicAddress, input.signer, refreshRevision]),
   );
 
-  return { balances, status };
+  return { balances, refresh, status };
 }
 
 function logWalletBalanceFailure(cause: unknown, attempt: number): void {

@@ -4,6 +4,7 @@ import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { AppScreen } from '@/components/layout/AppScreen';
+import { ActionButton } from '@/components/ui/ActionButton';
 import { SearchField } from '@/components/ui/SearchField';
 import { readAppConfig } from '@/config/appConfig';
 import {
@@ -15,14 +16,17 @@ import {
 import {
   usePacificaMarkets,
 } from '@/features/trade/hooks/usePacificaMarkets';
+import { useVelocityMarkets } from '@/features/trade/hooks/useVelocityMarkets';
 import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { useMinimizeOnScroll } from '@/navigation/tabs/minimizeState';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
+import { useAppPreferences } from '@/storage/AppPreferencesProvider';
 
 export function TradeScreen() {
   const router = useRouter();
   const config = readAppConfig();
+  const { perpsProvider, setPerpsProvider } = useAppPreferences();
   const [query, setQuery] = useState('');
   const onScroll = useMinimizeOnScroll();
   const compact = useWindowDimensions().width < layout.compactWidth;
@@ -30,24 +34,38 @@ export function TradeScreen() {
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     config.ok ? config.value.perps.pacificaAssetOrigin : '',
     config.ok ? config.value.perps.pacificaWsOrigin : '',
+    perpsProvider === 'pacifica',
+  );
+  const velocity = useVelocityMarkets(
+    config.ok ? config.value.api.publicRpcUrl : '',
+    config.ok ? config.value.perps.velocityProgramId : '',
+    config.ok ? config.value.perps.pacificaAssetOrigin : '',
+    perpsProvider === 'velocity',
   );
   const entries = useMemo<readonly MarketTableEntry[]>(
     () => {
-      const rows = joinMarkets(
-        pacifica.markets,
-        pacifica.snapshots,
-        query,
-        (snapshot) => `Next ${formatPacificaRatePercent(snapshot.nextFundingRate)}`,
-      );
+      const rows = perpsProvider === 'pacifica'
+        ? joinMarkets(
+            pacifica.markets,
+            pacifica.snapshots,
+            query,
+            (snapshot) => `Next ${formatPacificaRatePercent(snapshot.nextFundingRate)}`,
+          )
+        : joinMarkets(
+            velocity.markets,
+            velocity.snapshots,
+            query,
+            () => 'USDT collateral',
+          );
       return rows.sort((left, right) => {
         const leftVolume = left.venue?.volume24h?.baseUnits ?? -1n;
         const rightVolume = right.venue?.volume24h?.baseUnits ?? -1n;
         return leftVolume === rightVolume ? 0 : leftVolume > rightVolume ? -1 : 1;
       });
     },
-    [pacifica.markets, pacifica.snapshots, query],
+    [pacifica.markets, pacifica.snapshots, perpsProvider, query, velocity.markets, velocity.snapshots],
   );
-  const venueStatus = pacifica.status;
+  const venueStatus = perpsProvider === 'pacifica' ? pacifica.status : velocity.status;
 
   // Both stable, which is what lets `MarketTableRow`'s memo hold: a `renderItem` or an
   // `onPress` rebuilt inline would hand every row a new prop on every price message and
@@ -55,9 +73,9 @@ export function TradeScreen() {
   const openMarket = useCallback(
     (venueRef: string) => router.push({
       pathname: '/(tabs)/trade/[venueRef]',
-      params: { venueRef },
+      params: { provider: perpsProvider, venueRef },
     }),
-    [router],
+    [perpsProvider, router],
   );
   const renderRow = useCallback(
     ({ item }: { readonly item: MarketTableEntry }) => (
@@ -85,6 +103,22 @@ export function TradeScreen() {
             <View style={[styles.header, compact && styles.compactGutter]}>
               <Text accessibilityRole="header" style={styles.title}>Markets</Text>
             </View>
+            <View accessibilityRole="radiogroup" style={[styles.provider, compact && styles.compactGutter]}>
+              <ActionButton
+                label="Pacifica"
+                onPress={() => setPerpsProvider('pacifica')}
+                selected={perpsProvider === 'pacifica'}
+                style={styles.providerButton}
+                tone={perpsProvider === 'pacifica' ? 'accent' : 'neutral'}
+              />
+              <ActionButton
+                label="Velocity"
+                onPress={() => setPerpsProvider('velocity')}
+                selected={perpsProvider === 'velocity'}
+                style={styles.providerButton}
+                tone={perpsProvider === 'velocity' ? 'accent' : 'neutral'}
+              />
+            </View>
             <SearchField
               compact={compact}
               onChangeText={setQuery}
@@ -93,7 +127,7 @@ export function TradeScreen() {
             />
             {venueStatus === 'error' ? (
               <Text accessibilityRole="alert" style={styles.notice}>
-                Pacifica market data is reconnecting. Trading stays blocked until prices are current.
+                {perpsProvider === 'pacifica' ? 'Pacifica' : 'Velocity'} market data is reconnecting. Trading stays blocked until prices are current.
               </Text>
             ) : null}
             <MarketTableHeader compact={compact} />
@@ -104,6 +138,7 @@ export function TradeScreen() {
             compact={compact}
             query={query}
             status={venueStatus}
+            provider={perpsProvider}
           />
         )}
         keyboardShouldPersistTaps="handled"
@@ -168,9 +203,11 @@ function MarketListPlaceholder({
   compact,
   query,
   status,
+  provider,
 }: {
   readonly compact: boolean;
   readonly query: string;
+  readonly provider: 'pacifica' | 'velocity';
   readonly status: 'idle' | 'loading' | 'ready' | 'error';
 }) {
   const searching = query.trim().length > 0;
@@ -186,7 +223,7 @@ function MarketListPlaceholder({
   if (status === 'ready') {
     return (
       <Text accessibilityLiveRegion="polite" style={styles.empty}>
-        No markets reported by Pacifica.
+        {`No markets reported by ${provider === 'pacifica' ? 'Pacifica' : 'Velocity'}.`}
       </Text>
     );
   }
@@ -220,6 +257,14 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   title: { ...typography.title, color: colors.textPrimary },
+
+  provider: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: layout.screenPadding,
+    paddingBottom: spacing.sm,
+  },
+  providerButton: { flex: 1 },
 
 
   notice: {

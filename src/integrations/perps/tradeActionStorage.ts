@@ -5,13 +5,15 @@ import type { PerpsProviderId } from '@/config/appConfig';
 
 const PREFIX = 'perpal.trade-action.v1.';
 
+export type TradeActionScope = PerpsProviderId | 'wallet';
+
 export type PendingTradeAction = {
   readonly amountBaseUnits: string;
   readonly expiresAtMs: number;
   readonly idempotencyKey: string;
   readonly kind: 'conversion' | 'setup' | 'collateral' | 'trade';
   readonly owner: string;
-  readonly provider: PerpsProviderId;
+  readonly provider: TradeActionScope;
   readonly signature: string;
   readonly signedTransactionBase64: string | null;
   readonly updatedAtMs: number;
@@ -20,7 +22,7 @@ export type PendingTradeAction = {
 
 export async function readPendingTradeAction(
   owner: string,
-  provider: PerpsProviderId,
+  provider: TradeActionScope,
 ): Promise<PendingTradeAction | null> {
   const value = await SecureStore.getItemAsync(await key(owner, provider));
   if (value === null) return null;
@@ -53,12 +55,12 @@ export async function writePendingTradeAction(
 
 export async function removePendingTradeAction(
   owner: string,
-  provider: PerpsProviderId,
+  provider: TradeActionScope,
 ): Promise<void> {
   await SecureStore.deleteItemAsync(await key(owner, provider));
 }
 
-async function key(owner: string, provider: PerpsProviderId): Promise<string> {
+async function key(owner: string, provider: TradeActionScope): Promise<string> {
   const digest = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     `${owner}:${provider}`,
@@ -69,7 +71,7 @@ async function key(owner: string, provider: PerpsProviderId): Promise<string> {
 function valid(
   value: unknown,
   owner: string,
-  provider: PerpsProviderId,
+  provider: TradeActionScope,
 ): value is PendingTradeAction {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;

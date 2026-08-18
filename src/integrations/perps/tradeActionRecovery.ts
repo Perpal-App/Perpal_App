@@ -1,8 +1,8 @@
-import type { PerpsProviderId } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
   readPendingTradeAction,
   removePendingTradeAction,
+  type TradeActionScope,
 } from '@/integrations/perps/tradeActionStorage';
 import {
   readSubmittedTransactionStatus,
@@ -23,7 +23,7 @@ export type TradeActionRecoveryStatus =
 
 export async function reconcilePendingTradeAction(input: {
   readonly owner: string;
-  readonly provider: PerpsProviderId;
+  readonly provider: TradeActionScope;
   readonly rpcUrl: string;
   readonly signal?: AbortSignal;
   readonly signer: GatewayRequestSigner;
@@ -49,7 +49,8 @@ export async function reconcilePendingTradeAction(input: {
     );
   }
   if (record.signedTransactionBase64 !== null && Date.now() < record.expiresAtMs) {
-    const versioned = record.kind === 'conversion' || record.kind === 'trade';
+    const versioned = record.provider === 'velocity' ||
+      record.kind === 'conversion' || record.kind === 'trade';
     const current = versioned
       ? await storedVersionedTransactionIsCurrent({
           rpcUrl: input.rpcUrl,

@@ -78,6 +78,7 @@ export function PortfolioScreen() {
     <PacificaPortfolioContent
       balances={walletBalances.balances}
       balancesPending={walletBalances.status !== 'ready' && walletBalances.status !== 'error'}
+      onBalancesChanged={walletBalances.refresh}
       portfolioPending={portfolio.status !== 'ready' && portfolio.status !== 'error'}
       portfolioUnavailable={portfolio.status === 'error'}
       snapshot={portfolio.snapshot}

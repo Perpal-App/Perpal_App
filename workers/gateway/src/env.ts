@@ -28,7 +28,7 @@ export type WorkerEnv = {
   readonly CORS_ALLOWED_ORIGINS?: string;
   readonly PYTH_HERMES_ORIGIN?: string;
   readonly PYTH_MARKET_FEEDS?: string;
-  readonly CMC_FEAR_GREED_URL?: string;
+  readonly FEAR_GREED_URL?: string;
   readonly COINDESK_NEWS_FEED_URL?: string;
   readonly MARKETWATCH_NEWS_FEED_URL?: string;
   readonly FED_MONETARY_NEWS_FEED_URL?: string;
@@ -173,7 +173,7 @@ export function resolveMarketDataConfig(env: WorkerEnv): MarketDataConfig {
 }
 
 export function resolveFearGreedUrl(env: WorkerEnv): string {
-  return parseHttpsUrl(env.CMC_FEAR_GREED_URL, 'CMC_FEAR_GREED_URL');
+  return parseHttpsUrl(env.FEAR_GREED_URL, 'FEAR_GREED_URL');
 }
 
 export type PublicMarketBriefingConfig = {

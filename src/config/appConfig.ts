@@ -2,7 +2,7 @@ import { base58 } from '@scure/base';
 
 import type { PrivyPublicConfig } from '@/config/publicEnv';
 
-export type PerpsProviderId = 'pacifica';
+export type PerpsProviderId = 'pacifica' | 'velocity';
 export type SolanaCluster = 'mainnet';
 
 export type AppConfig = {
@@ -16,6 +16,7 @@ export type AppConfig = {
     readonly pacificaCentralState: string;
     readonly pacificaVault: string;
     readonly pacificaWithdrawalFeeBaseUnits: bigint;
+    readonly velocityProgramId: string;
     readonly usdcMint: string;
     readonly usdtMint: string;
   };
@@ -76,6 +77,7 @@ export type RawAppEnv = {
   readonly pacificaCentralState: string;
   readonly pacificaVault: string;
   readonly pacificaWithdrawalFeeUsdc: string;
+  readonly velocityProgramId: string;
   readonly usdcMint: string;
   readonly usdtMint: string;
   readonly umbraIndexerUrl: string;
@@ -119,6 +121,8 @@ export function readRawAppEnv(): RawAppEnv {
       process.env.EXPO_PUBLIC_PACIFICA_VAULT?.trim() ?? '',
     pacificaWithdrawalFeeUsdc:
       process.env.EXPO_PUBLIC_PACIFICA_WITHDRAWAL_FEE_USDC?.trim() ?? '',
+    velocityProgramId:
+      process.env.EXPO_PUBLIC_VELOCITY_PROGRAM_ID?.trim() ?? '',
     usdcMint: process.env.EXPO_PUBLIC_USDC_MINT?.trim() ?? '',
     usdtMint: process.env.EXPO_PUBLIC_USDT_MINT?.trim() ?? '',
     umbraIndexerUrl:
@@ -194,6 +198,7 @@ function validateAddress(
     | 'EXPO_PUBLIC_PACIFICA_PROGRAM_ID'
     | 'EXPO_PUBLIC_PACIFICA_CENTRAL_STATE'
     | 'EXPO_PUBLIC_PACIFICA_VAULT'
+    | 'EXPO_PUBLIC_VELOCITY_PROGRAM_ID'
     | 'EXPO_PUBLIC_USDC_MINT'
     | 'EXPO_PUBLIC_USDT_MINT',
   issues: ConfigIssue[],
@@ -362,6 +367,11 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_PACIFICA_VAULT',
     issues,
   );
+  const velocityProgramId = validateAddress(
+    raw.velocityProgramId,
+    'EXPO_PUBLIC_VELOCITY_PROGRAM_ID',
+    issues,
+  );
   const usdcMint = validateAddress(raw.usdcMint, 'EXPO_PUBLIC_USDC_MINT', issues);
   const usdtMint = validateAddress(
     raw.usdtMint,
@@ -428,6 +438,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
         pacificaCentralState,
         pacificaVault,
         pacificaWithdrawalFeeBaseUnits,
+        velocityProgramId,
         usdcMint,
         usdtMint,
       },
@@ -465,22 +476,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
 
 let resolved: AppConfigResult | null = null;
 
-/**
- * The build's configuration, parsed once per process.
- *
- * Cached deliberately rather than as an optimisation of last resort. Every value comes
- * from an `EXPO_PUBLIC_*` variable, which the bundler inlines at build time, so the
- * answer cannot change while the app is running — and deriving it is not cheap: a call
- * runs five base58 decodes, seven URL parses, a regex and a BigInt construction. Screens
- * call this during render, so an uncached read charged the whole validation once per
- * screen re-rendered, which on a tab switch is every mounted screen.
- *
- * Returning one object identity matters as much as the saved work: callers can now put
- * the result straight into a dependency array without re-running the effect behind it.
- *
- * `parseAppConfig` stays pure and exported for the tests, which drive it with explicit
- * raw environments rather than the real one.
- */
+/** Build-time public configuration, parsed once because it cannot change in-process. */
 export function readAppConfig(): AppConfigResult {
   resolved ??= parseAppConfig(readRawAppEnv());
   return resolved;

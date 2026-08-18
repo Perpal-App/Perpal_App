@@ -23,10 +23,11 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
 import { PrivateWithdrawPanel } from '@/features/portfolio/components/PrivateWithdrawPanel';
+import { PrivateSwapPanel } from '@/features/portfolio/components/PrivateSwapPanel';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, layout, motion, radii, spacing } from '@/theme/tokens';
 
-export type FundsMode = 'deposit' | 'withdraw';
+export type FundsMode = 'deposit' | 'swap' | 'withdraw';
 
 /**
  * Share of the sheet's own height a release must be heading past for it to close.
@@ -80,12 +81,14 @@ export function FundsSheet({
   balances,
   mode,
   onClose,
+  onBalancesChanged,
   snapshot,
 }: {
   /** Forwarded so the withdraw panel lists the tokens actually held, not every supported one. */
   readonly balances: WalletBalances | null;
   readonly mode: FundsMode | null;
   readonly onClose: () => void;
+  readonly onBalancesChanged: () => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
 }) {
   const reduceMotion = useReducedMotion();
@@ -256,6 +259,12 @@ export function FundsSheet({
                   ) : null}
                   {mode === 'withdraw' ? (
                     <PrivateWithdrawPanel balances={balances} snapshot={snapshot} />
+                  ) : null}
+                  {mode === 'swap' ? (
+                    <PrivateSwapPanel
+                      balances={balances}
+                      onBalancesChanged={onBalancesChanged}
+                    />
                   ) : null}
                 </ScrollView>
               </View>
