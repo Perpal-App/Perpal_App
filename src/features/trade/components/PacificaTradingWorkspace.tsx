@@ -150,7 +150,11 @@ const styles = StyleSheet.create({
   workspace: { width: '100%', minWidth: 0, gap: spacing.sm },
   tradeView: { width: '100%', minWidth: 0, gap: spacing.sm },
   tradeGrid: { width: '100%', minWidth: 0, gap: spacing.xs },
-  tradeGridWide: { flexDirection: 'row', alignItems: 'flex-start' },
+  // `stretch`, so both panels take the height of the taller one and their borders start and
+  // end on the same two lines. Under `flex-start` each card was only as tall as its own
+  // contents, which left the shorter of the two ending mid-column with a gap beneath it —
+  // and made the book's level count a layout dependency of the ticket's row count.
+  tradeGridWide: { flexDirection: 'row', alignItems: 'stretch' },
   tradePanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', paddingHorizontal: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
   // No padding of its own: the book's rows, toolbar and footnote share one gutter that
   // the panel inside sets, so the depth bars end on the same line as the numbers above

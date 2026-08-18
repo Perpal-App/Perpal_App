@@ -16,6 +16,7 @@ import {
   CollateralSlider,
   Field,
   PercentPresets,
+  StaticControl,
   TicketRow,
   Toggle,
 } from '@/features/trade/components/OrderTicketControls';
@@ -68,7 +69,6 @@ export function PacificaOrderTicket(props: {
   const [action, setAction] = useState<PacificaOrderAction>('open');
   const [side, setSide] = useState<PacificaOrderSide>(props.initialSide ?? 'long');
   const [orderType, setOrderType] = useState<PacificaOrderType>('market');
-  const [marginMode, setMarginMode] = useState<PacificaMarginMode>(props.market.isolatedOnly ? 'isolated' : 'cross');
   const [collateral, setCollateral] = useState('');
   const [leverage, setLeverage] = useState(String(Math.min(5, props.market.maxLeverage)));
   const [limitPrice, setLimitPrice] = useState('');
@@ -89,6 +89,11 @@ export function PacificaOrderTicket(props: {
   const [orderId, setOrderId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Not a choice, so not state. Cross is the mode for every market that allows it, and a
+  // market that does not is isolated whatever the ticket says — there was nothing for a
+  // second button to decide. The mode still travels with the plan and is spelled out in the
+  // confirmation before anything is signed.
+  const marginMode: PacificaMarginMode = props.market.isolatedOnly ? 'isolated' : 'cross';
   const controller = useRef<AbortController | null>(null);
   const recovery = useTradeActionRecovery({
     owner: session.address,
@@ -117,7 +122,6 @@ export function PacificaOrderTicket(props: {
     setTakeProfit('');
     setStopLoss('');
     setTriggerPrice('');
-    setMarginMode(props.market.isolatedOnly ? 'isolated' : 'cross');
     setLeverage(String(Math.min(5, props.market.maxLeverage)));
     if (session.status !== 'ready' || session.address === null) return;
     const abort = new AbortController();
@@ -334,23 +338,24 @@ export function PacificaOrderTicket(props: {
     // No "Order" heading: the workspace's Trade tab already names this column, and in a
     // half-width panel a title row costs a control's worth of height to repeat it.
     <View style={styles.panel}>
+      {/* Margin mode and leverage share the row, the way the reference pairs them: two
+          settings that describe the position's risk, stated in two equal boxes above the
+          order that will carry it. Mode is stated rather than chosen — cross wherever the
+          venue allows it — so it takes the quieter box of the two. */}
       <View style={styles.controls}>
-        <Choice disabled={props.market.isolatedOnly} label="Cross" onPress={() => { reset(); setMarginMode('cross'); }} selected={marginMode === 'cross'} />
-        <Choice label="Isolated" onPress={() => { reset(); setMarginMode('isolated'); }} selected={marginMode === 'isolated'} />
+        <StaticControl
+          accessibilityLabel={`Margin mode ${marginMode}`}
+          label={marginMode === 'cross' ? 'Cross' : 'Isolated'}
+        />
+        <Field
+          accessibilityLabel="Leverage"
+          align="center"
+          onChangeText={(value) => { reset(); setLeverage(value); }}
+          suffix="×"
+          value={leverage}
+        />
       </View>
-      {/* Leverage rides on the order-type row rather than a row of its own. On its own it
-          was a full-width box holding one digit and a multiplication sign, which read as
-          an unfinished control and cost the column a row it did not need. */}
       <PacificaOrderTypeFields
-        leverageField={
-          <Field
-            accessibilityLabel="Leverage"
-            align="right"
-            onChangeText={(value) => { reset(); setLeverage(value); }}
-            suffix="×"
-            value={leverage}
-          />
-        }
         limitPrice={limitPrice}
         markPrice={`$${formatAmountWithCommas(props.snapshot.price)}`}
         onLimitPriceChange={(value) => { reset(); setLimitPrice(value); }}

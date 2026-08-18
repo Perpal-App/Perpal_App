@@ -97,38 +97,61 @@ export function Choice(props: {
  */
 export function Field(props: {
   readonly accessibilityLabel: string;
-  readonly align?: 'left' | 'right';
-  /**
-   * Standing text at the head of the field, for a value that has no placeholder to name it.
-   *
-   * A leverage box holding `3×` and nothing else reads as an unfinished control — there is
-   * no empty state in which it could tell you what it is, because it always holds a number.
-   */
-  readonly label?: string;
+  readonly align?: 'left' | 'right' | 'center';
   readonly onChangeText: (value: string) => void;
   readonly placeholder?: string;
   readonly suffix: string;
   readonly value: string;
 }) {
-  const tight = props.align === 'right';
+  const input = useRef<TextInput>(null);
+  const centred = props.align === 'center';
+  const tight = centred || props.align === 'right';
 
   return (
-    <View style={styles.field}>
-      {props.label === undefined ? null : (
-        <Text numberOfLines={1} style={styles.fieldLabel}>{props.label}</Text>
-      )}
+    // The box focuses the input, not just the glyphs inside it. Centred, the input is only
+    // as wide as the digits it holds, so without this most of the control would be dead to
+    // a finger. `accessible={false}` keeps it out of the accessibility tree — the input is
+    // the thing being reached, and a wrapper announcing itself in front of it is noise.
+    <Pressable
+      accessible={false}
+      onPress={() => input.current?.focus()}
+      style={[styles.field, centred && styles.fieldCentred]}
+    >
       <TextInput
         accessibilityLabel={props.accessibilityLabel}
         inputMode="decimal"
         onChangeText={props.onChangeText}
         placeholder={props.placeholder}
         placeholderTextColor={colors.textMuted}
-        // Still the full width of the field either way: the whole box has to stay tappable,
-        // or a control this size becomes a target only a stylus could hit.
-        style={[styles.input, tight && styles.inputRight]}
+        ref={input}
+        style={[styles.input, tight && styles.inputRight, centred && styles.inputCentred]}
         value={props.value}
       />
-      <Text style={[styles.suffix, tight && styles.suffixTight]}>{props.suffix}</Text>
+      <Text style={[styles.suffix, tight && styles.suffixTight, centred && styles.suffixCentred]}>
+        {props.suffix}
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * A setting the ticket states rather than asks about.
+ *
+ * Same footprint as the controls beside it so a row of settings reads as one row, and a
+ * quieter border and label than a `Choice` so it does not invite a tap it has nothing to do
+ * with. Margin mode is the case it exists for: cross wherever the venue allows it, isolated
+ * on the markets that only offer that, and never a decision the ticket can make.
+ */
+export function StaticControl({
+  accessibilityLabel,
+  label,
+}: {
+  readonly accessibilityLabel?: string;
+  readonly label: string;
+}) {
+  return (
+    <View accessible accessibilityLabel={accessibilityLabel ?? label} style={styles.staticControl}>
+      <Text numberOfLines={1} style={styles.staticLabel}>{label}</Text>
     </View>
   );
 }
@@ -409,6 +432,22 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     backgroundColor: colors.surface,
   },
+  fieldCentred: { justifyContent: 'center' },
+  // A stated setting, not a choice: the same box as its neighbours, on the quieter of the two
+  // border tokens and with the label a step back from theirs.
+  staticControl: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xxs,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surface,
+  },
+  staticLabel: { ...typography.bodyCompact, color: colors.textSecondary },
   input: {
     flex: 1,
     minWidth: 0,
@@ -417,12 +456,17 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     ...typography.bodyCompact,
   },
-  fieldLabel: { ...typography.caption, flexShrink: 0, paddingLeft: spacing.xs, color: colors.textMuted },
   inputRight: { paddingRight: 2, textAlign: 'right' },
+  // Centred, the input sizes to its own digits instead of filling the box, so the number and
+  // its unit sit together in the middle as one figure — `5×` reading the way `50x` does in
+  // the reference, rather than a digit at one edge and a mark at the other. `flexBasis` has
+  // to come back to `auto` because `flex: 1` on the base style pinned it to zero.
+  inputCentred: { flexGrow: 0, flexBasis: 'auto', minWidth: 24, paddingHorizontal: 0 },
   suffix: { ...typography.caption, paddingRight: spacing.xs, color: colors.textMuted },
   // Same size as the value it belongs to, so `3×` reads as one figure rather than a number
   // with a smaller mark parked next to it.
   suffixTight: { ...typography.bodyCompact, color: colors.textSecondary },
+  suffixCentred: { paddingRight: 0, paddingLeft: 1 },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   // The touch area, which is deliberately much bigger than the bar it draws. The
   // half-handle of horizontal padding is what keeps the handle inside the panel at both

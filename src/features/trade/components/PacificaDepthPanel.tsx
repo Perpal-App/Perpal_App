@@ -30,9 +30,10 @@ type AggregationId = `${PacificaBookAggregation}`;
 /**
  * Levels rendered per side, by how much room the panel has.
  *
- * Nine a side lands the split book's last row near the order ticket's, which is what
- * makes the two columns read as one workspace instead of two unrelated lists. The wide
- * tab can afford a few more.
+ * A density choice and nothing else now. It used to be tuned against the order ticket's
+ * height so the two columns would end level, which made it break every time the ticket
+ * gained or lost a row; the grid stretches both panels to the taller of the two instead, so
+ * the count is free to be about how much of the book is worth reading on a phone.
  */
 const DEPTH: Record<OrderBookWidth, number> = { full: 12, split: 9 };
 
@@ -88,21 +89,37 @@ export function PacificaDepthPanel({
 
   return (
     <View style={styles.panel}>
-      <View style={styles.toolbar}>
+      {/* Two rows in the split column, one at full width, and neither of them wraps.
+          `flexWrap` decided this before, which meant the step control sat beside the title
+          on a large phone and dropped under it on a small one — or on the same phone the
+          moment the venue's step went from `1` to `0.0001`. A header that rearranges itself
+          around the value it is showing never looks aligned, because it is only aligned by
+          accident. Stacked is also what the reference does with it. */}
+      <View style={variant === 'split' ? styles.headerStack : styles.headerRow}>
         <Text numberOfLines={1} style={styles.title}>Order book</Text>
-        <View ref={anchorRef}>
-          <Pressable
-            accessibilityHint="Groups the book by a larger price step"
-            accessibilityLabel={`Price step ${selectedStep} USD`}
-            accessibilityRole="button"
-            accessibilityState={{ expanded: menuOpen }}
-            hitSlop={10}
-            onPress={openMenu}
-            style={({ pressed }) => [styles.stepButton, pressed && styles.pressed]}
-          >
-            <Text numberOfLines={1} style={styles.stepValue}>{selectedStep}</Text>
-            <ChevronDown size={12} />
-          </Pressable>
+        <View style={[styles.headerControls, variant === 'split' && styles.headerControlsSpread]}>
+          <View ref={anchorRef}>
+            <Pressable
+              accessibilityHint="Groups the book by a larger price step"
+              accessibilityLabel={`Price step ${selectedStep} USD`}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: menuOpen }}
+              hitSlop={10}
+              onPress={openMenu}
+              style={({ pressed }) => [styles.stepButton, pressed && styles.pressed]}
+            >
+              <Text numberOfLines={1} style={styles.stepValue}>{selectedStep}</Text>
+              <ChevronDown size={12} />
+            </Pressable>
+          </View>
+          {/* Where the unit lives now. `Total (USD)` does not fit a 65pt column header at
+              any text size worth reading, so the columns say `Price` and `Total` and the
+              currency is stated once instead — at the trailing edge, where it lands directly
+              over `Total` and the figures under it, because the header rows and the book
+              rows share one gutter. It is what the numbers are in, so it sits above the
+              numbers. Plain text and no chevron: unlike the step this is not something to
+              pick, since every market in the app quotes in USD. */}
+          <Text style={styles.unit}>USD</Text>
         </View>
       </View>
 
@@ -163,7 +180,15 @@ const styles = StyleSheet.create({
   // The panel owns its own gutter rather than taking one from the container, so the
   // toolbar, the rows and the footnote all sit on the same two edges.
   panel: { paddingVertical: spacing.xs },
-  toolbar: { minHeight: 32, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: spacing.xs, rowGap: spacing.xxs, paddingHorizontal: spacing.xs, paddingBottom: spacing.xs },
+  headerRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs, paddingHorizontal: spacing.xs, paddingBottom: spacing.xs },
+  headerStack: { gap: spacing.xxs, paddingHorizontal: spacing.xs, paddingBottom: spacing.xs },
+  // At full width the pair sits at the right end of the title's row, which the header's own
+  // `space-between` handles. Stacked, the row takes the panel's width so the step keeps the
+  // leading edge and the unit takes the trailing one — the same two edges `Price` and `Total`
+  // use on the row below, so the header reads as a grid rather than as two loose lines.
+  headerControls: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: spacing.xs },
+  headerControlsSpread: { alignSelf: 'stretch', justifyContent: 'space-between' },
+  unit: { ...typography.caption, color: colors.textMuted },
   title: { ...typography.label, flexShrink: 1, color: colors.textPrimary },
   // One line, one value. The old control spelled "Price step" above the number, which cost
   // the toolbar a second row on every phone to label a control that labels itself again on
