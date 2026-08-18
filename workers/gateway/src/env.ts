@@ -27,6 +27,7 @@ export type WorkerEnv = {
   readonly SOLANA_CLUSTER?: string;
   readonly CORS_ALLOWED_ORIGINS?: string;
   readonly PYTH_HERMES_ORIGIN?: string;
+  readonly PYTH_HISTORY_ORIGIN?: string;
   readonly PYTH_MARKET_FEEDS?: string;
   readonly FEAR_GREED_URL?: string;
   readonly COINDESK_NEWS_FEED_URL?: string;
@@ -159,6 +160,11 @@ export function resolveMarketDataConfig(env: WorkerEnv): MarketDataConfig {
     'PYTH_HERMES_ORIGIN',
     invalid,
   );
+  const historyOrigin = parseHttpsOrigin(
+    env.PYTH_HISTORY_ORIGIN,
+    'PYTH_HISTORY_ORIGIN',
+    invalid,
+  );
   const feedIds = parseMarketFeeds(env.PYTH_MARKET_FEEDS, invalid);
 
   if (invalid.length > 0) {
@@ -167,6 +173,7 @@ export function resolveMarketDataConfig(env: WorkerEnv): MarketDataConfig {
 
   return {
     origin,
+    historyOrigin,
     feedIds,
     apiKey: env.PYTH_API_KEY?.trim() || null,
   };

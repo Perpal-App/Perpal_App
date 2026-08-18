@@ -14,6 +14,7 @@ import {
 import { VelocityOrderTicket } from '@/features/trade/components/VelocityOrderTicket';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { useVelocityPublicMarket } from '@/features/trade/hooks/useVelocityPublicMarket';
+import { useVelocityMarketHistory } from '@/features/trade/hooks/useVelocityMarketHistory';
 import type {
   VelocityMarket,
   VelocityMarketSnapshot,
@@ -58,6 +59,13 @@ export function VelocityTradingWorkspace({
     marketName: market.marketName,
     wsOrigin: config.perps.velocityDlobWsOrigin,
   });
+  const history = useVelocityMarketHistory(
+    config.api.marketHistoryUrl,
+    config.perps.pacificaApiOrigin,
+    market.baseAsset,
+    timeframe,
+    view === 'chart',
+  );
 
   return (
     <View style={styles.workspace}>
@@ -68,7 +76,7 @@ export function VelocityTradingWorkspace({
           <View style={[styles.tradeGrid, wide && styles.tradeGridWide]}>
             <View style={styles.tradePanel}>
               {snapshot !== null && !snapshot.priceStale ? (
-                <VelocityOrderTicket config={config} market={market} />
+                <VelocityOrderTicket config={config} market={market} snapshot={snapshot} />
               ) : (
                 <View style={styles.waiting}>
                   <Text accessibilityLiveRegion="polite" style={styles.waitingTitle}>
@@ -93,10 +101,10 @@ export function VelocityTradingWorkspace({
 
       <View style={view === 'chart' ? styles.chartVisible : styles.chartHidden}>
         <TradingViewMarketChart
-          candles={[]}
+          candles={history.candles}
           onTimeframeChange={setTimeframe}
-          status="error"
-          symbol={`${market.baseAsset}/USD`}
+          status={history.status}
+          symbol={`${market.baseAsset}/USD · ${history.source === 'pyth' ? 'Pyth' : 'Pacifica'}`}
           timeframe={timeframe}
         />
       </View>

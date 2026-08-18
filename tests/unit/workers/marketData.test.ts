@@ -1,4 +1,5 @@
 import {
+  parsePythHistory,
   parsePythResponse,
   parsePythStreamFrame,
 } from '../../../workers/gateway/src/marketData';
@@ -49,6 +50,20 @@ describe('public market-data trust boundary', () => {
     );
 
     expect(streamed?.markets[0]?.symbol).toBe('BTC-PERP');
+  });
+
+  it('aggregates real source candles into the requested interval', () => {
+    expect(parsePythHistory({
+      s: 'ok',
+      t: [180, 240, 300, 360],
+      o: [10, 11, 12, 13],
+      h: [12, 13, 14, 15],
+      l: [9, 10, 11, 12],
+      c: [11, 12, 13, 14],
+    }, 180)).toEqual([
+      { timeMs: 180_000, open: 10, high: 14, low: 9, close: 13 },
+      { timeMs: 360_000, open: 13, high: 15, low: 12, close: 14 },
+    ]);
   });
 });
 

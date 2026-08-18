@@ -5,8 +5,11 @@ import {
 } from './env';
 import { isOriginAllowed } from './http';
 import {
+  fetchMainnetMarketHistory,
   fetchMainnetMarkets,
+  MARKET_HISTORY_PATH,
   MARKET_STREAM_PATH,
+  parseMarketHistoryInput,
   streamMainnetMarkets,
 } from './marketData';
 
@@ -27,6 +30,9 @@ export async function handlePublicMarketsRequest(
   traceId: string,
 ): Promise<PublicMarketsRouteResult> {
   const path = new URL(request.url).pathname;
+  const historyInput = path === MARKET_HISTORY_PATH
+    ? parseMarketHistoryInput(new URL(request.url))
+    : undefined;
 
   if (!isOriginAllowed(request, [])) {
     return result(
@@ -38,6 +44,13 @@ export async function handlePublicMarketsRequest(
   if (request.method !== 'GET') {
     return result(
       errorResponse(405, 'method_not_allowed', 'Use GET.', traceId),
+      'rejected',
+    );
+  }
+
+  if (historyInput === null) {
+    return result(
+      errorResponse(400, 'invalid_market_history_query', 'Market history query is invalid.', traceId),
       'rejected',
     );
   }
@@ -65,7 +78,9 @@ export async function handlePublicMarketsRequest(
   try {
     const config = resolveMarketDataConfig(env);
     const response =
-      path === MARKET_STREAM_PATH
+      historyInput !== undefined
+        ? jsonResponse(await fetchMainnetMarketHistory(config, historyInput))
+        : path === MARKET_STREAM_PATH
         ? await streamMainnetMarkets(config, request.signal)
         : jsonResponse(await fetchMainnetMarkets(config));
     return result(response, 'ok', performance.now() - started);

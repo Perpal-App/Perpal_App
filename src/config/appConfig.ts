@@ -43,6 +43,7 @@ export type AppConfig = {
     readonly rpcUrl: string;
     readonly publicRpcUrl: string;
     readonly marketDataUrl: string;
+    readonly marketHistoryUrl: string;
     readonly marketStreamUrl: string;
     readonly fearGreedUrl: string;
     readonly marketBriefingUrl: string;
@@ -406,6 +407,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
         rpcUrl: `${origin}${rpcPath}`,
         publicRpcUrl: `${origin}${publicRpcPath}`,
         marketDataUrl: `${origin}${marketDataPath}`,
+        marketHistoryUrl: `${origin}${marketDataPath}/history`,
         marketStreamUrl: `${origin}${marketStreamPath}`,
         fearGreedUrl: `${origin}${fearGreedPath}`,
         marketBriefingUrl: `${origin}${marketBriefingPath}`,

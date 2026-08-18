@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
-import { Button } from '@/components/ui/Button';
-import { StatusRow } from '@/components/ui/StatusRow';
 import type { AppConfig } from '@/config/appConfig';
-import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
+import {
+  amountFromBaseUnits,
+  formatAmount,
+  formatAmountWithCommas,
+  parseAmount,
+} from '@/domain/money/amount';
+import {
+  Choice,
+  CollateralSlider,
+  Field,
+  PercentPresets,
+  StaticControl,
+  TicketRow,
+} from '@/features/trade/components/OrderTicketControls';
 import { PrivateTradingTicketState } from '@/features/trade/components/PrivateTradingTicketState';
 import { useTradeActionRecovery } from '@/features/trade/hooks/useTradeActionRecovery';
 import { useTradingStablecoinBalances } from '@/features/trade/hooks/useTradingStablecoinBalances';
@@ -17,9 +28,12 @@ import {
   type VelocitySide,
   type VelocityTradePreparation,
 } from '@/integrations/perps/velocity/velocityTrade';
-import type { VelocityMarket } from '@/integrations/perps/velocity/velocityMarketData';
+import type {
+  VelocityMarket,
+  VelocityMarketSnapshot,
+} from '@/integrations/perps/velocity/velocityMarketData';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Phase = 'idle' | 'preparing' | 'submitting' | 'pending';
@@ -27,9 +41,11 @@ type Phase = 'idle' | 'preparing' | 'submitting' | 'pending';
 export function VelocityOrderTicket({
   config,
   market,
+  snapshot,
 }: {
   readonly config: AppConfig;
   readonly market: VelocityMarket;
+  readonly snapshot: VelocityMarketSnapshot;
 }) {
   const session = useTradingSession();
   const [side, setSide] = useState<VelocitySide>('long');
@@ -38,6 +54,8 @@ export function VelocityOrderTicket({
   const [phase, setPhase] = useState<Phase>('idle');
   const [preparation, setPreparation] = useState<VelocityTradePreparation | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [presetPercent, setPresetPercent] = useState<number | null>(null);
+  const [sliderReset, setSliderReset] = useState(0);
   const controller = useRef<AbortController | null>(null);
   const recovery = useTradeActionRecovery({
     owner: session.address,
@@ -60,6 +78,8 @@ export function VelocityOrderTicket({
     setLeverage(String(Math.min(5, market.maxLeverage)));
     setPreparation(null);
     setMessage(null);
+    setPresetPercent(null);
+    setSliderReset((value) => value + 1);
     setPhase('idle');
   }, [market.marketIndex, market.maxLeverage]);
 
@@ -74,6 +94,17 @@ export function VelocityOrderTicket({
   }
   const owner = session.address;
   const signer = session.signer;
+  const clearPreview = () => {
+    setPreparation(null);
+    setMessage(null);
+  };
+  const applyPercentage = (next: number) => {
+    const available = balances.balances?.usdtBaseUnits;
+    if (available === undefined) return;
+    const percent = Math.max(0, Math.min(100, Math.round(next)));
+    setCollateral(stable((available * BigInt(percent)) / 100n));
+    clearPreview();
+  };
 
   const prepare = async () => {
     let collateralBaseUnits: bigint;
@@ -189,45 +220,59 @@ export function VelocityOrderTicket({
   return (
     <View style={styles.panel}>
       <Text accessibilityRole="header" style={styles.title}>Order</Text>
-      <View accessibilityRole="radiogroup" style={styles.row}>
-        <ActionButton
-          label={`Buy ${market.baseAsset}`}
-          onPress={() => { setSide('long'); setPreparation(null); }}
-          selected={side === 'long'}
-          style={styles.flex}
-          tone={side === 'long' ? 'positive' : 'neutral'}
-        />
-        <ActionButton
-          label={`Sell ${market.baseAsset}`}
-          onPress={() => { setSide('short'); setPreparation(null); }}
-          selected={side === 'short'}
-          style={styles.flex}
-          tone={side === 'short' ? 'negative' : 'neutral'}
-        />
-      </View>
-      <View style={styles.row}>
-        <Input
-          label="Collateral"
-          onChange={(value) => { setCollateral(value); setPreparation(null); setMessage(null); }}
-          suffix="USDT"
-          value={collateral}
-        />
-        <Input
-          label="Leverage"
-          onChange={(value) => { setLeverage(value.replace(/\D/gu, '')); setPreparation(null); setMessage(null); }}
+      <View style={styles.controls}>
+        <StaticControl accessibilityLabel="Margin mode Cross" label="Cross" />
+        <Field
+          accessibilityLabel="Leverage"
+          align="center"
+          onChangeText={(value) => {
+            setLeverage(value.replace(/\D/gu, ''));
+            clearPreview();
+          }}
           suffix="×"
           value={leverage}
         />
       </View>
-      <StatusRow
-        label="Private USDT"
-        singleLine
-        value={balances.balances === null ? 'Loading' : stable(balances.balances.usdtBaseUnits)}
+      <StaticControl accessibilityLabel="Order type Market" label="Market" />
+      <View accessibilityRole="radiogroup" style={styles.controls}>
+        <Choice
+          accessibilityLabel={`Buy ${market.baseAsset}`}
+          label={`Buy ${market.baseAsset}`}
+          onPress={() => { setSide('long'); clearPreview(); }}
+          selected={side === 'long'}
+          tone="long"
+        />
+        <Choice
+          accessibilityLabel={`Sell ${market.baseAsset}`}
+          label={`Sell ${market.baseAsset}`}
+          onPress={() => { setSide('short'); clearPreview(); }}
+          selected={side === 'short'}
+          tone="short"
+        />
+      </View>
+      <Field
+        accessibilityLabel="Collateral amount"
+        onChangeText={(value) => {
+          setCollateral(value);
+          setPresetPercent(null);
+          setSliderReset((current) => current + 1);
+          clearPreview();
+        }}
+        placeholder="Collateral"
+        suffix="USDT"
+        value={collateral}
       />
-      <StatusRow
-        label="Private USDC"
-        singleLine
-        value={balances.balances === null ? 'Loading' : stable(balances.balances.usdcBaseUnits)}
+      <CollateralSlider
+        onChange={(next) => { applyPercentage(next); setPresetPercent(null); }}
+        resetSignal={sliderReset}
+      />
+      <PercentPresets
+        onSelect={(next) => {
+          applyPercentage(next);
+          setPresetPercent(next);
+          setSliderReset((current) => current + 1);
+        }}
+        selected={presetPercent}
       />
       {preparation === null ? null : <PreparationRows preparation={preparation} />}
       {recovery.error ?? message ? (
@@ -235,36 +280,21 @@ export function VelocityOrderTicket({
           {recovery.error ?? message}
         </Text>
       ) : null}
-      <Button
+      <ActionButton
         disabled={phase === 'pending'}
         label={preparation === null ? `Review ${side}` : 'Confirm transaction'}
         loading={phase === 'preparing' || phase === 'submitting'}
         onPress={preparation === null ? () => void prepare() : confirm}
+        tone={side === 'long' ? 'positive' : 'negative'}
       />
-    </View>
-  );
-}
-
-function Input(props: {
-  readonly label: string;
-  readonly onChange: (value: string) => void;
-  readonly suffix: string;
-  readonly value: string;
-}) {
-  return (
-    <View style={styles.inputBlock}>
-      <Text style={styles.label}>{props.label}</Text>
-      <View style={styles.inputRow}>
-        <TextInput
-          accessibilityLabel={props.label}
-          keyboardType="decimal-pad"
-          onChangeText={props.onChange}
-          placeholder="0"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          value={props.value}
-        />
-        <Text style={styles.suffix}>{props.suffix}</Text>
+      <View style={styles.riskRows}>
+        <TicketRow label="Type" screenReaderLabel="Order type" value="Market" />
+        <TicketRow label="Oracle" value={`$${formatAmountWithCommas(snapshot.oraclePrice)}`} />
+        <TicketRow label="Order value" value={orderValue(collateral, leverage)} />
+        <TicketRow label="Margin" value={stableInput(collateral)} />
+        <TicketRow label="Min. size" value={`${market.minOrderSize} ${market.baseAsset}`} />
+        <TicketRow label="Private USDT" value={balances.balances === null ? 'Loading' : `${stable(balances.balances.usdtBaseUnits)} USDT`} />
+        <TicketRow label="Private USDC" value={balances.balances === null ? 'Loading' : `${stable(balances.balances.usdcBaseUnits)} USDC`} />
       </View>
     </View>
   );
@@ -274,16 +304,16 @@ function PreparationRows({ preparation }: { readonly preparation: VelocityTradeP
   if (preparation.kind === 'conversion') {
     return (
       <>
-        <StatusRow label="Required swap" value={`${stable(preparation.plan.amountBaseUnits)} USDC → USDT`} />
-        <StatusRow label="Minimum received" value={`${stable(preparation.plan.swap.minimumOutputBaseUnits)} USDT`} />
-        <StatusRow label="Network fee" value={sol(preparation.plan.swap.feeLamports)} />
+        <TicketRow label="Swap" screenReaderLabel="Required swap" value={`${stable(preparation.plan.amountBaseUnits)} USDC → USDT`} />
+        <TicketRow label="Min. received" value={`${stable(preparation.plan.swap.minimumOutputBaseUnits)} USDT`} />
+        <TicketRow label="Network fee" value={sol(preparation.plan.swap.feeLamports)} />
       </>
     );
   }
   return (
     <>
-      <StatusRow label="Next step" value={preparation.plan.action === 'trade' ? 'Place order' : 'Make collateral available'} />
-      <StatusRow label="Network fee" value={sol(preparation.plan.feeLamports)} />
+      <TicketRow label="Next step" value={preparation.plan.action === 'trade' ? 'Place order' : 'Fund margin'} />
+      <TicketRow label="Network fee" value={sol(preparation.plan.feeLamports)} />
     </>
   );
 }
@@ -325,6 +355,24 @@ function sol(value: bigint): string {
   return `${formatAmount(amountFromBaseUnits(value, 9))} SOL`;
 }
 
+function stableInput(value: string): string {
+  try {
+    return `${stable(parseAmount(value, 6).baseUnits)} USDT`;
+  } catch {
+    return '--';
+  }
+}
+
+function orderValue(collateral: string, leverage: string): string {
+  const multiplier = Number(leverage);
+  if (!Number.isSafeInteger(multiplier) || multiplier < 1) return '--';
+  try {
+    return `${stable(parseAmount(collateral, 6).baseUnits * BigInt(multiplier))} USDT`;
+  } catch {
+    return '--';
+  }
+}
+
 function userMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'The transaction could not be prepared.';
 }
@@ -335,21 +383,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   title: { ...typography.heading, color: colors.textPrimary },
-  row: { flexDirection: 'row', gap: spacing.sm },
-  flex: { flex: 1 },
-  inputBlock: { flex: 1, minWidth: 0, gap: spacing.xxs },
-  label: { ...typography.caption, color: colors.textMuted },
-  inputRow: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
+  controls: { flexDirection: 'row', gap: spacing.xs },
+  riskRows: {
+    gap: spacing.xxs,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
-  input: { ...typography.label, flex: 1, minWidth: 0, color: colors.textPrimary },
-  suffix: { ...typography.caption, flexShrink: 0, color: colors.textSecondary },
   message: { ...typography.bodyCompact, color: colors.textSecondary },
 });

@@ -1,0 +1,44 @@
+diff --git a/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.browser.js b/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.browser.js
+index 4708120..ecf8ad9 100644
+--- a/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.browser.js
++++ b/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.browser.js
+@@ -51,16 +51,5 @@ exports.utils = {
+         },
+     },
+ };
+-class AnchorProvider {
+-    constructor() {
+-        throw new Error('AnchorProvider is not supported in the browser build. Use `VelocityCore` (pure builders/decoders/PDAs) instead of `VelocityClient`.');
+-    }
+-}
+-exports.AnchorProvider = AnchorProvider;
+-class Program {
+-    constructor() {
+-        throw new Error('Program is not supported in the browser build. Use `VelocityCore` (pure builders/decoders/PDAs) instead of `VelocityClient`.');
+-    }
+-}
+-exports.Program = Program;
++Object.defineProperty(exports, "AnchorProvider", { enumerable: true, get: function () { return core_1.AnchorProvider; } });
++Object.defineProperty(exports, "Program", { enumerable: true, get: function () { return core_1.Program; } });
+diff --git a/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.js b/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.js
+index 4708120..ecf8ad9 100644
+--- a/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.js
++++ b/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.js
+@@ -51,16 +51,5 @@ exports.utils = {
+         },
+     },
+ };
+-class AnchorProvider {
+-    constructor() {
+-        throw new Error('AnchorProvider is not supported in the browser build. Use `VelocityCore` (pure builders/decoders/PDAs) instead of `VelocityClient`.');
+-    }
+-}
+-exports.AnchorProvider = AnchorProvider;
+-class Program {
+-    constructor() {
+-        throw new Error('Program is not supported in the browser build. Use `VelocityCore` (pure builders/decoders/PDAs) instead of `VelocityClient`.');
+-    }
+-}
+-exports.Program = Program;
++Object.defineProperty(exports, "AnchorProvider", { enumerable: true, get: function () { return core_1.AnchorProvider; } });
++Object.defineProperty(exports, "Program", { enumerable: true, get: function () { return core_1.Program; } });

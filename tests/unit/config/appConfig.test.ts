@@ -56,6 +56,9 @@ describe('parseAppConfig', () => {
       expect(result.value.api.marketDataUrl).toBe(
         'https://gateway.example/v1/markets',
       );
+      expect(result.value.api.marketHistoryUrl).toBe(
+        'https://gateway.example/v1/markets/history',
+      );
       expect(result.value.api.marketStreamUrl).toBe(
         'https://gateway.example/v1/markets/stream',
       );
