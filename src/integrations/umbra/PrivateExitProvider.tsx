@@ -1,4 +1,5 @@
 import { isConnected, useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { NATIVE_MINT } from '@solana/spl-token';
 import {
   createContext,
   useCallback,
@@ -12,8 +13,6 @@ import {
 
 import { readAppConfig } from '@/config/appConfig';
 import { ensurePacificaCollateralInWallet } from '@/integrations/perps/pacifica/pacificaWithdrawal';
-import { readTokenBalance } from '@/integrations/solana/stablecoinSwap';
-import { withdrawNativeSol } from '@/integrations/solana/nativeSolWithdrawal';
 import {
   beginPrivateExit,
   resumePrivateExit,
@@ -22,6 +21,7 @@ import {
   readPrivateExitRecord,
   type PrivateExitRecord,
 } from '@/integrations/umbra/privateExitStorage';
+import { preparePrivateFundingPreflight } from '@/integrations/umbra/privateFundingPreflight';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
@@ -140,9 +140,9 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
    * them for recovery, and `assertRelayerSupportsMint` refuses a mint the Umbra relayer cannot route
    * before any funds move. So this change opens the path that existed rather than widening it.
    *
-   * The skipped leg is replaced by a balance read, not by nothing. Collection is what would otherwise
-   * have surfaced a shortfall, and entering a resumable state machine for an amount the wallet does
-   * not hold would leave a record to recover from a failure that was knowable up front.
+   * A shared preflight verifies the exact source token and enough native SOL for the deposit stage
+   * before a resumable record is created. For SOL, Umbra uses its native mint internally, wraps on
+   * deposit, and unwraps in the relayed claim callback.
    */
   const start = useCallback(async (
     amountBaseUnits: bigint,
@@ -152,43 +152,11 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
     await run(async () => {
       const input = operationInput();
 
-      if (asset.kind === 'native') {
-        const result = await withdrawNativeSol({
-          amountLamports: amountBaseUnits,
-          destinationAddress,
-          owner: input.sourceWalletAddress,
-          rpcUrl: input.config.api.rpcUrl,
-          signer: input.gatewaySigner,
-        });
-        if (result.status !== 'confirmed') {
-          throw new Error(
-            `SOL withdrawal ${result.signature} was submitted but is not confirmed yet.`,
-          );
-        }
-        return {
-          version: 1,
-          id: result.signature,
-          sourceWalletAddress: input.sourceWalletAddress,
-          destinationAddress,
-          mint: asset.mint,
-          symbol: asset.symbol,
-          amountBaseUnits: amountBaseUnits.toString(),
-          phase: 'complete',
-          generationIndex: null,
-          excludedNoteIds: [],
-          scanStartLeafCounts: null,
-          populateSignature: null,
-          depositSignature: null,
-          relayRequestId: null,
-          claimSignature: result.signature,
-          noteAmountBaseUnits: null,
-          relayerFixedFeeLamports: result.feeLamports.toString(),
-          errorCode: null,
-          updatedAtMs: Date.now(),
-        };
+      if (asset.kind === 'native' && asset.mint !== NATIVE_MINT.toBase58()) {
+        throw new Error('The native SOL withdrawal mint is invalid.');
       }
 
-      if (asset.mint === input.config.perps.usdcMint) {
+      if (asset.kind !== 'native' && asset.mint === input.config.perps.usdcMint) {
         await ensurePacificaCollateralInWallet(amountBaseUnits, {
           account: input.sourceWalletAddress,
           apiOrigin: input.config.perps.pacificaApiOrigin,
@@ -197,20 +165,27 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
           signer: input.gatewaySigner,
           withdrawalFeeBaseUnits: input.config.perps.pacificaWithdrawalFeeBaseUnits,
         });
-      } else {
-        const held = await readTokenBalance({
-          decimals: asset.decimals,
-          mint: asset.mint,
-          owner: input.sourceWalletAddress,
-          rpcUrl: input.config.api.rpcUrl,
-          signer: input.gatewaySigner,
-        });
+      }
 
-        if (held < amountBaseUnits) {
-          throw new Error(
-            `Private wallet T does not hold enough ${asset.symbol} for this withdrawal.`,
-          );
-        }
+      const preflight = await preparePrivateFundingPreflight({
+        amountBaseUnits: asset.kind === 'native' ? 0n : amountBaseUnits,
+        collateralLegPending: asset.kind !== 'native',
+        feeLegPending: asset.kind === 'native',
+        feeReserveLamports: asset.kind === 'native' ? amountBaseUnits : 0n,
+        mint: asset.mint,
+        rpcUrl: input.config.api.rpcUrl,
+        signer: input.gatewaySigner,
+        walletAddress: input.sourceWalletAddress,
+      });
+      if (preflight.missingCollateralBaseUnits > 0n) {
+        throw new Error(
+          `Private wallet T does not hold enough ${asset.symbol} for this withdrawal.`,
+        );
+      }
+      if (preflight.missingSolLamports > 0n) {
+        throw new Error(
+          `Private wallet T needs more SOL for this withdrawal amount, temporary rent, and network fees.`,
+        );
       }
 
       return beginPrivateExit(
@@ -224,8 +199,8 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
         setRecord,
       );
     }, asset.kind === 'native'
-      ? 'The destination received the public native SOL transfer.'
-      : undefined, asset.kind === 'native' ? 'SOL withdrawal completed' : undefined);
+      ? 'The destination received native SOL through the private Umbra route.'
+      : undefined, asset.kind === 'native' ? 'Private SOL withdrawal completed' : undefined);
   }, [operationInput, run]);
 
   const resume = useCallback(async () => {

@@ -6,7 +6,7 @@ Status: Pacifica mainnet integration implemented locally on 8 August 2026. Stati
 
 1. Sign in with Privy. Privy provisions or restores public Solana wallet **M**.
 2. Activate private trading once. The app derives or restores device-held Ed25519 wallet **T** and keeps its signing seed in secure storage.
-3. Fund T through Umbra: M deposits USDC or USDT and an optional wSOL leg. The installed Umbra claim delivers wSOL, not native SOL, so the first Pacifica on-chain fee still requires an explicit fee-bootstrap policy.
+3. Fund T through Umbra: M deposits USDC or USDT plus a user-chosen SOL fee reserve. Umbra uses the native SOL mint internally, wraps SOL during deposit, and closes its callback helper account to deliver spendable native SOL to T. The relayer pays the claim transaction fee.
 4. Browse Pacifica markets without a wallet signature. REST supplies the catalog and initial snapshot; WebSocket supplies live prices.
 5. Review a trade. If Pacifica collateral is short, the app converts only the required USDT to USDC in T, then deposits at least Pacifica's 10 USDC minimum from T.
 6. The app calculates the exact base-asset size, fee estimate, leverage, mark, and slippage boundary. A fresh mark is checked immediately before T signs Pacifica's canonical request.
@@ -59,11 +59,11 @@ Pacifica standard deposits accept mainnet USDC only. USDT may be held privately 
 
 Pacifica withdrawal requests use a persisted UUID idempotency key. A retry reuses the same request and never creates a second withdrawal. The configured public withdrawal fee is displayed before confirmation. Once USDC reaches T, the existing Umbra private-exit state machine takes over.
 
-The private-exit selector exposes only held SPL mints present in the installed Umbra mainnet pool set; the relayer is checked again before funds move. Native SOL uses a separate, explicitly public Solana transfer because wSOL cannot be delivered as spendable native SOL to an arbitrary destination without that destination signing an unwrap. The app pays the measured withdrawal fee and retains one additional measured base fee in active T. During rotation, no reserve is needed in old T: one atomic transaction moves its remaining SOL and empty-token-account rent into the next T after paying the exact rotation fee.
+The private-exit selector exposes only held assets present in the installed Umbra mainnet pool set; the relayer is checked again before funds move. Native SOL and any held wSOL are presented as one SOL balance. Umbra wraps native SOL during the T-side deposit and unwraps it in the relayed claim callback, so the destination receives native SOL without signing an unwrap. The preflight keeps enough native SOL in T for the deposit-stage rent and network fees. During rotation, no reserve remains stranded in old T: one atomic transaction moves its remaining SOL and empty-token-account rent into the next T after paying the exact rotation fee.
 
-## Lifecycle audit decision: native fee bootstrap
+## Lifecycle audit decision: native SOL through Umbra
 
-The earlier “private SOL fee reserve” claim was too strong. The installed Umbra self-burn path targets an associated token account, so its SOL mint is wSOL. Solana deducts a transaction fee before executing an unwrap, which means an empty T cannot unwrap its first wSOL without another fee payer. A sponsor/paymaster, a relayer-supported claim-and-unwrap operation, or a public bootstrap transfer are the real choices. Until one is selected and device-tested, first-time Pacifica collateral deposit remains intentionally blocked with the exact native-SOL shortage rather than being reported as a network failure.
+The installed `@umbra-privacy/sdk@5.0.0-rc.6` represents SOL with the native/WSOL mint inside the pool, but that is not the destination asset. Its generated public-claim instruction includes an MPC callback helper ATA: wrapped SOL moves through that helper and the program closes it to unwrap native SOL to the destination. PerPal therefore uses the same resumable Umbra path for the M-to-T fee reserve and T-to-destination SOL withdrawals. The earlier public-bootstrap and public-SOL-withdrawal assumptions were incorrect and have been removed.
 
 ## Privacy and custody boundary
 
@@ -88,6 +88,6 @@ Before calling the Pacifica migration device-confirmed, use a release-like build
 3. Fund T through Umbra and resume after an interruption.
 4. Convert a small USDT shortfall if selected, deposit USDC to Pacifica, and verify account state.
 5. Open and close the minimum position, verify rejection of an expired preview, and cancel an open order.
-6. Withdraw Pacifica USDC to T, then privately to M and an external wallet; interrupt and resume each phase.
+6. Withdraw Pacifica USDC and native SOL through Umbra to M and an external wallet; interrupt and resume each phase.
 7. Verify T rotation rejects every non-zero token balance, regular/stop order, position, collateral, and pending operation, then recovers empty-account rent and remaining SOL into the next T.
 8. Measure intent-to-submission and submission-to-Pacifica acknowledgement separately.

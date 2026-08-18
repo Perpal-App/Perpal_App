@@ -111,7 +111,7 @@ export async function preparePrivateFundingPreflight(
     : 0n;
   const feeStageLamports = input.feeLegPending
     ? reserveDeficit + ataRentLamports + proofRentLamports +
-      networkFeeLamports * (reserveDeficit > 0n ? 3n : 2n)
+      networkFeeLamports * 2n
     : 0n;
   const requiredSolLamports = collateralStageLamports > feeStageLamports
     ? collateralStageLamports
@@ -121,7 +121,7 @@ export async function preparePrivateFundingPreflight(
     : 0n;
   const estimatedNetworkFeeLamports = networkFeeLamports *
     ((input.collateralLegPending ? 2n : 0n) +
-      (input.feeLegPending ? (reserveDeficit > 0n ? 3n : 2n) : 0n));
+      (input.feeLegPending ? 2n : 0n));
 
   return {
     availableCollateralBaseUnits,

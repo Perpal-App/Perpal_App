@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import { NATIVE_MINT } from '@solana/spl-token';
 import { getUmbraRelayer } from '@umbra-privacy/sdk/relayer';
 
 import type { AppConfig } from '@/config/appConfig';
@@ -26,10 +27,6 @@ import {
   assertPrivateFundingPreflight,
   preparePrivateFundingPreflight,
 } from '@/integrations/umbra/privateFundingPreflight';
-import {
-  ensureWrappedSolReserve,
-  WRAPPED_SOL_MINT,
-} from '@/integrations/umbra/privateSolReserve';
 import {
   createUmbraGatewayDependencies,
   type PrivySolanaProvider,
@@ -250,7 +247,7 @@ async function runPrivateFunding(
     });
     await Promise.all([
       assertRelayerSupportsMint(relayer, record.mint),
-      assertRelayerSupportsMint(relayer, WRAPPED_SOL_MINT),
+      assertRelayerSupportsMint(relayer, NATIVE_MINT.toBase58()),
     ]);
 
     await runPrivateFundingLeg({
@@ -264,23 +261,6 @@ async function runPrivateFunding(
       },
     });
     await save({ ...record, phase: 'fee-funding', updatedAtMs: Date.now() });
-    if (record.feeFundingDepositSignature === null) {
-      await ensureWrappedSolReserve({
-        amountLamports: input.feeReserveLamports,
-        existingSignature: record.feeFundingWrapSignature,
-        gatewaySigner: input.gatewaySigner,
-        mainWalletAddress: input.mainWalletAddress,
-        provider: input.privyProvider,
-        rpcUrl: input.config.api.rpcUrl,
-        onSubmitted: async (signature) => {
-          await save({
-            ...record,
-            feeFundingWrapSignature: signature,
-            updatedAtMs: Date.now(),
-          });
-        },
-      });
-    }
     await runPrivateFundingLeg({
       client,
       config: input.config,
@@ -348,7 +328,7 @@ function feeReserveLeg(record: PrivateFundingRecord): PrivateFundingLegState {
     depositSignature: record.feeFundingDepositSignature,
     excludedNoteIds: record.feeFundingExcludedNoteIds,
     generationIndex: record.feeFundingGenerationIndex,
-    mint: WRAPPED_SOL_MINT,
+    mint: NATIVE_MINT.toBase58(),
     noteAmountBaseUnits: record.feeFundingNoteAmountLamports,
     populateSignature: record.feeFundingPopulateSignature,
     relayRequestId: record.feeFundingRelayRequestId,

@@ -15,9 +15,9 @@ lifecycle_audit:
   withdrawals:
     pacifica_usdc: resumable_to_t_then_umbra
     umbra_spl: installed_mainnet_supported_mints_only
-    native_sol: public_transfer_with_measured_fee_and_one_measured_fee_retained
+    native_sol: umbra_native_mint_wrap_on_deposit_unwrap_on_relayed_claim
   rotation: atomic_empty_token_account_rent_and_remaining_sol_sweep_to_next_t
-  blocking_design_gap: umbra_wsol_claim_does_not_bootstrap_native_sol_for_t_first_onchain_fee
+  blocking_design_gap: null
 debug:
   issues_resolved:
     - error: funding rejected before blockchain submission

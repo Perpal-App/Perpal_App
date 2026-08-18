@@ -97,15 +97,15 @@ export function PrivateWithdrawPanel({
       const validated = new PublicKey(destination).toBase58();
       setInputError(null);
       Alert.alert(
-        nativeSol ? 'Withdraw SOL' : 'Withdraw privately',
+        nativeSol ? 'Withdraw SOL privately' : 'Withdraw privately',
         [
           nativeSol
-            ? `${amount.trim()} SOL will be sent directly from private wallet T`
+            ? `${amount.trim()} SOL will move from private wallet T through Umbra`
             : `${amount.trim()} ${asset.symbol} will move through private wallet T, then privately`,
           `to ${destinationMode === 'privy' ? 'your public wallet' : 'the external wallet'}.`,
           collectsFromVenue ? `Trading withdrawal fee: ${feeLabel()}.` : null,
           nativeSol
-            ? 'This native SOL transfer is public on Solana. One additional network fee is kept in T.'
+            ? 'Umbra wraps SOL inside the pool and delivers native SOL after the relayed claim.'
             : 'Umbra relayer fees are deducted from the private transfer.',
         ].filter((line): line is string => line !== null).join(' '),
         [
@@ -130,7 +130,7 @@ export function PrivateWithdrawPanel({
           : collectsFromVenue
             ? 'One withdrawal collects the USDC into your private wallet, then delivers it privately.'
             : nativeSol
-              ? 'Native SOL fee funds can be withdrawn publicly while one current network fee remains.'
+              ? 'SOL is delivered privately through Umbra and arrives as native SOL.'
             : `${symbol} is already in your private wallet and is delivered privately in one step.`}
       </Text>
 
@@ -216,7 +216,7 @@ export function PrivateWithdrawPanel({
       ) : (
         <ActionButton
           disabled={asset === null || empty || privateExit.mainWalletAddress === null}
-          label={nativeSol ? 'Withdraw SOL' : 'Withdraw privately'}
+          label={nativeSol ? 'Withdraw SOL privately' : 'Withdraw privately'}
           loading={privateExit.isRunning}
           onPress={confirm}
         />
@@ -354,21 +354,23 @@ function readWithdrawable(
   const wallet = balances.privateWallet;
   const supported = new Set(getSupportedMints('mainnet').map(String));
   const known = new Map(configured.map((asset) => [asset.mint, asset]));
+  const nativeMint = NATIVE_MINT.toBase58();
   const assets = wallet.holdings
-    .filter((holding) => supported.has(holding.mint))
+    .filter((holding) => supported.has(holding.mint) && holding.mint !== nativeMint)
     .map((holding): PrivateExitAsset => known.get(holding.mint) ?? {
       decimals: holding.decimals,
       kind: 'spl',
       mint: holding.mint,
-      symbol: holding.mint === NATIVE_MINT.toBase58()
-        ? 'WSOL'
-        : `MINT-${holding.mint.slice(0, 5).toUpperCase()}`,
+      symbol: `MINT-${holding.mint.slice(0, 5).toUpperCase()}`,
     });
-  if (wallet.solLamports > 0n) {
+  const solBaseUnits = wallet.solLamports + (
+    wallet.holdings.find((holding) => holding.mint === nativeMint)?.baseUnits ?? 0n
+  );
+  if (solBaseUnits > 0n && supported.has(nativeMint)) {
     assets.unshift({
       decimals: 9,
       kind: 'native',
-      mint: 'native-sol',
+      mint: nativeMint,
       symbol: 'SOL',
     });
   }
@@ -379,7 +381,7 @@ function readWithdrawable(
 
   return assets.flatMap((asset) => {
     const inWallet = asset.kind === 'native'
-      ? wallet.solLamports
+      ? solBaseUnits
       : wallet.holdings.find((holding) => holding.mint === asset.mint)?.baseUnits ?? 0n;
     const onVenue = asset.symbol === 'USDC' ? venueWithdrawable(snapshot) : 0n;
     const total = inWallet + onVenue;
