@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
+  PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS,
   preparePacificaDeposit,
   submitPacificaDeposit,
   type PacificaDepositPlan,
@@ -14,6 +15,7 @@ import {
 } from '@/integrations/perps/providerCollateral';
 import {
   collateralShortfall,
+  creditedDepositAmount,
   scaledInputForMinimumOutput,
 } from '@/integrations/perps/tradeCollateralMath';
 import {
@@ -31,7 +33,19 @@ import type { SubmittedTransactionResult } from '@/integrations/solana/signedLeg
 
 const CONVERSION_LIFETIME_MS = 45_000;
 const MAX_CONVERSION_QUOTES = 3;
-const MINIMUM_DEPOSIT_BASE_UNITS = 10_000_000n;
+
+export type TradeFundingRequirement = {
+  readonly minimumBaseUnits: bigint;
+  readonly usdcAvailableBaseUnits: bigint;
+  readonly usdtAvailableBaseUnits: bigint;
+};
+
+export class TradeFundingRequirementError extends Error {
+  constructor(readonly requirement: TradeFundingRequirement) {
+    super('Private funds are below Pacifica funding minimum.');
+    this.name = 'TradeFundingRequirementError';
+  }
+}
 
 type CommonInput = {
   readonly apiOrigin: string;
@@ -73,9 +87,10 @@ export async function preparePacificaTradeCollateral(
   const available = usdc(portfolio.availableToSpend);
   const shortfall = collateralShortfall(input.requiredBaseUnits, available);
   if (shortfall === 0n) return null;
-  const depositAmount = shortfall < MINIMUM_DEPOSIT_BASE_UNITS
-    ? MINIMUM_DEPOSIT_BASE_UNITS
-    : shortfall;
+  const depositAmount = creditedDepositAmount(
+    shortfall,
+    PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS,
+  );
   const conversion = await prepareConversionIfNeeded(input, depositAmount);
   if (conversion !== null) return conversion;
   return {
@@ -172,7 +187,13 @@ async function prepareConversionIfNeeded(
     amount = scaledInputForMinimumOutput(amount, outputMissing, plan.minimumOutputBaseUnits);
     plan = null;
   }
-  if (plan === null) throw new Error('Private wallet T needs more USDC or USDT for this trade.');
+  if (plan === null) {
+    throw new TradeFundingRequirementError({
+      minimumBaseUnits: requiredOutputBaseUnits,
+      usdcAvailableBaseUnits: outputBalance,
+      usdtAvailableBaseUnits: sourceBalance,
+    });
+  }
   return {
     kind: 'conversion',
     provider: 'pacifica',

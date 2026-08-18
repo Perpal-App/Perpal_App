@@ -64,10 +64,14 @@ function summary(step: TradeCollateralStep): readonly (readonly [string, string]
 
 function blockedMessage(step: TradeCollateralStep): string {
   if (step.kind === 'pacifica-deposit') {
-    if (step.plan.simulation === 'insufficient-token') return 'T needs more USDC for this trade.';
-    return `T needs ${sol(step.plan.feeLamports - step.plan.solBalanceLamports)} more for the Solana network fee.`;
+    if (step.plan.simulation === 'insufficient-token') {
+      return `Pacifica funding requires ${token(step.plan.amountBaseUnits, 'USDC')}. ` +
+        `Private balance has ${token(step.plan.tokenBalanceBaseUnits, 'USDC')}.`;
+    }
+    return `Minimum network fee still needed: ${sol(step.plan.feeLamports - step.plan.solBalanceLamports)}.`;
   }
-  return `T needs more ${step.input.symbol} for this conversion.`;
+  return `Conversion requires ${token(step.inputAmountBaseUnits, step.input.symbol)}. ` +
+    `Private balance has ${token(step.sourceBalanceBaseUnits, step.input.symbol)}.`;
 }
 
 function token(value: bigint, symbol: string): string {

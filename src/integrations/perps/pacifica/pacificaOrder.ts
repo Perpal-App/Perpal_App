@@ -103,7 +103,7 @@ export async function preparePacificaOrder(input: {
     throw new PacificaOrderValidationError('Close now uses a reduce-only market order.');
   }
   if (input.action === 'open' && input.collateralBaseUnits <= 0n) {
-    throw new PacificaOrderValidationError('Enter USDC collateral greater than zero.');
+    throw new PacificaOrderValidationError('Enter collateral greater than zero.');
   }
   if (input.action === 'open' && input.market.isolatedOnly && input.marginMode !== 'isolated') {
     throw new PacificaOrderValidationError(`${input.market.baseAsset} supports isolated margin only.`);
@@ -170,7 +170,9 @@ export async function preparePacificaOrder(input: {
   const minimum = parseDecimal(input.market.minOrderSize, 6);
   const maximum = parseDecimal(input.market.maxOrderSize, 6);
   if (notionalBaseUnits < minimum || notionalBaseUnits > maximum) {
-    throw new PacificaOrderValidationError('Order size is outside Pacifica market limits.');
+    throw new PacificaOrderValidationError(
+      `Pacifica requires $${input.market.minOrderSize}–$${input.market.maxOrderSize} notional for this market.`,
+    );
   }
   const feeRate = parseRate(input.portfolio.takerFee);
 

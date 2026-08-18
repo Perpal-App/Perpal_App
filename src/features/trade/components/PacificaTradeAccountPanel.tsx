@@ -86,7 +86,7 @@ export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: s
     <View style={styles.shell}>
       <UnderlineTabs onSelect={setTab} options={TABS} selectedId={tab} />
       {account === null ? (
-        <Empty message="Activate private trading to view account activity." />
+        <Text accessibilityLiveRegion="polite" style={styles.status}>Preparing private trading…</Text>
       ) : accountData.state.status === 'loading' ? (
         <Text accessibilityLiveRegion="polite" style={styles.status}>Loading trading account…</Text>
       ) : portfolio === null ? (

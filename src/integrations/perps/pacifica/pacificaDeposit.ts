@@ -26,6 +26,10 @@ import {
 const PLAN_LIFETIME_MS = 45_000;
 const DEPOSIT_DISCRIMINATOR = sha256(utf8ToBytes('global:deposit')).slice(0, 8);
 
+// Pacifica does not expose this as account metadata. Its public protocol docs state that
+// smaller deposits are not credited, so the client must not submit them and strand funds.
+export const PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS = 10_000_000n;
+
 export type PacificaDepositPlan = {
   readonly amountBaseUnits: bigint;
   readonly expiresAtMs: number;

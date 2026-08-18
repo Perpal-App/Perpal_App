@@ -35,9 +35,8 @@ const X_URL = 'https://x.com/PerpalApp';
  * header beside it, while the visible label can lean on the group it sits in.
  */
 const PRIVATE_ACTIONS = {
-  inactive: { label: 'Activate private wallet', spoken: 'Activate private wallet' },
   ready: { label: 'Rotate wallet', spoken: 'Rotate private wallet' },
-  error: { label: 'Retry restore', spoken: 'Retry private wallet restore' },
+  error: { label: 'Retry wallet setup', spoken: 'Retry private wallet setup' },
 } as const satisfies Partial<
   Record<TradingSessionStatus, { readonly label: string; readonly spoken: string }>
 >;
@@ -67,9 +66,6 @@ export function AccountScreen() {
 
   const handlePrivateWallet = () => {
     switch (session.status) {
-      case 'inactive':
-        void session.activate();
-        return;
       case 'error':
         session.retryRestore();
         return;
@@ -296,13 +292,14 @@ async function openLink(url: string, unavailable: string): Promise<void> {
 function isDeriving(status: TradingSessionStatus): boolean {
   return status === 'waiting-for-wallet'
     || status === 'restoring'
+    || status === 'inactive'
     || status === 'activating';
 }
 
 function readPrivateAction(
   status: TradingSessionStatus,
 ): (typeof PRIVATE_ACTIONS)[keyof typeof PRIVATE_ACTIONS] | null {
-  return status === 'inactive' || status === 'ready' || status === 'error'
+  return status === 'ready' || status === 'error'
     ? PRIVATE_ACTIONS[status]
     : null;
 }
@@ -312,12 +309,12 @@ function privateWalletState(status: TradingSessionStatus): string {
   switch (status) {
     case 'waiting-for-wallet': return 'Waiting';
     case 'restoring': return 'Restoring';
-    case 'inactive': return 'Inactive';
+    case 'inactive': return 'Preparing';
     case 'activating': return 'Activating';
     case 'rotating': return 'Checking';
     case 'ready': return 'Active';
     case 'recovery-required': return 'Recovery';
-    case 'error': return 'Unavailable';
+    case 'error': return 'Retry needed';
   }
 }
 

@@ -48,6 +48,7 @@ export function PortfolioScreen() {
 
   if (
     session.status === 'restoring' ||
+    session.status === 'inactive' ||
     session.status === 'activating' ||
     session.status === 'rotating'
   ) {
@@ -63,8 +64,8 @@ export function PortfolioScreen() {
           : { label: 'Open Wallet', onPress: () => router.push('/(tabs)/account') }}
         message={recoveryRequired
           ? 'The derived trading wallet does not match the recorded identity. No new identity was adopted.'
-          : 'Activate private trading once from Wallet. It restores automatically afterward.'}
-        title={recoveryRequired ? 'Trading wallet recovery required' : 'Activate private trading'}
+          : 'Private trading setup did not complete. Open Wallet to retry.'}
+        title={recoveryRequired ? 'Trading wallet recovery required' : 'Private trading setup paused'}
       />
     );
   }

@@ -7,20 +7,31 @@ export function StatusRow({
   label,
   value,
   selectable = false,
+  singleLine = false,
 }: {
   readonly label: string;
   readonly value: string;
   readonly selectable?: boolean;
+  readonly singleLine?: boolean;
 }) {
   return (
     <View
       accessible
       accessibilityLabel={`${label}: ${value}`}
-      style={styles.row}
+      style={[styles.row, singleLine ? styles.singleLineRow : null]}
     >
-      <Text style={styles.label}>{label}</Text>
       <Text
-        numberOfLines={selectable ? undefined : 2}
+        adjustsFontSizeToFit={singleLine}
+        minimumFontScale={0.75}
+        numberOfLines={singleLine ? 1 : undefined}
+        style={styles.label}
+      >
+        {label}
+      </Text>
+      <Text
+        adjustsFontSizeToFit={singleLine}
+        minimumFontScale={0.75}
+        numberOfLines={singleLine ? 1 : selectable ? undefined : 2}
         selectable={selectable}
         style={styles.value}
       >
@@ -63,6 +74,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
   },
+  singleLineRow: { alignItems: 'center' },
   label: {
     ...typography.bodyCompact,
     flexShrink: 0,

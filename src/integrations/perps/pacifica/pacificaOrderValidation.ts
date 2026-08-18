@@ -39,7 +39,7 @@ export function validatePacificaOrderDraft(input: {
     } catch {
       throw new PacificaOrderValidationError('Enter a valid USDC collateral amount with up to 6 decimals.');
     }
-    if (collateral <= 0n) throw new PacificaOrderValidationError('Collateral must be greater than zero.');
+    if (collateral <= 0n) throw new PacificaOrderValidationError('Enter collateral greater than zero.');
     if (!Number.isInteger(leverage) || leverage < 1 || leverage > input.market.maxLeverage) {
       throw new PacificaOrderValidationError(`Choose leverage from 1× to ${input.market.maxLeverage}×.`);
     }

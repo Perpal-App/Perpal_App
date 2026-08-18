@@ -5,6 +5,16 @@ export function collateralShortfall(
   return required > available ? required - available : 0n;
 }
 
+export function creditedDepositAmount(
+  shortfall: bigint,
+  minimumCreditedDeposit: bigint,
+): bigint {
+  if (shortfall <= 0n || minimumCreditedDeposit <= 0n) {
+    throw new Error('Pacifica deposit amounts must be positive.');
+  }
+  return shortfall < minimumCreditedDeposit ? minimumCreditedDeposit : shortfall;
+}
+
 export function scaledInputForMinimumOutput(
   quotedInput: bigint,
   requiredOutput: bigint,

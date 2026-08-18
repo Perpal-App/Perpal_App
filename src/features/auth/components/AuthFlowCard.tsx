@@ -303,6 +303,9 @@ export function AuthFlowCard() {
               style={styles.loginLogo}
             />
             <Text style={styles.title}>Log in or sign up</Text>
+            <Text style={styles.body}>
+              Continuing creates or restores your public and private wallets on this device.
+            </Text>
           </View>
           <View style={styles.methodList}>
             <View

@@ -87,6 +87,7 @@ export function TradingSessionProvider({
   const rootSeedRef = useRef<Uint8Array | null>(null);
   const walletAddressRef = useRef(mainWalletAddress);
   const activatingRef = useRef(false);
+  const automaticActivationRef = useRef<string | null>(null);
 
   const clearSecret = useCallback(() => {
     if (seedRef.current !== null) {
@@ -102,6 +103,7 @@ export function TradingSessionProvider({
   useEffect(() => {
     walletAddressRef.current = mainWalletAddress;
     activatingRef.current = false;
+    automaticActivationRef.current = null;
     clearSecret();
     setAddress(null);
     setRecovery(null);
@@ -271,13 +273,13 @@ export function TradingSessionProvider({
       clearSecret();
       setAddress(null);
       setError('Private trading activation was not completed. Try again.');
-      setStatus('inactive');
+      setStatus('error');
       logActivationError('activate', cause);
       publishInAppNotification({
         kind: 'wallet',
         outcome: 'error',
-        title: 'Private trading not activated',
-        message: 'Open Wallet and try activation again.',
+        title: 'Private trading setup paused',
+        message: 'Retry the private wallet setup.',
       });
     } finally {
       if (derived !== null && seedRef.current !== derived.secretKey) {
@@ -286,6 +288,21 @@ export function TradingSessionProvider({
       activatingRef.current = false;
     }
   }, [clearSecret, mainWalletAddress, status, wallet]);
+
+  useEffect(() => {
+    if (
+      status !== 'inactive' ||
+      mainWalletAddress === null ||
+      automaticActivationRef.current === mainWalletAddress
+    ) return;
+    automaticActivationRef.current = mainWalletAddress;
+    void activate();
+  }, [activate, mainWalletAddress, status]);
+
+  const retryRestore = useCallback(() => {
+    automaticActivationRef.current = null;
+    setRestoreAttempt((attempt) => attempt + 1);
+  }, []);
 
   const signer = useMemo<GatewayRequestSigner | null>(() => {
     if (status !== 'ready' || address === null) {
@@ -368,11 +385,11 @@ export function TradingSessionProvider({
       generation,
       recovery,
       rotate,
-      retryRestore: () => setRestoreAttempt((attempt) => attempt + 1),
+      retryRestore,
       signer,
       status,
     }),
-    [activate, address, error, generation, recovery, rotate, signer, status],
+    [activate, address, error, generation, recovery, retryRestore, rotate, signer, status],
   );
 
   return (

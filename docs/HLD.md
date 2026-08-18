@@ -5,10 +5,10 @@ Status: Pacifica mainnet integration implemented locally on 8 August 2026. Stati
 ## Product flow
 
 1. Sign in with Privy. Privy provisions or restores public Solana wallet **M**.
-2. Activate private trading once. The app derives or restores device-held Ed25519 wallet **T** and keeps its signing seed in secure storage.
+2. The app automatically restores T or performs its one-time deterministic derivation after M connects. Normal screens show a skeleton while this completes; there is no separate activation step. The device-held Ed25519 signing seed stays in secure storage.
 3. Fund T through Umbra: M deposits USDC or USDT plus a user-chosen SOL fee reserve. Umbra uses the native SOL mint internally, wraps SOL during deposit, and closes its callback helper account to deliver spendable native SOL to T. The relayer pays the claim transaction fee.
 4. Browse Pacifica markets without a wallet signature. REST supplies the catalog and initial snapshot; WebSocket supplies live prices.
-5. Review a trade. If Pacifica collateral is short, the app converts only the required USDT to USDC in T, then deposits at least Pacifica's 10 USDC minimum from T.
+5. Review a trade. Collateral may be below $10 when leverage makes the notional satisfy that market's API-provided minimum. If Pacifica collateral is short, the app converts USDT to USDC in T and observes Pacifica's separate 10 USDC minimum credited deposit.
 6. The app calculates the exact base-asset size, fee estimate, leverage, mark, and slippage boundary. A fresh mark is checked immediately before T signs Pacifica's canonical request.
 7. Closing a position is a reduce-only market order. Pacifica collateral stays in the account until the user requests withdrawal.
 8. **Withdraw privately** requests an idempotent Pacifica USDC withdrawal to T, waits for T's balance, then sends it through Umbra to M or another Solana wallet.
@@ -49,7 +49,7 @@ Screens render state and collect intent. They do not construct Pacifica signatur
 
 T signs Pacifica's documented recursively sorted compact JSON with Ed25519. The app verifies the returned signature locally before submission. The signed header binds operation type, timestamp, and a five-second expiry window.
 
-The MVP order surface implements market, limit, stop-market, and stop-limit entry plus full reduce-only market close. Before confirmation it shows side, exact base size, mark, notional, leverage, estimated taker fee, and 0.5% slippage. Immediately before submission it refetches the market mark and rejects a stale or out-of-bound plan. Opening updates the chosen leverage and then submits the order; both requests are signed by T under the single confirmed intent. Open regular orders are readable and cancellable from Portfolio with a separate confirmation. An accepted market close is reconciled through Pacifica position/trade history before it is treated as filled.
+The MVP order surface implements market, limit, stop-market, and stop-limit entry plus full reduce-only market close. Before confirmation it shows side, exact base size, mark, notional, leverage, estimated taker fee, 0.5% slippage, Pacifica's available balance, T's USDC/USDT balances, and the market's API-provided minimum notional. Immediately before submission it refetches the market mark and rejects a stale or out-of-bound plan. Opening updates the chosen leverage and then submits the order; both requests are signed by T under the single confirmed intent. Open regular orders are readable and cancellable from Portfolio with a separate confirmation. An accepted market close is reconciled through Pacifica position/trade history before it is treated as filled.
 
 Edit-order UI and individual stop-order management are not claimed as complete. Rotation uses Pacifica's authoritative stop-order count and refuses to proceed while any remain.
 
