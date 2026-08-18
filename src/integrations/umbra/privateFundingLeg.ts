@@ -28,6 +28,7 @@ import {
   type PrivateFundingNote,
 } from '@/integrations/umbra/privateFundingNotes';
 import { seedScanBoundary } from '@/integrations/umbra/privateFundingScanBoundary';
+import { nextPrivateFundingLegAction } from '@/integrations/umbra/privateFundingState';
 import type { UmbraGatewayDependencies } from '@/integrations/umbra/umbraGateway';
 
 const SCAN_ATTEMPTS = 60;
@@ -57,12 +58,14 @@ export type PrivateFundingLegState = {
 export async function runPrivateFundingLeg(input: {
   readonly client: IUmbraClient;
   readonly config: AppConfig;
+  readonly deferRelayPolling?: boolean;
   readonly dependencies: UmbraGatewayDependencies;
   readonly onState: (
     state: PrivateFundingLegState,
     phase: PrivateFundingLegPhase,
   ) => Promise<void>;
   readonly relayer: UmbraRelayer;
+  readonly returnAfterDeposit?: boolean;
   readonly state: PrivateFundingLegState;
 }): Promise<PrivateFundingLegState> {
   let state = input.state;
@@ -78,11 +81,17 @@ export async function runPrivateFundingLeg(input: {
     await input.onState(state, phase);
   };
 
-  if (state.claimSignature !== null) {
+  const nextAction = nextPrivateFundingLegAction({
+    claimSignature: state.claimSignature,
+    deferRelayPolling: input.deferRelayPolling === true,
+    relayRequestId: state.relayRequestId,
+  });
+
+  if (nextAction === 'done' || nextAction === 'wait-for-peer-leg') {
     return state;
   }
 
-  if (state.relayRequestId !== null) {
+  if (nextAction === 'poll-relay' && state.relayRequestId !== null) {
     const signature = await pollPrivateFundingRelay(
       input.relayer,
       state.relayRequestId,
@@ -202,6 +211,10 @@ export async function runPrivateFundingLeg(input: {
         },
         'scanning',
       );
+
+      if (input.returnAfterDeposit === true) {
+        return state;
+      }
     }
   }
 
@@ -268,7 +281,7 @@ export async function runPrivateFundingLeg(input: {
         pollBurnStatus: input.relayer.pollClaimStatus,
         getRelayerAddress: input.relayer.getRelayerAddress,
       },
-      awaitCompletion: true,
+      awaitCompletion: input.deferRelayPolling !== true,
       pollingIntervalMs: PRIVATE_FUNDING_RELAY_POLL_INTERVAL_MS,
       timeoutMs: PRIVATE_FUNDING_RELAY_TIMEOUT_MS,
       hooks: {
@@ -281,6 +294,22 @@ export async function runPrivateFundingLeg(input: {
   const result = await burn([note]);
   const batches = [...result.batches.values()];
   const batch = batches[0];
+
+  if (input.deferRelayPolling === true) {
+    const requestId = state.relayRequestId ?? batch?.requestId;
+
+    if (batches.length !== 1 || requestId === undefined) {
+      throw privateFundingRelayFailure(
+        batch?.failureReason,
+        batch?.status ?? 'missing_batch',
+      );
+    }
+
+    if (state.relayRequestId === null) {
+      await save({ relayRequestId: requestId }, 'relaying');
+    }
+    return state;
+  }
 
   if (
     batches.length !== 1 ||

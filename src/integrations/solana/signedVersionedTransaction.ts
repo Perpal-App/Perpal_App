@@ -16,6 +16,7 @@ const CONFIRMATION_INTERVAL_MS = 1_200;
 export async function signAndSubmitVersionedTransaction(input: {
   readonly idempotencyKey: string;
   readonly owner: string;
+  readonly operationLabel?: string;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
   readonly transaction: VersionedTransaction;
@@ -24,6 +25,7 @@ export async function signAndSubmitVersionedTransaction(input: {
     signedTransactionBase64: string,
   ) => Promise<void>;
 }): Promise<SubmittedTransactionResult> {
+  const operation = input.operationLabel ?? 'stablecoin conversion';
   const owner = new PublicKey(input.owner);
   assertTransactionAuthority(input.transaction, owner, input.signer, true);
   const valid = await isBlockhashValid(
@@ -34,7 +36,7 @@ export async function signAndSubmitVersionedTransaction(input: {
 
   if (!valid) {
     throw new TransactionSigningError(
-      'The stablecoin conversion expired. Prepare it again.',
+      `The ${operation} expired. Prepare it again.`,
       'blockhash_expired',
     );
   }
@@ -73,7 +75,7 @@ export async function signAndSubmitVersionedTransaction(input: {
 
   if (simulation.value.err !== null) {
     throw new TransactionSigningError(
-      'The stablecoin conversion preview failed.',
+      `The ${operation} preview failed.`,
       'simulation_failed',
     );
   }
@@ -92,6 +94,7 @@ export async function submitSignedVersionedTransaction(input: {
   readonly expectedSignature: string;
   readonly idempotencyKey: string;
   readonly owner: string;
+  readonly operationLabel?: string;
   readonly rpcUrl: string;
   readonly signedTransactionBase64: string;
   readonly signer: GatewayRequestSigner;
@@ -113,7 +116,7 @@ export async function submitSignedVersionedTransaction(input: {
     )
   ) {
     throw new TransactionSigningError(
-      'The stored stablecoin conversion is invalid.',
+      `The stored ${input.operationLabel ?? 'stablecoin conversion'} is invalid.`,
       'signature_invalid',
     );
   }
@@ -202,6 +205,7 @@ async function isBlockhashValid(
 
 async function confirm(input: {
   readonly expectedSignature: string;
+  readonly operationLabel?: string;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
 }): Promise<'confirmed' | 'submitted'> {
@@ -214,7 +218,7 @@ async function confirm(input: {
 
     if (status === 'failed') {
       throw new TransactionSigningError(
-        'The stablecoin conversion failed on-chain.',
+        `The ${input.operationLabel ?? 'stablecoin conversion'} failed on-chain.`,
         'transaction_failed',
       );
     }

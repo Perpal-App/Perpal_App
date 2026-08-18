@@ -250,11 +250,12 @@ export function usePacificaMarkets(
   apiOrigin: string,
   assetOrigin: string,
   wsOrigin: string,
+  enabled = true,
 ): PacificaVenueSnapshotState {
   useFocusEffect(
     useCallback(
-      () => retain(apiOrigin, assetOrigin, wsOrigin),
-      [apiOrigin, assetOrigin, wsOrigin],
+      () => enabled ? retain(apiOrigin, assetOrigin, wsOrigin) : undefined,
+      [apiOrigin, assetOrigin, enabled, wsOrigin],
     ),
   );
 

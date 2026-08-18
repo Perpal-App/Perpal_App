@@ -12,6 +12,7 @@ import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import { fetchPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { hasPendingPacificaWithdrawal } from '@/integrations/perps/pacifica/pacificaWithdrawal';
+import { readPendingTradeAction } from '@/integrations/perps/tradeActionStorage';
 import {
   signAndSubmitLegacyTransaction,
   type SubmittedTransactionResult,
@@ -163,11 +164,12 @@ export async function submitTradingWalletRotation(
 }
 
 async function assertNoPendingActivity(input: RotationInput): Promise<void> {
-  const [funding, exit, pacificaWithdrawal, pacifica] = await Promise.all([
+  const [funding, exit, pacificaWithdrawal, pacifica, pacificaAction] = await Promise.all([
     readPrivateFundingRecord(input.mainWalletAddress),
     readPrivateExitRecord(input.tradingWalletAddress),
     hasPendingPacificaWithdrawal(input.tradingWalletAddress),
     fetchPacificaPortfolio(input.config.perps.pacificaApiOrigin, input.tradingWalletAddress),
+    readPendingTradeAction(input.tradingWalletAddress, 'pacifica'),
   ]);
 
   if (funding !== null && funding.phase !== 'complete') {
@@ -178,6 +180,9 @@ async function assertNoPendingActivity(input: RotationInput): Promise<void> {
   }
   if (pacificaWithdrawal) {
     throw new TradingWalletRotationError('A Pacifica withdrawal is still pending.');
+  }
+  if (pacificaAction !== null) {
+    throw new TradingWalletRotationError('A trading transaction is still pending confirmation.');
   }
   if (
     pacifica.positionsCount > 0 ||

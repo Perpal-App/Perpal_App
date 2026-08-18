@@ -1,5 +1,6 @@
 import * as Crypto from 'expo-crypto';
 
+import type { PerpsProviderId } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
   PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS,
@@ -42,29 +43,32 @@ export type TradeFundingRequirement = {
 
 export class TradeFundingRequirementError extends Error {
   constructor(readonly requirement: TradeFundingRequirement) {
-    super('Private funds are below Pacifica funding minimum.');
+    super('Private funds are below the required collateral.');
     this.name = 'TradeFundingRequirementError';
   }
 }
 
-type CommonInput = {
-  readonly apiOrigin: string;
-  readonly centralState: string;
+type ConversionInput = {
   readonly owner: string;
-  readonly programId: string;
   readonly rpcUrl: string;
   readonly signal: AbortSignal;
   readonly signer: GatewayRequestSigner;
   readonly swapBuildUrl: string;
   readonly usdcMint: string;
   readonly usdtMint: string;
+};
+
+type CommonInput = ConversionInput & {
+  readonly apiOrigin: string;
+  readonly centralState: string;
+  readonly programId: string;
   readonly vault: string;
 };
 
 export type TradeCollateralStep =
   | {
       readonly kind: 'conversion';
-      readonly provider: 'pacifica';
+      readonly provider: PerpsProviderId;
       readonly input: ProviderCollateral;
       readonly inputAmountBaseUnits: bigint;
       readonly output: ProviderCollateral;
@@ -146,7 +150,7 @@ export function tradeCollateralStepCanSubmit(step: TradeCollateralStep): boolean
 }
 
 async function prepareConversionIfNeeded(
-  input: CommonInput,
+  input: ConversionInput,
   requiredOutputBaseUnits: bigint,
 ): Promise<Extract<TradeCollateralStep, { readonly kind: 'conversion' }> | null> {
   const output = pacificaCollateral(input.usdcMint);

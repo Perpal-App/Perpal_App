@@ -15,16 +15,12 @@ import { Skeleton, SkeletonText } from '@/components/feedback/Skeleton';
 import {
   formatCompactTokenPrice,
   formatCompactUsd,
+  type Amount,
 } from '@/domain/money/amount';
 import {
   MARKET_LOGO_SIZE,
   MarketLogo,
 } from '@/features/trade/components/MarketLogo';
-import type {
-  PacificaMarket,
-  PacificaMarketSnapshot,
-} from '@/integrations/perps/pacifica/pacificaMarketData';
-import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
 
 /**
@@ -62,8 +58,21 @@ const COLUMN_FLEX = { market: 1.85, price: 1.35, volume: 1.15 } as const;
 const MAX_TEXT_SCALE = 1.15;
 
 export type MarketTableEntry = {
-  readonly market: PacificaMarket;
-  readonly venue: PacificaMarketSnapshot | null;
+  readonly detailText: string;
+  readonly market: {
+    readonly baseAsset: string;
+    readonly displayName: string;
+    readonly iconUrl: string;
+    readonly maxLeverage: number;
+    readonly venueRef: string;
+  };
+  readonly venue: {
+    readonly change24hBps: number | null;
+    readonly openInterest: Amount | null;
+    readonly price: Amount;
+    readonly priceStale: boolean;
+    readonly volume24h: Amount | null;
+  } | null;
 };
 
 /**
@@ -174,7 +183,8 @@ export const MarketTableRow = memo(
   (previous, next) => previous.compact === next.compact
     && previous.onSelect === next.onSelect
     && previous.entry.market === next.entry.market
-    && previous.entry.venue === next.entry.venue,
+    && previous.entry.venue === next.entry.venue
+    && previous.entry.detailText === next.entry.detailText,
 );
 
 function MarketRow({ entry, compact = false, onSelect }: MarketTableRowProps) {
@@ -190,9 +200,6 @@ function MarketRow({ entry, compact = false, onSelect }: MarketTableRowProps) {
   const openInterestText = openInterest === null
     ? UNAVAILABLE
     : formatCompactUsd(openInterest);
-  const nextFundingText = venue === null
-    ? UNAVAILABLE
-    : formatPacificaRatePercent(venue.nextFundingRate);
   // A row with no snapshot yet is still loading, so its cells shimmer. Once the
   // venue has answered, a value it does not publish shows the placeholder
   // instead: pending and unavailable are different states and read differently.
@@ -208,7 +215,7 @@ function MarketRow({ entry, compact = false, onSelect }: MarketTableRowProps) {
         `24 hour change ${spoken(changeText)}`,
         `24 hour volume ${spoken(volumeText)}`,
         `open interest ${spoken(openInterestText)}`,
-        `next funding ${spoken(nextFundingText)}`,
+        entry.detailText,
       ].join('. ')}
       accessibilityHint="Opens market details and trade controls"
       accessibilityRole="button"
@@ -231,7 +238,7 @@ function MarketRow({ entry, compact = false, onSelect }: MarketTableRowProps) {
           {pending ? (
             <SkeletonText role="caption" width={72} />
           ) : (
-            <TableText style={styles.marketName}>{`Next ${nextFundingText}`}</TableText>
+            <TableText style={styles.marketName}>{entry.detailText}</TableText>
           )}
         </View>
       </View>

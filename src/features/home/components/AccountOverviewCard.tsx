@@ -254,14 +254,13 @@ function walletLabel(
   return count === 0 ? label : `${label} · ${count} unpriced`;
 }
 
-function unrealizedPnl(portfolio: PacificaPortfolioSnapshot | null): Amount | null {
+function unrealizedPnl(
+  portfolio: PacificaPortfolioSnapshot | null,
+): Amount | null {
   if (portfolio === null) return null;
 
   try {
-    return subtractAmounts(
-      parseAmount(portfolio.accountEquity, 6),
-      parseAmount(portfolio.balance, 6),
-    );
+    return subtractAmounts(parseAmount(portfolio.accountEquity, 6), parseAmount(portfolio.balance, 6));
   } catch {
     return null;
   }

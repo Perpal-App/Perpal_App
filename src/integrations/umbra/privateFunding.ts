@@ -36,6 +36,7 @@ import {
   writePrivateFundingRecord,
   type PrivateFundingRecord,
 } from '@/integrations/umbra/umbraSecureStorage';
+import { prefetchUmbraZkey } from '@/integrations/umbra/zkAssets';
 
 export type PrivateFundingInput = {
   readonly amountBaseUnits: bigint;
@@ -255,6 +256,46 @@ async function runPrivateFunding(
     await runPrivateFundingLeg({
       client,
       config: input.config,
+      deferRelayPolling: true,
+      dependencies,
+      returnAfterDeposit: true,
+      relayer,
+      state: collateralLeg(record),
+      onState: async (state, phase) => {
+        await save(withCollateralLeg(record, state, phase));
+      },
+    });
+    const claimAsset = prefetchUmbraZkey(
+      input.config.privacy.umbraZkAssetBaseUrl,
+      'claimDepositIntoPublicAmount:n1',
+    );
+    if (
+      record.feeFundingScanStartLeafCounts === null &&
+      record.scanStartLeafCounts !== null
+    ) {
+      await save({
+        ...record,
+        feeFundingScanStartLeafCounts: record.scanStartLeafCounts,
+        updatedAtMs: Date.now(),
+      });
+    }
+    await save({ ...record, phase: 'fee-funding', updatedAtMs: Date.now() });
+    await runPrivateFundingLeg({
+      client,
+      config: input.config,
+      deferRelayPolling: true,
+      dependencies,
+      returnAfterDeposit: true,
+      relayer,
+      state: feeReserveLeg(record),
+      onState: async (state) => {
+        await save(withFeeReserveLeg(record, state));
+      },
+    });
+    await runPrivateFundingLeg({
+      client,
+      config: input.config,
+      deferRelayPolling: true,
       dependencies,
       relayer,
       state: collateralLeg(record),
@@ -262,7 +303,28 @@ async function runPrivateFunding(
         await save(withCollateralLeg(record, state, phase));
       },
     });
-    await save({ ...record, phase: 'fee-funding', updatedAtMs: Date.now() });
+    await runPrivateFundingLeg({
+      client,
+      config: input.config,
+      deferRelayPolling: true,
+      dependencies,
+      relayer,
+      state: feeReserveLeg(record),
+      onState: async (state) => {
+        await save(withFeeReserveLeg(record, state));
+      },
+    });
+    await claimAsset;
+    await runPrivateFundingLeg({
+      client,
+      config: input.config,
+      dependencies,
+      relayer,
+      state: collateralLeg(record),
+      onState: async (state, phase) => {
+        await save(withCollateralLeg(record, state, phase));
+      },
+    });
     await runPrivateFundingLeg({
       client,
       config: input.config,

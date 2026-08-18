@@ -1,4 +1,7 @@
-import { hasCompletedPrivateWalletFunding } from '@/integrations/umbra/privateFundingState';
+import {
+  hasCompletedPrivateWalletFunding,
+  nextPrivateFundingLegAction,
+} from '@/integrations/umbra/privateFundingState';
 import { nextPrivateFundingRelayRecoveryAttempt } from '@/integrations/umbra/privateFundingRelayRecovery';
 
 it('finishes in T only after both claims and before any provider deposit', () => {
@@ -59,4 +62,22 @@ it('retries a submitted relay after a manual run aborts passive recovery', () =>
     lastAttemptKey: firstAttempt,
     recoveryKey: null,
   })).toBeNull();
+});
+
+it('submits both claim legs before polling either relayer request', () => {
+  expect(nextPrivateFundingLegAction({
+    claimSignature: null,
+    deferRelayPolling: true,
+    relayRequestId: 'collateral-request',
+  })).toBe('wait-for-peer-leg');
+  expect(nextPrivateFundingLegAction({
+    claimSignature: null,
+    deferRelayPolling: false,
+    relayRequestId: 'collateral-request',
+  })).toBe('poll-relay');
+  expect(nextPrivateFundingLegAction({
+    claimSignature: null,
+    deferRelayPolling: true,
+    relayRequestId: null,
+  })).toBe('continue');
 });

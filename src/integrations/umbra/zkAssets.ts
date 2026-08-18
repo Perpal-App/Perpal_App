@@ -31,6 +31,14 @@ type RemoteManifest = {
   readonly assets?: unknown;
 };
 
+type UmbraZkey = {
+  readonly source: 'cache' | 'network';
+  readonly uri: string;
+};
+
+const assetRequests = new Map<string, Promise<UmbraZkey>>();
+const manifestRequests = new Map<string, Promise<void>>();
+
 export class UmbraAssetError extends Error {
   constructor(message: string) {
     super(message);
@@ -42,10 +50,50 @@ export async function getUmbraZkey(
   baseUrl: string,
   circuit: UmbraCircuit,
   options?: { readonly refresh?: boolean },
-): Promise<{ readonly source: 'cache' | 'network'; readonly uri: string }> {
+): Promise<UmbraZkey> {
+  if (options?.refresh === true) {
+    return loadUmbraZkey(baseUrl, circuit, true);
+  }
+
+  const key = `${baseUrl}:${circuit}`;
+  const existing = assetRequests.get(key);
+
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const request = loadUmbraZkey(baseUrl, circuit, false).finally(() => {
+    if (assetRequests.get(key) === request) {
+      assetRequests.delete(key);
+    }
+  });
+  assetRequests.set(key, request);
+  return request;
+}
+
+export async function prefetchUmbraZkey(
+  baseUrl: string,
+  circuit: UmbraCircuit,
+): Promise<void> {
+  try {
+    await getUmbraZkey(baseUrl, circuit);
+  } catch (cause) {
+    console.warn('[Perpal Umbra proof]', JSON.stringify({
+      circuit,
+      errorName: cause instanceof Error ? cause.name : typeof cause,
+      event: 'asset_prefetch_failed',
+    }));
+  }
+}
+
+async function loadUmbraZkey(
+  baseUrl: string,
+  circuit: UmbraCircuit,
+  refresh: boolean,
+): Promise<UmbraZkey> {
   const asset = UMBRA_ZKEY_SPECS[circuit];
   const manifestStartedAtMs = performance.now();
-  await verifyManifest(baseUrl, circuit, asset.path);
+  await verifyManifestOnce(baseUrl, circuit, asset.path);
   console.info('[Perpal Umbra proof]', JSON.stringify({
     circuit,
     durationMs: Math.round(performance.now() - manifestStartedAtMs),
@@ -60,7 +108,7 @@ export async function getUmbraZkey(
   );
   const file = new File(directory, asset.path.split('/').at(-1) ?? 'asset.zkey');
 
-  if (options?.refresh === true && file.exists) {
+  if (refresh && file.exists) {
     await file.delete();
   }
 
@@ -107,6 +155,28 @@ export async function getUmbraZkey(
 
   logAssetReady(circuit, asset.bytes, 'network', assetStartedAtMs);
   return { source: 'network', uri: file.uri };
+}
+
+async function verifyManifestOnce(
+  baseUrl: string,
+  circuit: UmbraCircuit,
+  expectedPath: string,
+): Promise<void> {
+  const key = `${baseUrl}:${UMBRA_RN_ZK_ASSET_VERSION}:${circuit}`;
+  const existing = manifestRequests.get(key);
+
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const request = verifyManifest(baseUrl, circuit, expectedPath).catch((cause) => {
+    if (manifestRequests.get(key) === request) {
+      manifestRequests.delete(key);
+    }
+    throw cause;
+  });
+  manifestRequests.set(key, request);
+  return request;
 }
 
 function logAssetReady(

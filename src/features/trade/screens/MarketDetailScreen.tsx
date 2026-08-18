@@ -33,12 +33,16 @@ const UNAVAILABLE = '--.--';
  * watched. Every order still ends at the explicit review-and-sign boundary.
  */
 export function MarketDetailScreen() {
+  const params = useLocalSearchParams<{
+    venueRef?: string | string[];
+  }>();
+  const venueRef = Array.isArray(params.venueRef) ? params.venueRef[0] : params.venueRef;
+  return <PacificaMarketDetailScreen venueRef={venueRef ?? ''} />;
+}
+
+function PacificaMarketDetailScreen({ venueRef }: { readonly venueRef: string }) {
   const compact = useWindowDimensions().width < layout.compactWidth;
   const router = useRouter();
-  const params = useLocalSearchParams<{ venueRef?: string | string[] }>();
-  const rawVenueRef = Array.isArray(params.venueRef)
-    ? params.venueRef[0]
-    : params.venueRef;
   const config = readAppConfig();
   const perps = config.ok ? config.value.perps : null;
   const venue = usePacificaMarkets(
@@ -47,8 +51,8 @@ export function MarketDetailScreen() {
     perps?.pacificaWsOrigin ?? '',
   );
   const market = useMemo(
-    () => venue.markets.find((candidate) => candidate.venueRef === rawVenueRef),
-    [rawVenueRef, venue.markets],
+    () => venue.markets.find((candidate) => candidate.venueRef === venueRef),
+    [venue.markets, venueRef],
   );
   const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
 

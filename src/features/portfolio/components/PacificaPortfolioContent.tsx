@@ -113,7 +113,7 @@ export function PacificaPortfolioContent({
       {portfolioUnavailable ? (
         <RiseInView layout={layoutMorph()}>
           <Text accessibilityRole="alert" selectable style={styles.alert}>
-            Active trades are temporarily unavailable. Your wallet balances remain visible.
+            Some active trades are temporarily unavailable. Your wallet balances remain visible.
           </Text>
         </RiseInView>
       ) : null}

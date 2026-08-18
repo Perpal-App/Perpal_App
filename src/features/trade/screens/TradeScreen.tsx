@@ -14,8 +14,8 @@ import {
 } from '@/features/trade/components/MarketTable';
 import {
   usePacificaMarkets,
-  type PacificaVenueState,
 } from '@/features/trade/hooks/usePacificaMarkets';
+import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { useMinimizeOnScroll } from '@/navigation/tabs/minimizeState';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
@@ -26,26 +26,28 @@ export function TradeScreen() {
   const [query, setQuery] = useState('');
   const onScroll = useMinimizeOnScroll();
   const compact = useWindowDimensions().width < layout.compactWidth;
-  const venue = usePacificaMarkets(
+  const pacifica = usePacificaMarkets(
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     config.ok ? config.value.perps.pacificaAssetOrigin : '',
     config.ok ? config.value.perps.pacificaWsOrigin : '',
   );
-  const snapshots = useMemo(
-    () => new Map(venue.snapshots.map((snapshot) => [snapshot.venueRef, snapshot])),
-    [venue.snapshots],
-  );
   const entries = useMemo<readonly MarketTableEntry[]>(
-    () => venue.markets
-      .filter((market) => matches(market, query))
-      .map((market) => ({ market, venue: snapshots.get(market.venueRef) ?? null }))
-      .sort((left, right) => {
-        const leftVolume = left.venue?.volume24h.baseUnits ?? -1n;
-        const rightVolume = right.venue?.volume24h.baseUnits ?? -1n;
+    () => {
+      const rows = joinMarkets(
+        pacifica.markets,
+        pacifica.snapshots,
+        query,
+        (snapshot) => `Next ${formatPacificaRatePercent(snapshot.nextFundingRate)}`,
+      );
+      return rows.sort((left, right) => {
+        const leftVolume = left.venue?.volume24h?.baseUnits ?? -1n;
+        const rightVolume = right.venue?.volume24h?.baseUnits ?? -1n;
         return leftVolume === rightVolume ? 0 : leftVolume > rightVolume ? -1 : 1;
-      }),
-    [query, snapshots, venue.markets],
+      });
+    },
+    [pacifica.markets, pacifica.snapshots, query],
   );
+  const venueStatus = pacifica.status;
 
   // Both stable, which is what lets `MarketTableRow`'s memo hold: a `renderItem` or an
   // `onPress` rebuilt inline would hand every row a new prop on every price message and
@@ -89,7 +91,7 @@ export function TradeScreen() {
               placeholder="Search markets"
               value={query}
             />
-            {venue.status === 'error' ? (
+            {venueStatus === 'error' ? (
               <Text accessibilityRole="alert" style={styles.notice}>
                 Pacifica market data is reconnecting. Trading stays blocked until prices are current.
               </Text>
@@ -101,7 +103,7 @@ export function TradeScreen() {
           <MarketListPlaceholder
             compact={compact}
             query={query}
-            status={venue.status}
+            status={venueStatus}
           />
         )}
         keyboardShouldPersistTaps="handled"
@@ -134,6 +136,22 @@ function matches(market: MarketTableEntry['market'], query: string): boolean {
     market.displayName.toLowerCase().includes(needle);
 }
 
+function joinMarkets<
+  Market extends MarketTableEntry['market'],
+  Snapshot extends NonNullable<MarketTableEntry['venue']> & { readonly venueRef: string },
+>(
+  markets: readonly Market[],
+  snapshots: readonly Snapshot[],
+  query: string,
+  detail: (snapshot: Snapshot) => string,
+): MarketTableEntry[] {
+  const byMarket = new Map(snapshots.map((snapshot) => [snapshot.venueRef, snapshot]));
+  return markets.filter((market) => matches(market, query)).map((market) => {
+    const snapshot = byMarket.get(market.venueRef) ?? null;
+    return { market, venue: snapshot, detailText: snapshot === null ? '' : detail(snapshot) };
+  });
+}
+
 /** Rows to shimmer before the venue's first answer — roughly a phone's worth. */
 const PLACEHOLDER_ROWS = 9;
 
@@ -153,7 +171,7 @@ function MarketListPlaceholder({
 }: {
   readonly compact: boolean;
   readonly query: string;
-  readonly status: PacificaVenueState;
+  readonly status: 'idle' | 'loading' | 'ready' | 'error';
 }) {
   const searching = query.trim().length > 0;
 
