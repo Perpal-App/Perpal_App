@@ -47,4 +47,16 @@ it('retries a submitted relay after a manual run aborts passive recovery', () =>
     lastAttemptKey: null,
     recoveryKey,
   })).toBe(`${recoveryKey}:1`);
+  expect(nextPrivateFundingRelayRecoveryAttempt({
+    activeRefresh: 2,
+    isRunning: false,
+    lastAttemptKey: firstAttempt,
+    recoveryKey,
+  })).toBe(`${recoveryKey}:2`);
+  expect(nextPrivateFundingRelayRecoveryAttempt({
+    activeRefresh: 2,
+    isRunning: false,
+    lastAttemptKey: firstAttempt,
+    recoveryKey: null,
+  })).toBeNull();
 });

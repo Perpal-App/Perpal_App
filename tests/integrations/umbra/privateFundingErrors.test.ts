@@ -2,6 +2,7 @@ import {
   classifyPrivateFundingFailure,
   isGroth16ProofVerificationFailure,
   privateFundingFailureDiagnostic,
+  privateFundingUserMessage,
 } from '@/integrations/umbra/privateFundingErrors';
 
 describe('private funding error classification', () => {
@@ -35,5 +36,10 @@ describe('private funding error classification', () => {
     expect(privateFundingFailureDiagnostic(
       'failed for 4Nd1mYvQwZcDg5pWPQrj2WnQkzq7tBpmJZrQJ5Yx7FhT',
     )).toBe('failed for [address]');
+  });
+
+  it('describes terminal and pending relayer states without claiming submission state', () => {
+    expect(privateFundingUserMessage('relay_failed')).toContain('resume to reconcile');
+    expect(privateFundingUserMessage('relay_pending')).toContain('still processing');
   });
 });

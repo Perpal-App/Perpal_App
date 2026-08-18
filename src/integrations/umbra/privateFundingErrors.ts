@@ -98,6 +98,14 @@ export function privateFundingUserMessage(code: string): string {
     return 'Private funding was not approved.';
   }
 
+  if (code === 'relay_failed') {
+    return 'Umbra could not complete the private claim. Progress is saved; resume to reconcile it.';
+  }
+
+  if (code === 'relay_pending') {
+    return 'Umbra is still processing the private claim. Progress is saved and will be checked again.';
+  }
+
   if (code === 'fetch_utxos_key_derivation') {
     return 'The Umbra recovery key could not be prepared. No transaction was submitted.';
   }
