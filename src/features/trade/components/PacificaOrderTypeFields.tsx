@@ -23,6 +23,7 @@ const OPTIONS: readonly MenuOption<PacificaOrderType>[] = [
 const MIN_MENU_WIDTH = 168;
 
 export function PacificaOrderTypeFields(props: {
+  readonly disabled?: boolean;
   readonly limitPrice: string;
   readonly markPrice: string;
   readonly onLimitPriceChange: (value: string) => void;
@@ -57,9 +58,14 @@ export function PacificaOrderTypeFields(props: {
         <Pressable
           accessibilityLabel={`Order type ${label}`}
           accessibilityRole="button"
-          accessibilityState={{ expanded: menuOpen }}
+          accessibilityState={{ disabled: props.disabled, expanded: menuOpen }}
+          disabled={props.disabled}
           onPress={openMenu}
-          style={({ pressed }) => [styles.selector, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.selector,
+            props.disabled && styles.disabled,
+            pressed && styles.pressed,
+          ]}
         >
           <Text numberOfLines={1} style={styles.selectorLabel}>{label}</Text>
           <ChevronDown />
@@ -132,6 +138,7 @@ const styles = StyleSheet.create({
   selector: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xxs, paddingLeft: spacing.xs, paddingRight: spacing.xxs, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
   selectorLabel: { ...typography.bodyCompact, flexShrink: 1, color: colors.textPrimary },
   pressed: { opacity: 0.72 },
+  disabled: { opacity: 0.6 },
   priceField: { minWidth: 0, minHeight: 40, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
   input: { flex: 1, minWidth: 0, minHeight: 38, paddingHorizontal: spacing.xs, color: colors.textPrimary, ...typography.bodyCompact },
   suffix: { ...typography.caption, paddingRight: spacing.xs, color: colors.textMuted },

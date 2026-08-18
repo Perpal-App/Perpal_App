@@ -22,6 +22,7 @@ export type WalletValuation = {
 };
 
 export type WalletBalance = {
+  readonly holdings: readonly TokenHolding[];
   readonly solLamports: bigint;
   readonly usdcBaseUnits: bigint;
   readonly usdtBaseUnits: bigint;
@@ -33,9 +34,7 @@ export type WalletBalances = {
   readonly privateWallet: WalletBalance;
 };
 
-type RawWalletBalance = Omit<WalletBalance, 'valuation'> & {
-  readonly holdings: readonly TokenHolding[];
-};
+type RawWalletBalance = Omit<WalletBalance, 'valuation'>;
 
 type BalanceStatus = 'idle' | 'loading' | 'ready' | 'error';
 type PriceBatch = {
@@ -112,7 +111,13 @@ export function useWalletBalances(input: {
           ]);
 
           const pricing = await fetchTokenPrices(
-            uniqueMints([...publicWallet.holdings, ...privateWallet.holdings]),
+            uniqueMints([
+              ...publicWallet.holdings,
+              ...privateWallet.holdings,
+              ...(publicWallet.solLamports === 0n && privateWallet.solLamports === 0n
+                ? []
+                : [{ mint: NATIVE_MINT.toBase58(), baseUnits: 1n, decimals: 9 }]),
+            ]),
             config.value.api.tokenPricesUrl,
             controller.signal,
           );
@@ -190,13 +195,7 @@ async function readWalletBalance(
   }
 
   const solLamports = BigInt(sol.value);
-  const holdings = mergeHoldings([
-    ...legacy,
-    ...token2022,
-    ...(solLamports === 0n
-      ? []
-      : [{ mint: NATIVE_MINT.toBase58(), baseUnits: solLamports, decimals: 9 }]),
-  ]);
+  const holdings = mergeHoldings([...legacy, ...token2022]);
 
   return {
     holdings,
@@ -341,10 +340,17 @@ function withValuation(
   wallet: RawWalletBalance,
   pricing: PriceBatch,
 ): WalletBalance {
-  const { holdings, ...balance } = wallet;
-  const valuation = valueTokenHoldingsUsd(holdings, pricing.prices);
+  const valuation = valueTokenHoldingsUsd(
+    mergeHoldings([
+      ...wallet.holdings,
+      ...(wallet.solLamports === 0n
+        ? []
+        : [{ mint: NATIVE_MINT.toBase58(), baseUnits: wallet.solLamports, decimals: 9 }]),
+    ]),
+    pricing.prices,
+  );
   return {
-    ...balance,
+    ...wallet,
     valuation: {
       ...valuation,
       source: 'Jupiter Price API V3',

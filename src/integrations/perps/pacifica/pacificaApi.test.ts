@@ -51,7 +51,8 @@ describe('Pacifica market order intent', () => {
       portfolio: {
         accountEquity: '100', availableToSpend: '100', availableToWithdraw: '100',
         balance: '100', initialized: true, makerFee: '0.0002', orders: [], pendingBalance: '0',
-        positions: [], takerFee: '0.0007', totalMarginUsed: '0', updatedAtMs: Date.now(),
+        ordersCount: 0, positions: [], positionsCount: 0, stopOrdersCount: 0,
+        takerFee: '0.0007', totalMarginUsed: '0', updatedAtMs: Date.now(),
       },
       side: 'long',
       snapshot: {

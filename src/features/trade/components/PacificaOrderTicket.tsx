@@ -73,10 +73,6 @@ export function PacificaOrderTicket(props: {
   const [leverage, setLeverage] = useState(String(Math.min(5, props.market.maxLeverage)));
   const [limitPrice, setLimitPrice] = useState('');
   const [triggerPrice, setTriggerPrice] = useState('');
-  // The two ways to size collateral are independent controls, so neither reads the other's
-  // state. `presetPercent` is the button that was last tapped and nothing else; the slider
-  // owns its handle and only hears about `sliderReset`, which returns it to rest when its
-  // claim is void — a new market, or an amount typed in by hand.
   const [presetPercent, setPresetPercent] = useState<number | null>(null);
   const [sliderReset, setSliderReset] = useState(0);
   const [tpSlEnabled, setTpSlEnabled] = useState(false);
@@ -89,10 +85,6 @@ export function PacificaOrderTicket(props: {
   const [orderId, setOrderId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
-  // Not a choice, so not state. Cross is the mode for every market that allows it, and a
-  // market that does not is isolated whatever the ticket says — there was nothing for a
-  // second button to decide. The mode still travels with the plan and is spelled out in the
-  // confirmation before anything is signed.
   const marginMode: PacificaMarginMode = props.market.isolatedOnly ? 'isolated' : 'cross';
   const controller = useRef<AbortController | null>(null);
   const recovery = useTradeActionRecovery({
@@ -335,13 +327,7 @@ export function PacificaOrderTicket(props: {
   const stopOrder = orderType === 'stop-market' || orderType === 'stop-limit';
 
   return (
-    // No "Order" heading: the workspace's Trade tab already names this column, and in a
-    // half-width panel a title row costs a control's worth of height to repeat it.
     <View style={styles.panel}>
-      {/* Margin mode and leverage share the row, the way the reference pairs them: two
-          settings that describe the position's risk, stated in two equal boxes above the
-          order that will carry it. Mode is stated rather than chosen — cross wherever the
-          venue allows it — so it takes the quieter box of the two. */}
       <View style={styles.controls}>
         <StaticControl
           accessibilityLabel={`Margin mode ${marginMode}`}
@@ -356,6 +342,7 @@ export function PacificaOrderTicket(props: {
         />
       </View>
       <PacificaOrderTypeFields
+        disabled={reduceOnly}
         limitPrice={limitPrice}
         markPrice={`$${formatAmountWithCommas(props.snapshot.price)}`}
         onLimitPriceChange={(value) => { reset(); setLimitPrice(value); }}
@@ -367,10 +354,6 @@ export function PacificaOrderTicket(props: {
         orderType={orderType}
         triggerPrice={triggerPrice}
       />
-      {/* One word each. `Buy BTC` and `Close short` both ran past a half-width button
-          and truncated mid-ticker, and the ticker is already on the header above and in
-          the confirmation before anything is signed. The full phrase is what a screen
-          reader gets. */}
       <View style={styles.controls}>
         <Choice
           accessibilityLabel={reduceOnly
@@ -393,9 +376,6 @@ export function PacificaOrderTicket(props: {
       </View>
       {reduceOnly ? null : (
         <>
-          {/* Typing is the authority over both sizing controls: once an exact amount is in
-              the field, neither the handle's position nor a lit button describes it, so both
-              stand down. */}
           <Field
             accessibilityLabel="USDC collateral"
             onChangeText={(value) => {
@@ -412,10 +392,6 @@ export function PacificaOrderTicket(props: {
             onChange={(next) => { applyPercentage(next); setPresetPercent(null); }}
             resetSignal={sliderReset}
           />
-          {/* A button does not move the handle to its own value — that is the coupling this
-              split exists to remove — but it does stand the handle down, because a rail
-              parked at 30% beside a field holding 75% of the balance is a figure on screen
-              that describes nothing. At rest the slider is simply not the control in play. */}
           <PercentPresets
             onSelect={(next) => {
               applyPercentage(next);
@@ -426,7 +402,20 @@ export function PacificaOrderTicket(props: {
           />
         </>
       )}
-      <Toggle label="Reduce only" onChange={(value) => { reset(); setAction(value ? 'close' : 'open'); if (value) setTpSlEnabled(false); }} value={reduceOnly} />
+      <Toggle
+        label="Reduce only"
+        onChange={(value) => {
+          reset();
+          setAction(value ? 'close' : 'open');
+          if (value) {
+            setOrderType('market');
+            setLimitPrice('');
+            setTriggerPrice('');
+            setTpSlEnabled(false);
+          }
+        }}
+        value={reduceOnly}
+      />
       <Toggle disabled={reduceOnly || stopOrder} label="TP / SL" onChange={(value) => { reset(); setTpSlEnabled(value); }} value={tpSlEnabled} />
       {/* Stacked, not side by side: `Take profit` and `Stop loss` are longer than a
           quarter-screen input can show, and a clipped placeholder on a price field is the
@@ -496,7 +485,6 @@ const styles = StyleSheet.create({
   panel: { gap: spacing.xs, paddingVertical: spacing.xs },
   title: { ...typography.heading, color: colors.textPrimary },
   message: { ...typography.bodyCompact, color: colors.textSecondary },
-  // `xs`, not `sm`: at half a phone's width the gap between two controls is width the
   // labels inside them need more.
   controls: { flexDirection: 'row', gap: spacing.xs },
   summary: { gap: spacing.xxs, paddingTop: spacing.xs },

@@ -8,6 +8,16 @@ mobile:
   physical_device_tested: partial
   perps_provider: pacifica
   provider_integration_status: implemented_locally_device_confirmation_pending
+lifecycle_audit:
+  audited_at: 2026-08-18
+  trade_close: reduce_only_market_full_position_request_implemented_fill_reconciliation_pending_device_test
+  collateral: pacifica_usdc_with_usdt_shortfall_conversion
+  withdrawals:
+    pacifica_usdc: resumable_to_t_then_umbra
+    umbra_spl: installed_mainnet_supported_mints_only
+    native_sol: public_transfer_with_measured_fee_and_one_measured_fee_retained
+  rotation: atomic_empty_token_account_rent_and_remaining_sol_sweep_to_next_t
+  blocking_design_gap: umbra_wsol_claim_does_not_bootstrap_native_sol_for_t_first_onchain_fee
 debug:
   issues_resolved:
     - error: funding rejected before blockchain submission

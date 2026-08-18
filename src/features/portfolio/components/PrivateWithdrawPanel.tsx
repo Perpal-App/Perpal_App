@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PublicKey } from '@solana/web3.js';
+import { getSupportedMints } from '@umbra-privacy/sdk/constants';
+import { NATIVE_MINT } from '@solana/spl-token';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
 
@@ -18,13 +20,13 @@ import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/a
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import {
   listTradingCollateralOptions,
-  type ProviderCollateral,
 } from '@/integrations/perps/providerCollateral';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { usePrivateExit } from '@/integrations/umbra/PrivateExitProvider';
+import {
+  usePrivateExit,
+  type PrivateExitAsset,
+} from '@/integrations/umbra/PrivateExitProvider';
 import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
-
-type CollateralSymbol = ProviderCollateral['symbol'];
 
 /**
  * One token the account can actually withdraw, and how much of it there is.
@@ -34,7 +36,7 @@ type CollateralSymbol = ProviderCollateral['symbol'];
  * hold nothing a moment before the figures arrive.
  */
 type WithdrawableToken = {
-  readonly collateral: ProviderCollateral;
+  readonly asset: PrivateExitAsset;
   readonly baseUnits: bigint | null;
 };
 
@@ -50,78 +52,72 @@ export function PrivateWithdrawPanel({
   const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>('privy');
   const [externalAddress, setExternalAddress] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
-  const [chosen, setChosen] = useState<CollateralSymbol>('USDC');
-
-  /**
-   * The tokens supported as collateral, which bounds what can be withdrawn.
-   *
-   * Still the bound, even now that the list shown is filtered by balance: offering every SPL account in
-   * T would produce options that fail at `assertRelayerSupportsMint` after the reader had committed.
-   *
-   * SOL is absent, and not because the relayer cannot route it — `privateFunding` asserts support for
-   * `WRAPPED_SOL_MINT` on every deposit, so the private leg would carry it. Two things are missing
-   * instead. `beginPrivateExit` would deliver wrapped SOL to the destination and nothing unwraps it, so
-   * the reader would receive a token account rather than spendable SOL. And T's wrapped SOL *is* its
-   * fee reserve: draining it leaves the wallet unable to pay for its own transactions, including the
-   * next withdrawal. Both are protocol work, not a list to widen.
-   */
-  const supported = useMemo<readonly ProviderCollateral[]>(() => {
+  const [chosenMint, setChosenMint] = useState('');
+  const configured = useMemo(() => {
     const config = readAppConfig();
     return config.ok
-      ? listTradingCollateralOptions(config.value.perps.usdcMint, config.value.perps.usdtMint)
+      ? listTradingCollateralOptions(
+        config.value.perps.usdcMint,
+        config.value.perps.usdtMint,
+      ).map((asset) => ({ ...asset, kind: 'spl' as const }))
       : [];
   }, []);
 
   const withdrawable = useMemo(
-    () => readWithdrawable(supported, balances, snapshot),
-    [balances, snapshot, supported],
+    () => readWithdrawable(configured, balances, snapshot),
+    [balances, configured, snapshot],
   );
 
   // Derived, not corrected in an effect. A balance can drop to zero while the panel is open, and the
   // selection has to fall back within the same render — otherwise the amount field would keep
   // describing a token that is no longer on the list.
-  const symbol = withdrawable.some((token) => token.collateral.symbol === chosen)
-    ? chosen
-    : withdrawable[0]?.collateral.symbol ?? chosen;
-  const collateral = withdrawable.find((token) => token.collateral.symbol === symbol)
-    ?.collateral ?? null;
+  const selected = withdrawable.find((token) => token.asset.mint === chosenMint)
+    ?? withdrawable[0]
+    ?? null;
+  const asset = selected?.asset ?? null;
+  const symbol = asset?.symbol ?? 'Token';
   const pending = privateExit.record !== null && privateExit.record.phase !== 'complete';
   const empty = withdrawable.length === 0;
+  const nativeSol = asset?.kind === 'native';
   // The venue keeps its margin in USDC, so only a USDC withdrawal can pull from the trading account
   // and only a USDC withdrawal pays the venue's withdrawal fee. Anything else is already in T.
   const collectsFromVenue = symbol === 'USDC';
 
   const confirm = () => {
-    if (collateral === null) {
+    if (asset === null) {
       setInputError('Withdrawal configuration is unavailable.');
       return;
     }
     try {
-      const parsed = parseAmount(amount, collateral.decimals);
+      const parsed = parseTokenAmount(amount, asset.decimals);
       const destination = destinationMode === 'privy'
         ? privateExit.mainWalletAddress
         : externalAddress.trim();
-      if (parsed.baseUnits <= 0n || destination === null) throw new Error('invalid input');
+      if (parsed <= 0n || destination === null) throw new Error('invalid input');
       const validated = new PublicKey(destination).toBase58();
       setInputError(null);
       Alert.alert(
-        'Withdraw privately',
+        nativeSol ? 'Withdraw SOL' : 'Withdraw privately',
         [
-          `${amount.trim()} ${collateral.symbol} will move through private wallet T, then privately`,
+          nativeSol
+            ? `${amount.trim()} SOL will be sent directly from private wallet T`
+            : `${amount.trim()} ${asset.symbol} will move through private wallet T, then privately`,
           `to ${destinationMode === 'privy' ? 'your public wallet' : 'the external wallet'}.`,
           collectsFromVenue ? `Trading withdrawal fee: ${feeLabel()}.` : null,
-          'Umbra relayer fees are deducted from the private transfer.',
+          nativeSol
+            ? 'This native SOL transfer is public on Solana. One additional network fee is kept in T.'
+            : 'Umbra relayer fees are deducted from the private transfer.',
         ].filter((line): line is string => line !== null).join(' '),
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Withdraw',
-            onPress: () => void privateExit.start(parsed.baseUnits, validated, collateral),
+            onPress: () => void privateExit.start(parsed, validated, asset),
           },
         ],
       );
     } catch {
-      setInputError(`Enter a valid ${collateral.symbol} amount and destination.`);
+      setInputError(`Enter a valid ${asset.symbol} amount and destination.`);
     }
   };
 
@@ -133,6 +129,8 @@ export function PrivateWithdrawPanel({
           ? 'Nothing to withdraw yet. Deposited collateral and closed margin appear here.'
           : collectsFromVenue
             ? 'One withdrawal collects the USDC into your private wallet, then delivers it privately.'
+            : nativeSol
+              ? 'Native SOL fee funds can be withdrawn publicly while one current network fee remains.'
             : `${symbol} is already in your private wallet and is delivered privately in one step.`}
       </Text>
 
@@ -173,7 +171,8 @@ export function PrivateWithdrawPanel({
           // Open even with a single token, because the menu is where the balance is shown and one
           // token still has a figure worth reading. Only a run in flight or nothing at all locks it.
           disabled={privateExit.isRunning || pending || empty}
-          onSelect={setChosen}
+          onSelect={setChosenMint}
+          selectedMint={asset?.mint ?? ''}
           symbol={symbol}
           tokens={withdrawable}
         />
@@ -216,8 +215,8 @@ export function PrivateWithdrawPanel({
         />
       ) : (
         <ActionButton
-          disabled={collateral === null || empty || privateExit.mainWalletAddress === null}
-          label="Withdraw privately"
+          disabled={asset === null || empty || privateExit.mainWalletAddress === null}
+          label={nativeSol ? 'Withdraw SOL' : 'Withdraw privately'}
           loading={privateExit.isRunning}
           onPress={confirm}
         />
@@ -238,12 +237,14 @@ export function PrivateWithdrawPanel({
 function TokenSelector({
   disabled,
   onSelect,
+  selectedMint,
   symbol,
   tokens,
 }: {
   readonly disabled: boolean;
-  readonly onSelect: (symbol: CollateralSymbol) => void;
-  readonly symbol: CollateralSymbol;
+  readonly onSelect: (mint: string) => void;
+  readonly selectedMint: string;
+  readonly symbol: string;
   readonly tokens: readonly WithdrawableToken[];
 }) {
   // A plain View, because the measurement has to come from a host view: `PressableScale` is an
@@ -253,13 +254,13 @@ function TokenSelector({
   const [open, setOpen] = useState(false);
   // The balance rides each option, because "which token" and "how much of it" are the same question
   // here: without it the reader picks a symbol and then finds out from an error whether they had any.
-  const menuOptions = useMemo<readonly MenuOption<CollateralSymbol>[]>(
+  const menuOptions = useMemo<readonly MenuOption<string>[]>(
     () => tokens.map((token) => ({
-      id: token.collateral.symbol,
-      label: token.collateral.symbol,
+      id: token.asset.mint,
+      label: token.asset.symbol,
       ...(token.baseUnits === null
         ? {}
-        : { detail: formatAmount(amountFromBaseUnits(token.baseUnits, token.collateral.decimals)) }),
+        : { detail: formatTokenAmount(token.baseUnits, token.asset.decimals) }),
     })),
     [tokens],
   );
@@ -307,7 +308,7 @@ function TokenSelector({
           setOpen(false);
         }}
         options={menuOptions}
-        selected={symbol}
+        selected={selectedMint}
         title="Token"
         visible={open}
       />
@@ -342,24 +343,48 @@ function ChevronDown() {
  * out. Filtering on absent data would empty the menu on open and refill it a moment later.
  */
 function readWithdrawable(
-  supported: readonly ProviderCollateral[],
+  configured: readonly PrivateExitAsset[],
   balances: WalletBalances | null,
   snapshot: PacificaPortfolioSnapshot | null,
 ): readonly WithdrawableToken[] {
   if (balances === null) {
-    return supported.map((collateral) => ({ baseUnits: null, collateral }));
+    return configured.map((asset) => ({ asset, baseUnits: null }));
   }
 
   const wallet = balances.privateWallet;
+  const supported = new Set(getSupportedMints('mainnet').map(String));
+  const known = new Map(configured.map((asset) => [asset.mint, asset]));
+  const assets = wallet.holdings
+    .filter((holding) => supported.has(holding.mint))
+    .map((holding): PrivateExitAsset => known.get(holding.mint) ?? {
+      decimals: holding.decimals,
+      kind: 'spl',
+      mint: holding.mint,
+      symbol: holding.mint === NATIVE_MINT.toBase58()
+        ? 'WSOL'
+        : `MINT-${holding.mint.slice(0, 5).toUpperCase()}`,
+    });
+  if (wallet.solLamports > 0n) {
+    assets.unshift({
+      decimals: 9,
+      kind: 'native',
+      mint: 'native-sol',
+      symbol: 'SOL',
+    });
+  }
+  const usdc = configured.find((asset) => asset.symbol === 'USDC');
+  if (usdc !== undefined && venueWithdrawable(snapshot) > 0n && !assets.some(
+    (asset) => asset.mint === usdc.mint,
+  )) assets.unshift(usdc);
 
-  return supported.flatMap((collateral) => {
-    const inWallet = collateral.symbol === 'USDC'
-      ? wallet.usdcBaseUnits
-      : wallet.usdtBaseUnits;
-    const onVenue = collateral.symbol === 'USDC' ? venueWithdrawable(snapshot) : 0n;
+  return assets.flatMap((asset) => {
+    const inWallet = asset.kind === 'native'
+      ? wallet.solLamports
+      : wallet.holdings.find((holding) => holding.mint === asset.mint)?.baseUnits ?? 0n;
+    const onVenue = asset.symbol === 'USDC' ? venueWithdrawable(snapshot) : 0n;
     const total = inWallet + onVenue;
 
-    return total > 0n ? [{ baseUnits: total, collateral }] : [];
+    return total > 0n ? [{ asset, baseUnits: total }] : [];
   });
 }
 
@@ -390,6 +415,28 @@ function exitStatus(phase: string): string {
     case 'complete': return 'Delivered privately';
     default: return 'Ready';
   }
+}
+
+function parseTokenAmount(value: string, decimals: number): bigint {
+  const trimmed = value.trim();
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) throw new Error('invalid');
+  const parts = trimmed.split('.');
+  if (parts.length > 2) throw new Error('invalid');
+  const [whole = '', fraction = ''] = parts;
+  if (!/^\d+$/u.test(whole) || !/^\d*$/u.test(fraction) || fraction.length > decimals) {
+    throw new Error('invalid');
+  }
+  return BigInt(`${whole}${fraction.padEnd(decimals, '0')}`);
+}
+
+function formatTokenAmount(value: bigint, decimals: number): string {
+  if (value < 0n || !Number.isInteger(decimals) || decimals < 0 || decimals > 255) return '--';
+  if (decimals === 0) return value.toString();
+  const digits = value.toString().padStart(decimals + 1, '0');
+  const fraction = digits.slice(-decimals).replace(/0+$/u, '');
+  return fraction.length === 0
+    ? digits.slice(0, -decimals)
+    : `${digits.slice(0, -decimals)}.${fraction}`;
 }
 
 /**

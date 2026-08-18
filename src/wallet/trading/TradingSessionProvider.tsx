@@ -31,7 +31,10 @@ import {
   type DerivedTradingWallet,
   type TradingWalletIdentity,
 } from '@/wallet/trading/derivation';
-import { assertTradingWalletRotationSafe } from '@/wallet/trading/rotationSafety';
+import {
+  prepareTradingWalletRotation,
+  submitTradingWalletRotation,
+} from '@/wallet/trading/rotationSafety';
 
 export type TradingSessionStatus =
   | 'waiting-for-wallet'
@@ -318,13 +321,20 @@ export function TradingSessionProvider({
     setError(null);
     let next: DerivedTradingWallet | null = null;
     try {
-      await assertTradingWalletRotationSafe({
+      next = deriveRotatedTradingWallet(rootSeed, mainWalletAddress, generation + 1);
+      const plan = await prepareTradingWalletRotation({
+        config: config.value,
+        mainWalletAddress,
+        nextWalletAddress: next.address,
+        signer,
+        tradingWalletAddress: address,
+      });
+      await submitTradingWalletRotation(plan, {
         config: config.value,
         mainWalletAddress,
         signer,
         tradingWalletAddress: address,
       });
-      next = deriveRotatedTradingWallet(rootSeed, mainWalletAddress, generation + 1);
       await writeActivatedTradingWallet(mainWalletAddress, next, rootSeed);
       seedRef.current?.fill(0);
       seedRef.current = next.secretKey;
@@ -335,7 +345,7 @@ export function TradingSessionProvider({
         kind: 'wallet',
         outcome: 'success',
         title: 'Private wallet rotated',
-        message: 'The new private wallet T is active.',
+        message: 'The new private wallet T is active and recovered SOL and account rent are available.',
       });
     } catch (cause) {
       if (next !== null && seedRef.current !== next.secretKey) zeroize(next.secretKey);

@@ -27,7 +27,7 @@ type Input = {
   readonly gatewaySigner: GatewayRequestSigner;
   readonly mint: string;
   readonly sourceWalletAddress: string;
-  readonly symbol: 'USDC' | 'USDT';
+  readonly symbol: string;
 };
 
 export async function beginPrivateExit(

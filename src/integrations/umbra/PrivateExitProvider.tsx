@@ -11,9 +11,9 @@ import {
 } from 'react';
 
 import { readAppConfig } from '@/config/appConfig';
-import type { ProviderCollateral } from '@/integrations/perps/providerCollateral';
 import { ensurePacificaCollateralInWallet } from '@/integrations/perps/pacifica/pacificaWithdrawal';
 import { readTokenBalance } from '@/integrations/solana/stablecoinSwap';
+import { withdrawNativeSol } from '@/integrations/solana/nativeSolWithdrawal';
 import {
   beginPrivateExit,
   resumePrivateExit,
@@ -33,9 +33,16 @@ type State = {
   readonly start: (
     amountBaseUnits: bigint,
     destinationAddress: string,
-    collateral: ProviderCollateral,
+    asset: PrivateExitAsset,
   ) => Promise<void>;
   readonly resume: () => Promise<void>;
+};
+
+export type PrivateExitAsset = {
+  readonly decimals: number;
+  readonly kind: 'native' | 'spl';
+  readonly mint: string;
+  readonly symbol: string;
 };
 
 const Context = createContext<State | null>(null);
@@ -86,7 +93,11 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
     };
   }, [session.address, session.signer, session.status]);
 
-  const run = useCallback(async (action: () => Promise<PrivateExitRecord>) => {
+  const run = useCallback(async (
+    action: () => Promise<PrivateExitRecord>,
+    successMessage = 'The destination received the private withdrawal.',
+    successTitle = 'Private withdrawal completed',
+  ) => {
     if (runningRef.current) return;
     runningRef.current = true;
     setIsRunning(true);
@@ -98,8 +109,8 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
         publishInAppNotification({
           kind: 'withdrawal',
           outcome: 'success',
-          title: 'Private withdrawal completed',
-          message: 'The destination received the private withdrawal.',
+          title: successTitle,
+          message: successMessage,
         });
       }
     } catch (cause) {
@@ -136,23 +147,60 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
   const start = useCallback(async (
     amountBaseUnits: bigint,
     destinationAddress: string,
-    collateral: ProviderCollateral,
+    asset: PrivateExitAsset,
   ) => {
     await run(async () => {
       const input = operationInput();
 
-      if (collateral.mint === input.config.perps.usdcMint) {
+      if (asset.kind === 'native') {
+        const result = await withdrawNativeSol({
+          amountLamports: amountBaseUnits,
+          destinationAddress,
+          owner: input.sourceWalletAddress,
+          rpcUrl: input.config.api.rpcUrl,
+          signer: input.gatewaySigner,
+        });
+        if (result.status !== 'confirmed') {
+          throw new Error(
+            `SOL withdrawal ${result.signature} was submitted but is not confirmed yet.`,
+          );
+        }
+        return {
+          version: 1,
+          id: result.signature,
+          sourceWalletAddress: input.sourceWalletAddress,
+          destinationAddress,
+          mint: asset.mint,
+          symbol: asset.symbol,
+          amountBaseUnits: amountBaseUnits.toString(),
+          phase: 'complete',
+          generationIndex: null,
+          excludedNoteIds: [],
+          scanStartLeafCounts: null,
+          populateSignature: null,
+          depositSignature: null,
+          relayRequestId: null,
+          claimSignature: result.signature,
+          noteAmountBaseUnits: null,
+          relayerFixedFeeLamports: result.feeLamports.toString(),
+          errorCode: null,
+          updatedAtMs: Date.now(),
+        };
+      }
+
+      if (asset.mint === input.config.perps.usdcMint) {
         await ensurePacificaCollateralInWallet(amountBaseUnits, {
           account: input.sourceWalletAddress,
           apiOrigin: input.config.perps.pacificaApiOrigin,
-          mint: collateral.mint,
+          mint: asset.mint,
           rpcUrl: input.config.api.rpcUrl,
           signer: input.gatewaySigner,
           withdrawalFeeBaseUnits: input.config.perps.pacificaWithdrawalFeeBaseUnits,
         });
       } else {
         const held = await readTokenBalance({
-          mint: collateral.mint,
+          decimals: asset.decimals,
+          mint: asset.mint,
           owner: input.sourceWalletAddress,
           rpcUrl: input.config.api.rpcUrl,
           signer: input.gatewaySigner,
@@ -160,7 +208,7 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
 
         if (held < amountBaseUnits) {
           throw new Error(
-            `Private wallet T does not hold enough ${collateral.symbol} for this withdrawal.`,
+            `Private wallet T does not hold enough ${asset.symbol} for this withdrawal.`,
           );
         }
       }
@@ -170,12 +218,14 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
           ...input,
           amountBaseUnits,
           destinationAddress,
-          mint: collateral.mint,
-          symbol: collateral.symbol,
+          mint: asset.mint,
+          symbol: asset.symbol,
         },
         setRecord,
       );
-    });
+    }, asset.kind === 'native'
+      ? 'The destination received the public native SOL transfer.'
+      : undefined, asset.kind === 'native' ? 'SOL withdrawal completed' : undefined);
   }, [operationInput, run]);
 
   const resume = useCallback(async () => {

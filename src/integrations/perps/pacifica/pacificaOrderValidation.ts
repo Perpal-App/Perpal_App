@@ -28,6 +28,9 @@ export function validatePacificaOrderDraft(input: {
   readonly tpSlEnabled: boolean;
   readonly triggerPrice: string;
 }): void {
+  if (input.action === 'close' && input.orderType !== 'market') {
+    throw new PacificaOrderValidationError('Close now uses a reduce-only market order.');
+  }
   const leverage = Number(input.leverage);
   if (input.action === 'open') {
     let collateral: bigint;

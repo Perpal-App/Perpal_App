@@ -99,6 +99,9 @@ export async function preparePacificaOrder(input: {
   if (input.action === 'close' && position === undefined) {
     throw new PacificaOrderValidationError(`No ${input.side} ${input.market.baseAsset} position is open.`);
   }
+  if (input.action === 'close' && input.orderType !== 'market') {
+    throw new PacificaOrderValidationError('Close now uses a reduce-only market order.');
+  }
   if (input.action === 'open' && input.collateralBaseUnits <= 0n) {
     throw new PacificaOrderValidationError('Enter USDC collateral greater than zero.');
   }
@@ -142,19 +145,31 @@ export async function preparePacificaOrder(input: {
     input.market.tickSize,
     input.snapshot.price.decimals,
   );
-  const notionalBaseUnits = input.action === 'open'
+  const requestedNotionalBaseUnits = input.action === 'open'
     ? input.collateralBaseUnits * BigInt(leverage)
     : usdNotional(position!.amount, input.snapshot.price.baseUnits);
   const sizingPrice = prices.orderBaseUnits ?? prices.triggerBaseUnits ?? markBaseUnits;
   const amountBaseUnits = input.action === 'open'
-    ? (notionalBaseUnits * 10n ** 14n) / sizingPrice
+    ? (requestedNotionalBaseUnits * 10n ** 14n) / sizingPrice
     : parseDecimal(position!.amount, SIZE_DECIMALS);
   const lot = parseDecimal(input.market.lotSize, SIZE_DECIMALS);
   if (lot <= 0n) throw new Error('Pacifica lot size is invalid.');
+  if (input.action === 'close' && amountBaseUnits % lot !== 0n) {
+    throw new PacificaOrderValidationError(
+      'Pacifica returned a position size that cannot be closed without leaving dust.',
+    );
+  }
   const roundedAmount = amountBaseUnits - amountBaseUnits % lot;
-  const minimum = parseDecimal(input.market.minOrderSize, SIZE_DECIMALS);
-  const maximum = parseDecimal(input.market.maxOrderSize, SIZE_DECIMALS);
-  if (roundedAmount < minimum || roundedAmount > maximum) {
+  if (roundedAmount <= 0n) {
+    throw new PacificaOrderValidationError('Order size is below Pacifica market limits.');
+  }
+  const notionalBaseUnits = usdNotional(
+    formatDecimal(roundedAmount, SIZE_DECIMALS),
+    sizingPrice,
+  );
+  const minimum = parseDecimal(input.market.minOrderSize, 6);
+  const maximum = parseDecimal(input.market.maxOrderSize, 6);
+  if (notionalBaseUnits < minimum || notionalBaseUnits > maximum) {
     throw new PacificaOrderValidationError('Order size is outside Pacifica market limits.');
   }
   const feeRate = parseRate(input.portfolio.takerFee);

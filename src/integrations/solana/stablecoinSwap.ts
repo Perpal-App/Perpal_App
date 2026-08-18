@@ -171,6 +171,7 @@ export async function prepareStablecoinSwap(input: {
 }
 
 export async function readTokenBalance(input: {
+  readonly decimals?: number;
   readonly mint: string;
   readonly owner: string;
   readonly rpcUrl: string;
@@ -205,9 +206,16 @@ export async function readTokenBalance(input: {
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 
-  if (balance.value.decimals !== 6 || !/^\d+$/u.test(balance.value.amount)) {
+  const expectedDecimals = input.decimals ?? 6;
+  if (
+    !Number.isInteger(expectedDecimals) ||
+    expectedDecimals < 0 ||
+    expectedDecimals > 255 ||
+    balance.value.decimals !== expectedDecimals ||
+    !/^\d+$/u.test(balance.value.amount)
+  ) {
     throw new StablecoinSwapError(
-      'The stablecoin balance is invalid.',
+      'The token balance is invalid.',
       'balance_invalid',
     );
   }

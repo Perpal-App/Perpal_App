@@ -37,6 +37,9 @@ export type PacificaPortfolioSnapshot = {
   readonly makerFee: string;
   readonly takerFee: string;
   readonly updatedAtMs: number | null;
+  readonly positionsCount: number;
+  readonly ordersCount: number;
+  readonly stopOrdersCount: number;
   readonly positions: readonly PacificaPosition[];
   readonly orders: readonly PacificaOpenOrder[];
 };
@@ -64,6 +67,9 @@ export async function fetchPacificaPortfolio(
       makerFee: decimal(value.maker_fee, 'maker fee'),
       takerFee: decimal(value.taker_fee, 'taker fee'),
       updatedAtMs: optionalTimestamp(value.updated_at),
+      positionsCount: nonNegativeInteger(value.positions_count, 'positions count'),
+      ordersCount: nonNegativeInteger(value.orders_count, 'orders count'),
+      stopOrdersCount: nonNegativeInteger(value.stop_orders_count, 'stop orders count'),
       positions: parsePositions(rawPositions),
       orders: parseOrders(rawOrders),
     };
@@ -129,6 +135,9 @@ function emptyPortfolio(): PacificaPortfolioSnapshot {
     makerFee: '0',
     takerFee: '0',
     updatedAtMs: null,
+    positionsCount: 0,
+    ordersCount: 0,
+    stopOrdersCount: 0,
     positions: [],
     orders: [],
   };
@@ -162,6 +171,11 @@ function boolean(value: unknown, label: string): boolean {
 function integer(value: unknown, label: string): number {
   const parsed = typeof value === 'string' ? Number(value) : value;
   if (typeof parsed !== 'number' || !Number.isSafeInteger(parsed)) throw invalid(label);
+  return parsed;
+}
+function nonNegativeInteger(value: unknown, label: string): number {
+  const parsed = integer(value, label);
+  if (parsed < 0) throw invalid(label);
   return parsed;
 }
 function optionalTimestamp(value: unknown): number | null {

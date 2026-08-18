@@ -17,7 +17,7 @@ export type PrivateExitRecord = {
   readonly sourceWalletAddress: string;
   readonly destinationAddress: string;
   readonly mint: string;
-  readonly symbol: 'USDC' | 'USDT';
+  readonly symbol: string;
   readonly amountBaseUnits: string;
   readonly phase: PrivateExitPhase;
   readonly generationIndex: string | null;
@@ -67,7 +67,7 @@ function parseRecord(value: string): PrivateExitRecord | null {
       !isAddress(record.sourceWalletAddress) ||
       !isAddress(record.destinationAddress) ||
       !isAddress(record.mint) ||
-      (record.symbol !== 'USDC' && record.symbol !== 'USDT') ||
+      !isSymbol(record.symbol) ||
       !unsigned(record.amountBaseUnits) ||
       !['depositing', 'scanning', 'proving', 'relaying', 'complete'].includes(String(record.phase)) ||
       !nullableString(record.generationIndex) ||
@@ -119,4 +119,7 @@ function nullableScanBoundary(value: unknown): value is readonly string[] | null
     Array.isArray(value) &&
     value.every((entry) => typeof entry === 'string' && /^\d+:\d+$/u.test(entry))
   );
+}
+function isSymbol(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Z0-9._-]{1,20}$/u.test(value);
 }
