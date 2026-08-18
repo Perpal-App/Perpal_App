@@ -2,11 +2,20 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { formatAmountWithCommas } from '@/domain/money/amount';
 import { usePacificaPublicMarket } from '@/features/trade/hooks/usePacificaPublicMarket';
-import type { PacificaPublicTrade } from '@/integrations/perps/pacifica/pacificaPublicMarket';
+import type { Amount } from '@/domain/money/amount';
 import { colors, spacing, typography } from '@/theme/tokens';
 
 /** Executions kept on screen. The feed holds more; a reader scans the recent ones. */
 const VISIBLE_TRADES = 20;
+
+export type MarketTradeView = {
+  readonly key: string;
+  readonly price: Amount;
+  readonly amount: Amount;
+  readonly side: string;
+  readonly cause: string;
+  readonly publishedAtMs: number;
+};
 
 /**
  * Pacifica's public taker-trade stream.
@@ -42,13 +51,13 @@ export function PacificaTradesPanel({
 /** Also the liquidations tab's table, filtered to liquidation causes by its own panel. */
 export function MarketTrades({
   baseAsset,
-  emptyText = 'Waiting for the next Pacifica trade.',
+  emptyText = 'Waiting for the next market trade.',
   trades,
   title = 'Market trades',
 }: {
   readonly baseAsset: string;
   readonly emptyText?: string;
-  readonly trades: readonly PacificaPublicTrade[];
+  readonly trades: readonly MarketTradeView[];
   readonly title?: string;
 }) {
   return (
@@ -77,7 +86,7 @@ function TradeRow({
   trade,
 }: {
   readonly baseAsset: string;
-  readonly trade: PacificaPublicTrade;
+  readonly trade: MarketTradeView;
 }) {
   const long = trade.side.endsWith('long');
   const price = formatAmountWithCommas(trade.price);
@@ -109,7 +118,7 @@ function TradeRow({
   );
 }
 
-function tradeLabel(trade: PacificaPublicTrade): string {
+function tradeLabel(trade: MarketTradeView): string {
   const action = trade.side.replace('_', ' ');
   return trade.cause === 'normal' ? action : `${action} · ${trade.cause.replaceAll('_', ' ')}`;
 }

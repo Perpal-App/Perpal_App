@@ -6,13 +6,20 @@ import {
   formatCompactUsd,
   type Amount,
 } from '@/domain/money/amount';
-import {
-  orderBookSpreadPercent,
-  totalBookLiquidity,
-  type PacificaOrderBook,
-  type PacificaOrderBookLevel,
-} from '@/integrations/perps/pacifica/pacificaPublicMarket';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
+
+export type OrderBookLevelView = {
+  readonly price: Amount;
+  readonly amount: Amount;
+  readonly notional: Amount;
+  readonly orderCount: number;
+};
+
+export type OrderBookView = {
+  readonly bids: readonly OrderBookLevelView[];
+  readonly asks: readonly OrderBookLevelView[];
+  readonly publishedAtMs: number;
+};
 
 /**
  * How much width the ladder has, which is the only thing that changes about it.
@@ -56,7 +63,7 @@ export function OrderBookTable({
   depth,
   width,
 }: {
-  readonly book: PacificaOrderBook;
+  readonly book: OrderBookView;
   readonly depth: number;
   readonly width: OrderBookWidth;
 }) {
@@ -131,7 +138,7 @@ function BookRow({
   total,
   width,
 }: {
-  readonly level: PacificaOrderBookLevel;
+  readonly level: OrderBookLevelView;
   readonly maximum: bigint;
   readonly side: 'bid' | 'ask';
   readonly total: Amount;
@@ -177,7 +184,7 @@ function SpreadRow({
   book,
   width,
 }: {
-  readonly book: PacificaOrderBook;
+  readonly book: OrderBookView;
   readonly width: OrderBookWidth;
 }) {
   const percent = orderBookSpreadPercent(book) ?? UNAVAILABLE;
@@ -200,9 +207,9 @@ function SpreadRow({
  * Whole percentages, and the ask share is derived from the bid rather than rounded on its
  * own, so the two always read as one hundred.
  */
-function BookBalance({ book }: { readonly book: PacificaOrderBook }) {
-  const bids = totalBookLiquidity(book.bids).baseUnits;
-  const asks = totalBookLiquidity(book.asks).baseUnits;
+function BookBalance({ book }: { readonly book: OrderBookView }) {
+  const bids = totalLiquidity(book.bids);
+  const asks = totalLiquidity(book.asks);
   const total = bids + asks;
   const bidTenths = total === 0n ? 500n : (bids * 1000n + total / 2n) / total;
   const bidPercent = (bidTenths + 5n) / 10n;
@@ -223,7 +230,7 @@ function BookBalance({ book }: { readonly book: PacificaOrderBook }) {
   );
 }
 
-function cumulativeRows(levels: readonly PacificaOrderBookLevel[]) {
+function cumulativeRows(levels: readonly OrderBookLevelView[]) {
   let total = 0n;
   return levels.map((level) => {
     total += level.notional.baseUnits;
@@ -243,11 +250,25 @@ function formatBookUsd(value: Amount): string {
   return formatCompactUsd(value).replace('$', '');
 }
 
-function spreadPrice(book: PacificaOrderBook): string {
+function spreadPrice(book: OrderBookView): string {
   const bid = book.bids[0]?.price;
   const ask = book.asks[0]?.price;
   if (bid === undefined || ask === undefined || ask.baseUnits <= bid.baseUnits) return UNAVAILABLE;
   return formatAmountWithCommas(amountFromBaseUnits(ask.baseUnits - bid.baseUnits, ask.decimals));
+}
+
+function totalLiquidity(levels: readonly OrderBookLevelView[]): bigint {
+  return levels.reduce((total, level) => total + level.notional.baseUnits, 0n);
+}
+
+function orderBookSpreadPercent(book: OrderBookView): string | null {
+  const bid = book.bids[0]?.price.baseUnits;
+  const ask = book.asks[0]?.price.baseUnits;
+  if (bid === undefined || ask === undefined || ask <= bid) return null;
+  const midTwice = ask + bid;
+  const tenThousandths = ((ask - bid) * 2_000_000n + midTwice / 2n) / midTwice;
+  const digits = tenThousandths.toString().padStart(5, '0');
+  return `${digits.slice(0, -4)}.${digits.slice(-4)}%`;
 }
 
 function depthPercent(value: bigint, maximum: bigint): number {

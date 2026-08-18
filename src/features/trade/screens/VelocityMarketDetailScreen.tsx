@@ -5,15 +5,17 @@ import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-na
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { Skeleton, SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
+import { RiseInView } from '@/components/motion/RiseInView';
 import { readAppConfig } from '@/config/appConfig';
 import {
   formatAmountWithCommas,
+  formatCompactTokenPrice,
   formatCompactUsd,
 } from '@/domain/money/amount';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
-import { VelocityOrderTicket } from '@/features/trade/components/VelocityOrderTicket';
+import { VelocityTradingWorkspace } from '@/features/trade/components/VelocityTradingWorkspace';
 import { useVelocityMarkets } from '@/features/trade/hooks/useVelocityMarkets';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, fonts, layout, motion, radii, spacing, typography } from '@/theme/tokens';
 
 const UNAVAILABLE = '--.--';
 
@@ -52,75 +54,159 @@ export function VelocityMarketDetailScreen({ venueRef }: { readonly venueRef: st
     );
   }
 
+  const pending = snapshot === null;
+  const price = snapshot !== null && !snapshot.priceStale ? snapshot.price : null;
+
   return (
-    <AppScreen contentContainerStyle={[styles.content, compact && styles.compact]}>
-      <View style={styles.instrument}>
-        <Pressable
-          accessibilityLabel="Back to markets"
-          accessibilityRole="button"
-          hitSlop={14}
-          onPress={() => router.back()}
-          style={({ pressed }) => [styles.back, pressed && styles.pressed]}
-        >
-          <Text style={styles.backLabel}>‹</Text>
-        </Pressable>
+    <AppScreen contentContainerStyle={[styles.content, compact && styles.compactGutter]}>
+      <RiseInView style={styles.instrument}>
+        <BackButton />
         <MarketLogo size={30} symbol={market.baseAsset} url={market.iconUrl} />
         <View style={styles.identity}>
           <Text numberOfLines={1} style={styles.symbol}>{market.baseAsset}-USD</Text>
-          <Text numberOfLines={1} style={styles.subtitle}>Velocity · USDT margin</Text>
+          <View style={styles.qualifier}>
+            <View style={styles.leverageBadge}>
+              <Text style={styles.leverage}>{market.maxLeverage}×</Text>
+            </View>
+            <Text numberOfLines={1} style={styles.name}>Velocity · USDT margin</Text>
+          </View>
         </View>
-        <View style={styles.priceBlock}>
-          {snapshot === null ? (
-            <SkeletonText align="right" role="heading" width={86} />
+        <View style={styles.priceSummary}>
+          {pending ? (
+            <>
+              <SkeletonText align="right" role="heading" width={84} />
+              <SkeletonText align="right" role="caption" width={52} />
+            </>
           ) : (
-            <Text numberOfLines={1} selectable style={styles.price}>
-              ${formatAmountWithCommas(snapshot.price)}
-            </Text>
+            <>
+              <Text numberOfLines={1} selectable style={styles.price}>
+                {price === null ? UNAVAILABLE : `$${formatAmountWithCommas(price)}`}
+              </Text>
+              <Text numberOfLines={1} style={[styles.change, styles.absent]}>{UNAVAILABLE}</Text>
+            </>
           )}
         </View>
-      </View>
+      </RiseInView>
 
-      <View style={styles.figures}>
+      <RiseInView delay={motion.rise.stagger} style={styles.figureGrid}>
         <Figure
           label="24H VOL"
+          pending={pending}
+          pendingWidth={56}
           value={snapshot === null ? UNAVAILABLE : formatCompactUsd(snapshot.volume24h)}
         />
         <Figure
-          label="OPEN INTEREST"
+          label="OI"
+          pending={pending}
+          pendingWidth={48}
           value={snapshot === null ? UNAVAILABLE : formatCompactUsd(snapshot.openInterest)}
         />
-        <Figure label="MAX LEVERAGE" value={`${market.maxLeverage}×`} />
-        <Figure label="COLLATERAL" value="USDT" />
-      </View>
+        <Figure
+          label="ORACLE"
+          pending={pending}
+          pendingWidth={64}
+          value={snapshot === null ? UNAVAILABLE : formatCompactTokenPrice(snapshot.oraclePrice)}
+        />
+        <Figure
+          label="FUNDING"
+          pending={pending}
+          pendingWidth={55}
+          value={snapshot?.fundingRatePercent ?? UNAVAILABLE}
+        />
+        <Figure
+          label="NEXT"
+          pending={pending}
+          pendingWidth={55}
+          value={formatNextFunding(snapshot?.nextFundingAtMs ?? null)}
+        />
+      </RiseInView>
 
-      <VelocityOrderTicket config={config.value} market={market} />
+      <RiseInView delay={motion.rise.stagger * 2}>
+        <VelocityTradingWorkspace config={config.value} market={market} snapshot={snapshot} />
+      </RiseInView>
     </AppScreen>
   );
 }
 
-function Figure({ label, value }: { readonly label: string; readonly value: string }) {
+function Figure({
+  label,
+  pending,
+  pendingWidth,
+  value,
+}: {
+  readonly label: string;
+  readonly pending: boolean;
+  readonly pendingWidth: number;
+  readonly value: string;
+}) {
   return (
     <View style={styles.figure}>
       <Text numberOfLines={1} style={styles.figureLabel}>{label}</Text>
-      <Text numberOfLines={1} selectable style={styles.figureValue}>{value}</Text>
+      {pending ? (
+        <SkeletonText role="caption" width={pendingWidth} />
+      ) : (
+        <Text
+          numberOfLines={1}
+          selectable
+          style={[styles.figureValue, value === UNAVAILABLE && styles.absent]}
+        >
+          {value}
+        </Text>
+      )}
     </View>
+  );
+}
+
+function BackButton() {
+  const router = useRouter();
+  return (
+    <Pressable
+      accessibilityLabel="Back to markets"
+      accessibilityRole="button"
+      hitSlop={14}
+      onPress={() => router.back()}
+      style={({ pressed }) => [styles.back, pressed && styles.pressed]}
+    >
+      <Text style={styles.backLabel}>‹</Text>
+    </Pressable>
   );
 }
 
 function Loading({ compact }: { readonly compact: boolean }) {
   return (
-    <AppScreen contentContainerStyle={[styles.content, compact && styles.compact]}>
-      <View accessibilityRole="progressbar" style={styles.instrument}>
+    <AppScreen contentContainerStyle={[styles.content, compact && styles.compactGutter]}>
+      <View accessibilityLabel="Loading market" accessibilityRole="progressbar" style={styles.instrument}>
+        <BackButton />
         <Skeleton height={30} radius={15} width={30} />
-        <SkeletonText role="heading" width={120} />
-        <View style={styles.priceBlock}>
-          <SkeletonText align="right" role="heading" width={86} />
+        <View style={styles.identity}>
+          <SkeletonText role="heading" width={112} />
+          <SkeletonText role="caption" width={84} />
+        </View>
+        <View style={styles.priceSummary}>
+          <SkeletonText align="right" role="heading" width={84} />
+          <SkeletonText align="right" role="caption" width={52} />
         </View>
       </View>
-      <Skeleton height={100} radius={radii.sm} />
-      <Skeleton height={340} radius={radii.sm} />
+      <View style={styles.figureGrid}>
+        {[56, 48, 64, 55, 55].map((width, index) => (
+          <View key={width * 100 + index} style={styles.figure}>
+            <SkeletonText role="eyebrow" width={width * 0.7} />
+            <SkeletonText role="caption" width={width} />
+          </View>
+        ))}
+      </View>
+      <Skeleton height={420} radius={radii.sm} />
     </AppScreen>
   );
+}
+
+function formatNextFunding(value: number | null): string {
+  if (value === null) return UNAVAILABLE;
+  const remainingMinutes = Math.max(0, Math.ceil((value - Date.now()) / 60_000));
+  if (remainingMinutes === 0) return 'Due';
+  const hours = Math.floor(remainingMinutes / 60);
+  const minutes = remainingMinutes % 60;
+  return hours === 0 ? `${minutes}m` : `${hours}h ${minutes}m`;
 }
 
 const styles = StyleSheet.create({
@@ -130,29 +216,47 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingHorizontal: layout.screenPaddingCompact,
     paddingVertical: spacing.md,
-    gap: spacing.md,
+    gap: spacing.sm,
   },
-  compact: { paddingHorizontal: spacing.xs },
+  compactGutter: { paddingHorizontal: spacing.xs },
   centered: { flexGrow: 1, justifyContent: 'center' },
   instrument: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  back: { width: 26, minHeight: layout.minTouchTarget, alignItems: 'center', justifyContent: 'center' },
+  back: {
+    width: 26,
+    height: layout.minTouchTarget,
+    marginLeft: -spacing.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   backLabel: { ...typography.title, color: colors.textPrimary, lineHeight: 34 },
   identity: { flex: 1, minWidth: 0 },
   symbol: { ...typography.heading, color: colors.textPrimary },
-  subtitle: { ...typography.caption, color: colors.textMuted },
-  priceBlock: { marginLeft: 'auto', alignItems: 'flex-end' },
-  price: { ...typography.label, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
-  figures: {
+  qualifier: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs, minWidth: 0 },
+  name: { ...typography.caption, flexShrink: 1, color: colors.textMuted },
+  leverageBadge: {
+    flexShrink: 0,
+    paddingHorizontal: spacing.xxs,
+    borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accent,
+  },
+  leverage: { ...typography.eyebrow, letterSpacing: 0, color: colors.accentSoft },
+  priceSummary: { flexShrink: 0, alignItems: 'flex-end' },
+  price: { ...typography.label, lineHeight: typography.heading.lineHeight, color: colors.textPrimary },
+  change: { ...typography.caption },
+  figureGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: spacing.sm,
+    columnGap: spacing.xs,
+    rowGap: spacing.sm,
     paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  figure: { minWidth: '42%', gap: spacing.xxs },
-  figureLabel: { ...typography.eyebrow, color: colors.textMuted },
-  figureValue: { ...typography.bodyCompact, color: colors.textPrimary },
+  figure: { minWidth: 0 },
+  figureLabel: { ...typography.eyebrow, letterSpacing: 0.5, color: colors.textMuted },
+  figureValue: { ...typography.caption, fontFamily: fonts.semiBold, color: colors.textPrimary },
+  absent: { color: colors.textMuted },
   pressed: { opacity: 0.72 },
 });

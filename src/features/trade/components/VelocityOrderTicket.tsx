@@ -331,12 +331,8 @@ function userMessage(cause: unknown): string {
 
 const styles = StyleSheet.create({
   panel: {
-    gap: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    padding: spacing.md,
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
   },
   title: { ...typography.heading, color: colors.textPrimary },
   row: { flexDirection: 'row', gap: spacing.sm },

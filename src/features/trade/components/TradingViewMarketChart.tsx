@@ -250,7 +250,7 @@ export function TradingViewMarketChart({
           ) : (
             <View accessibilityLiveRegion="polite" style={styles.placeholder}>
               <Text style={styles.placeholderText}>
-                {status === 'loading' ? 'Loading Pacifica candles' : 'Price history unavailable'}
+                {status === 'loading' ? 'Loading market candles' : 'Price history unavailable'}
               </Text>
             </View>
           )}

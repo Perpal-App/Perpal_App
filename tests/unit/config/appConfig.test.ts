@@ -18,6 +18,8 @@ const VALID: RawAppEnv = {
   pacificaCentralState: '11111111111111111111111111111111',
   pacificaVault: '11111111111111111111111111111111',
   pacificaWithdrawalFeeUsdc: '1',
+  velocityDlobApiOrigin: 'https://dlob.velocity.exchange',
+  velocityDlobWsOrigin: 'wss://dlob.velocity.exchange',
   velocityProgramId: '11111111111111111111111111111111',
   usdcMint: '11111111111111111111111111111111',
   usdtMint: '11111111111111111111111111111111',
