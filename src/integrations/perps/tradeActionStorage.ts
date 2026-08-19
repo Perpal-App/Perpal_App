@@ -11,7 +11,7 @@ export type PendingTradeAction = {
   readonly amountBaseUnits: string;
   readonly expiresAtMs: number;
   readonly idempotencyKey: string;
-  readonly kind: 'conversion' | 'setup' | 'collateral' | 'trade';
+  readonly kind: 'conversion' | 'setup' | 'collateral' | 'trade' | 'close';
   readonly owner: string;
   readonly provider: TradeActionScope;
   readonly signature: string;
@@ -77,7 +77,7 @@ function valid(
   const record = value as Record<string, unknown>;
   return record.version === 1 && record.owner === owner &&
     record.provider === provider &&
-    ['conversion', 'setup', 'collateral', 'trade'].includes(String(record.kind)) &&
+    ['conversion', 'setup', 'collateral', 'trade', 'close'].includes(String(record.kind)) &&
     typeof record.amountBaseUnits === 'string' &&
     /^\d+$/u.test(record.amountBaseUnits) &&
     typeof record.signature === 'string' && record.signature.length > 0 &&

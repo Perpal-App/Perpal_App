@@ -34,6 +34,7 @@ export type RpcValidationResult =
 
 const PUBLIC_READ_METHODS = new Set([
   'getAccountInfo',
+  'getLatestBlockhash',
   'getMultipleAccounts',
   'getSlot',
 ]);

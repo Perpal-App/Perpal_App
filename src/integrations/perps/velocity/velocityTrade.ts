@@ -5,16 +5,9 @@ import {
   PublicKey,
   SystemProgram,
   VersionedTransaction,
-  type Transaction,
   type TransactionInstruction,
 } from '@solana/web3.js';
-import { BulkAccountLoader } from '@velocity-exchange/sdk/lib/browser/accounts/bulkAccountLoader';
 import { getUserAccountPublicKeySync } from '@velocity-exchange/sdk/lib/browser/addresses/pda';
-import {
-  getMarketsAndOraclesForSubscription,
-  initialize,
-} from '@velocity-exchange/sdk/lib/browser/config';
-import { BN } from '@velocity-exchange/sdk/lib/browser/isomorphic/anchor';
 import { getMarketOrderParams } from '@velocity-exchange/sdk/lib/browser/orderParams';
 import { MarketType, PositionDirection } from '@velocity-exchange/sdk/lib/browser/types';
 import { VelocityClient } from '@velocity-exchange/sdk/lib/browser/velocityClient';
@@ -26,6 +19,11 @@ import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import {
   scaledInputForMinimumOutput,
 } from '@/integrations/perps/tradeCollateralMath';
+import { velocityCloseIntent } from '@/integrations/perps/velocity/velocityAccount';
+import {
+  subscribedVelocityClient,
+  velocityBn,
+} from '@/integrations/perps/velocity/velocityClient';
 import {
   removePendingTradeAction,
   writePendingTradeAction,
@@ -47,7 +45,7 @@ const QUOTE_MARKET_INDEX = 0;
 export type VelocitySide = 'long' | 'short';
 
 type VelocityTransactionPlan = {
-  readonly action: 'setup' | 'collateral' | 'trade';
+  readonly action: 'setup' | 'collateral' | 'trade' | 'close';
   readonly amountBaseUnits: bigint;
   readonly expiresAtMs: number;
   readonly feeLamports: bigint;
@@ -88,7 +86,7 @@ export async function prepareVelocityTrade(input: {
   const userPda = getUserAccountPublicKeySync(programId, owner, 0);
   const connection = new Connection(input.publicRpcUrl, 'confirmed');
   const userExists = await connection.getAccountInfo(userPda, 'confirmed') !== null;
-  const client = await subscribedClient(connection, owner, programId, userExists);
+  const client = await subscribedVelocityClient({ connection, owner, programId, userExists });
 
   try {
     const freeCollateral = userExists
@@ -119,13 +117,13 @@ export async function prepareVelocityTrade(input: {
       );
       const instructions = userExists
         ? await client.getDepositTxnIx(
-            bn(shortfall),
+            velocityBn(shortfall),
             QUOTE_MARKET_INDEX,
             tokenAccount,
             0,
           )
         : (await client.createInitializeUserAccountAndDepositCollateralIxs(
-            bn(shortfall),
+            velocityBn(shortfall),
             tokenAccount,
             QUOTE_MARKET_INDEX,
             0,
@@ -166,18 +164,72 @@ export async function prepareVelocityTrade(input: {
     }
 
     const order = getMarketOrderParams({
-      baseAssetAmount: bn(size),
+      baseAssetAmount: velocityBn(size),
       direction: input.side === 'long' ? PositionDirection.LONG : PositionDirection.SHORT,
       marketIndex: input.marketIndex,
       marketType: MarketType.PERP,
       reduceOnly: false,
     });
-    const instruction = await client.getPlacePerpOrderIx(order, 0);
+    const instruction = await client.getPlaceAndTakePerpOrderIx(order, undefined, undefined, undefined, 0);
     return {
       kind: 'velocity',
       plan: await transactionPlan({
         action: 'trade',
         amountBaseUnits: input.collateralBaseUnits,
+        client,
+        instructions: [instruction],
+        owner,
+        programId,
+        rpcUrl: input.rpcUrl,
+        signal: input.signal,
+        signer: input.signer,
+      }),
+    };
+  } finally {
+    await client.unsubscribe();
+  }
+}
+
+export async function prepareVelocityClose(input: {
+  readonly marketIndex: number;
+  readonly owner: string;
+  readonly programId: string;
+  readonly publicRpcUrl: string;
+  readonly rpcUrl: string;
+  readonly signal: AbortSignal;
+  readonly signer: GatewayRequestSigner;
+}): Promise<VelocityTradePreparation> {
+  const owner = new PublicKey(input.owner);
+  const programId = new PublicKey(input.programId);
+  const connection = new Connection(input.publicRpcUrl, 'confirmed');
+  const userPda = getUserAccountPublicKeySync(programId, owner, 0);
+  const userExists = await connection.getAccountInfo(userPda, 'confirmed') !== null;
+  if (!userExists) throw new Error('No Velocity account exists for this wallet.');
+  const client = await subscribedVelocityClient({ connection, owner, programId, userExists });
+
+  try {
+    const position = client.getUser(0).getPerpPosition(input.marketIndex);
+    const baseAmount = position === undefined ? 0n : BigInt(position.baseAssetAmount.toString());
+    const close = velocityCloseIntent(baseAmount);
+    const order = getMarketOrderParams({
+      baseAssetAmount: velocityBn(close.amountBaseUnits),
+      direction: close.side === 'long' ? PositionDirection.LONG : PositionDirection.SHORT,
+      marketIndex: input.marketIndex,
+      marketType: MarketType.PERP,
+      reduceOnly: true,
+    });
+    const instruction = await client.getPlaceAndTakePerpOrderIx(
+      order,
+      undefined,
+      undefined,
+      undefined,
+      0,
+    );
+    return {
+      kind: 'velocity',
+      plan: await transactionPlan({
+        action: 'close',
+        amountBaseUnits: close.amountBaseUnits,
         client,
         instructions: [instruction],
         owner,
@@ -250,36 +302,6 @@ async function conversionForMinimumOutput(
   throw new Error('A sufficient USDC to USDT quote is unavailable.');
 }
 
-async function subscribedClient(
-  connection: Connection,
-  owner: PublicKey,
-  programId: PublicKey,
-  userExists: boolean,
-): Promise<VelocityClient> {
-  const configured = initialize({ env: 'mainnet-beta' });
-  if (configured.VELOCITY_PROGRAM_ID !== programId.toBase58()) {
-    throw new Error('Velocity program configuration is invalid.');
-  }
-  const subscriptions = getMarketsAndOraclesForSubscription('mainnet-beta');
-  const client = new VelocityClient({
-    accountSubscription: {
-      accountLoader: new BulkAccountLoader(connection, 'confirmed', 1_000),
-      type: 'polling',
-    },
-    connection,
-    env: 'mainnet-beta',
-    oracleInfos: subscriptions.oracleInfos,
-    perpMarketIndexes: subscriptions.perpMarketIndexes,
-    programID: programId,
-    skipLoadUsers: !userExists,
-    spotMarketIndexes: [0],
-    ...(userExists ? { subAccountIds: [0] } : {}),
-    wallet: readOnlyWallet(owner),
-  });
-  if (!await client.subscribe()) throw new Error('Velocity accounts could not be loaded.');
-  return client;
-}
-
 async function transactionPlan(input: {
   readonly action: VelocityTransactionPlan['action'];
   readonly amountBaseUnits: bigint;
@@ -322,6 +344,65 @@ async function transactionPlan(input: {
     throw new Error('Velocity network fee could not be verified.');
   }
   if (balance.value < fee.value) throw new Error('Private wallet T needs more SOL for this action.');
+  if (input.action === 'setup') {
+    const simulation = await signedSolanaRpc<{
+      readonly value: {
+        readonly accounts: readonly ({ readonly lamports: number } | null)[] | null;
+        readonly err: unknown;
+        readonly logs: readonly string[] | null;
+        readonly postBalances?: readonly number[] | null;
+      };
+    }>({
+      method: 'simulateTransaction',
+      params: [
+        base64.encode(transaction.serialize()),
+        {
+          accounts: {
+            addresses: [input.owner.toBase58()],
+            encoding: 'base64',
+          },
+          commitment: 'confirmed',
+          encoding: 'base64',
+          replaceRecentBlockhash: false,
+          sigVerify: false,
+        },
+      ],
+      rpcUrl: input.rpcUrl,
+      signal: input.signal,
+      signer: input.signer,
+      timeoutMs: 12_000,
+    });
+    if (simulation.value.err !== null) {
+      const shortfall = velocitySetupSolShortfall(
+        simulation.value.logs ?? [],
+        BigInt(fee.value),
+      );
+      if (shortfall !== null) {
+        throw new Error(`Add at least ${sol(shortfall)} SOL to private wallet T for setup.`);
+      }
+      const remainingLamports = simulation.value.accounts?.[0]?.lamports ??
+        simulation.value.postBalances?.[0];
+      if (velocitySetupLeavesWalletBelowRent(simulation.value.err) &&
+        remainingLamports !== undefined && Number.isSafeInteger(remainingLamports)) {
+        const rentMinimum = await signedSolanaRpc<number>({
+          method: 'getMinimumBalanceForRentExemption',
+          params: [0, { commitment: 'confirmed' }],
+          rpcUrl: input.rpcUrl,
+          signal: input.signal,
+          signer: input.signer,
+        });
+        if (Number.isSafeInteger(rentMinimum) && rentMinimum > remainingLamports) {
+          throw new Error(
+            `Add at least ${sol(BigInt(rentMinimum - remainingLamports))} SOL to private wallet T for its rent reserve.`,
+          );
+        }
+      }
+      if (velocitySetupLeavesWalletBelowRent(simulation.value.err)) {
+        throw new Error('Add SOL to private wallet T so it remains rent-exempt after setup.');
+      }
+      throw new Error('Velocity setup could not be prepared.');
+    }
+  }
   return {
     action: input.action,
     amountBaseUnits: input.amountBaseUnits,
@@ -331,6 +412,27 @@ async function transactionPlan(input: {
     solBalanceLamports: BigInt(balance.value),
     transaction,
   };
+}
+
+export function velocitySetupSolShortfall(
+  logs: readonly string[],
+  feeLamports: bigint,
+): bigint | null {
+  for (const log of logs) {
+    const match = /Transfer: insufficient lamports ([0-9]+), need ([0-9]+)/u.exec(log);
+    if (match === null) continue;
+    const available = BigInt(match[1]!);
+    const required = BigInt(match[2]!) + feeLamports;
+    return required > available ? required - available : feeLamports;
+  }
+  return null;
+}
+
+export function velocitySetupLeavesWalletBelowRent(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const rent = (value as Record<string, unknown>).InsufficientFundsForRent;
+  return typeof rent === 'object' && rent !== null && !Array.isArray(rent) &&
+    (rent as Record<string, unknown>).account_index === 0;
 }
 
 function validateInstructions(
@@ -375,18 +477,6 @@ function pendingRecord(
   };
 }
 
-function readOnlyWallet(publicKey: PublicKey) {
-  return {
-    publicKey,
-    signAllTransactions: async (_transactions: Transaction[]) => {
-      throw new Error('Velocity instruction building cannot sign transactions.');
-    },
-    signTransaction: async (_transaction: Transaction) => {
-      throw new Error('Velocity instruction building cannot sign transactions.');
-    },
-  };
-}
-
 function positive(value: bigint): bigint {
   return value > 0n ? value : 0n;
 }
@@ -397,7 +487,8 @@ function decimal(value: bigint): string {
   return fraction.length === 0 ? digits.slice(0, -6) : `${digits.slice(0, -6)}.${fraction}`;
 }
 
-function bn(value: bigint): BN {
-  const Constructor = BN as unknown as new (value: string) => BN;
-  return new Constructor(value.toString());
+function sol(value: bigint): string {
+  const digits = value.toString().padStart(10, '0');
+  const fraction = digits.slice(-9).replace(/0+$/u, '');
+  return fraction.length === 0 ? digits.slice(0, -9) : `${digits.slice(0, -9)}.${fraction}`;
 }

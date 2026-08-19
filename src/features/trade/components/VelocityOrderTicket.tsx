@@ -374,6 +374,9 @@ function orderValue(collateral: string, leverage: string): string {
 }
 
 function userMessage(cause: unknown): string {
+  if (cause instanceof Error && cause.message.includes('fetch blockhash')) {
+    return 'Latest network blockhash is unavailable. Try again.';
+  }
   return cause instanceof Error ? cause.message : 'The transaction could not be prepared.';
 }
 

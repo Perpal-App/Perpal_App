@@ -12,6 +12,7 @@ import {
   VelocityTradesPanel,
 } from '@/features/trade/components/VelocityMarketPanels';
 import { VelocityOrderTicket } from '@/features/trade/components/VelocityOrderTicket';
+import { VelocityTradeAccountPanel } from '@/features/trade/components/VelocityTradeAccountPanel';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { useVelocityPublicMarket } from '@/features/trade/hooks/useVelocityPublicMarket';
 import { useVelocityMarketHistory } from '@/features/trade/hooks/useVelocityMarketHistory';
@@ -96,6 +97,7 @@ export function VelocityTradingWorkspace({
               />
             </View>
           </View>
+          <VelocityTradeAccountPanel config={config} />
         </FadeInView>
       ) : null}
 
