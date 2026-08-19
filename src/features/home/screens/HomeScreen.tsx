@@ -10,6 +10,7 @@ import { layoutMorph } from '@/components/motion/layoutMorph';
 import { RiseInView } from '@/components/motion/RiseInView';
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { readAppConfig } from '@/config/appConfig';
 import { formatSignedBpsPercent } from '@/domain/money/amount';
 import { useWalletBalances } from '@/features/account/hooks/useWalletBalances';
@@ -79,22 +80,7 @@ export function HomeScreen() {
     programId: config.ok ? config.value.perps.velocityProgramId : '',
     publicRpcUrl: config.ok ? config.value.api.publicRpcUrl : '',
   });
-  const tradingWalletPending = tradingSession.status === 'waiting-for-wallet'
-    || tradingSession.status === 'restoring'
-    || tradingSession.status === 'activating'
-    || tradingSession.status === 'rotating';
   const publicWalletPending = publicWallet.status === 'provisioning';
-  const walletInputsReady = publicWallet.embeddedWalletAddress !== null
-    && tradingSession.address !== null
-    && tradingSession.signer !== null;
-  const balancesPending = publicWalletPending
-    || tradingWalletPending
-    || (walletInputsReady && (walletBalances.status === 'idle' || walletBalances.status === 'loading'));
-  const portfolioPending = tradingWalletPending
-    || (tradingSession.status === 'ready'
-      && (portfolio.status === 'idle' || portfolio.status === 'loading'));
-  const velocityPending = tradingWalletPending
-    || (tradingSession.status === 'ready' && velocity.account.status === 'loading');
 
   // Indexed, not scanned. Every price message hands back a new snapshot array, so this
   // runs at socket tick rate — and a `find` per market made that a full pass over the
@@ -145,14 +131,23 @@ export function HomeScreen() {
           </View>
           <View style={styles.headingCopy}>
             <Text accessibilityRole="header" style={styles.greeting}>{greeting()}</Text>
-            {publicWallet.embeddedWalletAddress === null && publicWalletPending ? (
-              <SkeletonText role="caption" width={132} />
-            ) : (
+            {publicWallet.embeddedWalletAddress !== null ? (
               <CopyableAddress
                 address={publicWallet.embeddedWalletAddress}
-                fallback="Privy wallet unavailable"
+                fallback="Set up public wallet"
                 subject="public wallet address"
               />
+            ) : publicWalletPending ? (
+              <SkeletonText role="caption" width={132} />
+            ) : (
+              <PressableScale
+                accessibilityHint="Creates or restores your Privy public wallet"
+                accessibilityLabel="Set up public wallet"
+                accessibilityRole="button"
+                onPress={() => void publicWallet.retry()}
+              >
+                <Text style={styles.walletAction}>Set up public wallet</Text>
+              </PressableScale>
             )}
           </View>
         </View>
@@ -180,14 +175,11 @@ export function HomeScreen() {
         <AccountOverviewCard
           activationRequired={tradingSession.status === 'inactive' || tradingSession.status === 'error'}
           balances={walletBalances.balances}
-          balancesPending={balancesPending}
           onActivate={tradingSession.status === 'error'
             ? tradingSession.retryRestore
             : () => void tradingSession.activate()}
           portfolio={portfolio.snapshot}
-          portfolioPending={portfolioPending}
           velocity={velocity.account.snapshot}
-          velocityPending={velocityPending}
         />
       </RiseInView>
 
@@ -259,6 +251,7 @@ const styles = StyleSheet.create({
   // section titles further down, so it read as one of them. Regular 15 is quieter than both and
   // shares its weight with neither.
   greeting: { ...typography.body, color: colors.textPrimary },
+  walletAction: { ...typography.caption, color: colors.accentSoft },
   summary: { width: '100%' },
   sentiment: { marginTop: spacing.xs, marginBottom: spacing.xs },
 });

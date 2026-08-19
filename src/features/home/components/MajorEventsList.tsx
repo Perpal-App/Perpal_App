@@ -13,15 +13,13 @@ import { colors, spacing, typography } from '@/theme/tokens';
  * calendar and the news are the same briefing request, and giving each its own titled block
  * spent two screens of height on one payload.
  */
-export function MajorEventsList({ data, status }: MarketBriefingState) {
+export function MajorEventsList({ data }: Pick<MarketBriefingState, 'data'>) {
   return (
     <View style={styles.section}>
       {data === null ? (
-        status === 'loading'
-          ? Array.from({ length: 3 }, (_unused, index) => (
-            <View key={index} style={styles.pending}><SkeletonText role="label" width="75%" /></View>
-          ))
-          : <Text accessibilityRole="alert" style={styles.unavailable}>Event calendar unavailable</Text>
+        Array.from({ length: 3 }, (_unused, index) => (
+          <View key={index} style={styles.pending}><SkeletonText role="label" width="75%" /></View>
+        ))
       ) : data.events.length === 0 ? (
         <Text style={styles.unavailable}>No high-impact U.S. events in the next 30 days.</Text>
       ) : data.events.slice(0, 6).map((event, index) => (

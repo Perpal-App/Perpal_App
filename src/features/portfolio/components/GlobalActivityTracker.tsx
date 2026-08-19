@@ -11,6 +11,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { EmptyHistoryMark } from '@/assets/svg/EmptyHistoryMark';
+import { SkeletonText } from '@/components/feedback/Skeleton';
 import { layoutMorph } from '@/components/motion/layoutMorph';
 import { PressableScale } from '@/components/ui/PressableScale';
 import {
@@ -87,7 +88,9 @@ export function GlobalActivityTracker({
   const remoteUnavailable = remote.state.status === 'error'
     || remote.state.status === 'stale'
     || velocityHistory.status === 'error';
-  const loading = (remote.state.status === 'loading' || velocityHistory.status === 'loading')
+  const loading = (remote.state.status === 'loading'
+    || velocityHistory.status === 'loading'
+    || remoteUnavailable)
     && items.length === 0;
   const narrowed = filter !== 'all' || query.trim().length > 0;
 
@@ -120,12 +123,6 @@ export function GlobalActivityTracker({
         query={query}
       />
 
-      {remoteUnavailable ? (
-        <Text accessibilityRole="alert" selectable style={styles.error}>
-          Some venue history is temporarily unavailable. Confirmed events remain visible.
-        </Text>
-      ) : null}
-
       {velocityHistory.data?.truncated ? (
         <Text accessibilityRole="alert" selectable style={styles.error}>
           Showing the latest 1,000 Velocity account transactions.
@@ -137,7 +134,11 @@ export function GlobalActivityTracker({
           it is worse than no animation at all. */}
       <Animated.View layout={layoutMorph()} style={styles.list}>
         {loading ? (
-          <Text accessibilityLiveRegion="polite" style={styles.status}>Loading activity…</Text>
+          <View accessibilityLabel="Loading activity" accessibilityRole="progressbar" style={styles.loading}>
+            <SkeletonText role="label" width="82%" />
+            <SkeletonText role="bodyCompact" width="64%" />
+            <SkeletonText role="label" width="76%" />
+          </View>
         ) : items.length === 0 ? (
           <EmptyHistory />
         ) : visible.length === 0 ? (
@@ -272,6 +273,7 @@ const styles = StyleSheet.create({
   // out at their final size the instant a filter changes while the box is still travelling to meet
   // them, so the overflow would otherwise spill past it for the length of the spring.
   list: { overflow: 'hidden', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  loading: { gap: spacing.sm, paddingVertical: spacing.md },
   status: { ...typography.bodyCompact, paddingVertical: spacing.md, color: colors.textSecondary },
   error: { ...typography.caption, color: colors.negative },
   count: { ...typography.caption, color: colors.textMuted },

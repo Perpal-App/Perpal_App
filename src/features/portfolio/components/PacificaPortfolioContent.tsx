@@ -30,17 +30,12 @@ import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Props = {
   readonly balances: WalletBalances | null;
-  readonly balancesPending: boolean;
   readonly onBalancesChanged: () => void;
   readonly onPacificaRefresh: () => void;
   readonly onVelocityRefresh: () => void;
-  readonly portfolioPending: boolean;
-  readonly portfolioUnavailable: boolean;
   readonly snapshot: PacificaPortfolioSnapshot | null;
   readonly velocity: VelocityAccountSnapshot | null;
   readonly velocityHistory: VelocityHistoryState;
-  readonly velocityPending: boolean;
-  readonly velocityUnavailable: boolean;
 };
 
 /**
@@ -58,17 +53,12 @@ type Props = {
  */
 export function PacificaPortfolioContent({
   balances,
-  balancesPending,
   onBalancesChanged,
   onPacificaRefresh,
   onVelocityRefresh,
-  portfolioPending,
-  portfolioUnavailable,
   snapshot,
   velocity,
   velocityHistory,
-  velocityPending,
-  velocityUnavailable,
 }: Props) {
   const config = readAppConfig();
   const session = useTradingSession();
@@ -126,21 +116,10 @@ export function PacificaPortfolioContent({
       <RiseInView delay={motion.rise.stagger} layout={layoutMorph()}>
         <AccountOverviewCard
           balances={balances}
-          balancesPending={balancesPending}
           portfolio={snapshot}
-          portfolioPending={portfolioPending}
           velocity={velocity}
-          velocityPending={velocityPending}
         />
       </RiseInView>
-
-      {portfolioUnavailable || velocityUnavailable ? (
-        <RiseInView layout={layoutMorph()}>
-          <Text accessibilityRole="alert" selectable style={styles.alert}>
-            Some active trades are temporarily unavailable. Your wallet balances remain visible.
-          </Text>
-        </RiseInView>
-      ) : null}
 
       {positions.length === 0 ? null : (
         <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.section}>
@@ -294,5 +273,4 @@ const styles = StyleSheet.create({
   heading: { ...typography.label, color: colors.textPrimary },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   action: { flexGrow: 1, flexBasis: '42%' },
-  alert: { ...typography.bodyCompact, color: colors.negative },
 });

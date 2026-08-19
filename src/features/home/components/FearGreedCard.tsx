@@ -69,7 +69,7 @@ const BADGE_HEIGHT = Math.max(FACE_SIZE, typography.label.lineHeight) + BADGE_PA
  * stated hundred, and two more lines of type to say a gauge fills rightward was more than the
  * block could carry.
  */
-export function FearGreedCard({ data, status }: FearGreedState) {
+export function FearGreedCard({ data }: FearGreedState) {
   const band = data === null ? null : PRESENTATION[data.classification];
   const tone = band?.tone ?? colors.textMuted;
 
@@ -84,12 +84,10 @@ export function FearGreedCard({ data, status }: FearGreedState) {
             face and the word. A tinted fill behind them made the badge itself the loudest object
             on the block. */}
         {data === null || band === null ? (
-          status === 'loading'
-            // Sized and cornered to the badge it stands in for, so the badge does not change
-            // shape as it resolves. Derived from the label rather than the face because the
-            // label's line is the taller of the two and therefore what sets the height.
-            ? <Skeleton height={BADGE_HEIGHT} radius={BADGE_RADIUS} width={112} />
-            : <Text style={styles.unavailable}>Unavailable</Text>
+          // Sized and cornered to the badge it stands in for, so the badge does not change
+          // shape as it resolves. Derived from the label rather than the face because the
+          // label's line is the taller of the two and therefore what sets the height.
+          <Skeleton height={BADGE_HEIGHT} radius={BADGE_RADIUS} width={112} />
         ) : (
           <View style={styles.badge}>
             <LinearGradient
@@ -104,14 +102,12 @@ export function FearGreedCard({ data, status }: FearGreedState) {
       </View>
 
       {data === null ? (
-        status === 'loading' ? (
-          <View style={styles.pending}>
-            {/* `heading`, matching the reading's role, so the number lands on the line its
-                placeholder held rather than a taller one. */}
-            <SkeletonText role="heading" width={72} />
-            <Skeleton height={GAUGE_HEIGHT} radius={TICK_RADIUS} />
-          </View>
-        ) : null
+        <View style={styles.pending}>
+          {/* `heading`, matching the reading's role, so the number lands on the line its
+              placeholder held rather than a taller one. */}
+          <SkeletonText role="heading" width={72} />
+          <Skeleton height={GAUGE_HEIGHT} radius={TICK_RADIUS} />
+        </View>
       ) : (
         <>
           <View style={styles.readingRow}>
@@ -223,7 +219,6 @@ const styles = StyleSheet.create({
   // looks exactly like a radius that was never applied.
   badgeSheen: { borderRadius: BADGE_RADIUS },
   badgeLabel: { ...typography.label },
-  unavailable: { ...typography.caption, color: colors.textMuted },
   pending: { gap: spacing.sm },
   readingRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs },
   // The reading still anchors the card, but on weight rather than size now that the card is

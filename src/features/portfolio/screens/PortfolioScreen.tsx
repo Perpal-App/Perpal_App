@@ -1,4 +1,3 @@
-import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { EmptyState } from '@/components/feedback/EmptyState';
@@ -16,7 +15,6 @@ import { layout, spacing } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 export function PortfolioScreen() {
-  const router = useRouter();
   const config = readAppConfig();
   const publicWallet = useWalletProvisioning();
   const session = useTradingSession();
@@ -47,9 +45,9 @@ export function PortfolioScreen() {
     }
     return (
       <PortfolioState
-        action={{ label: 'Open Wallet', onPress: () => router.push('/(tabs)/account') }}
-        message="Your public wallet could not be restored. Open Wallet to retry."
-        title="Privy wallet required"
+        action={{ label: 'Set up public wallet', onPress: () => void publicWallet.retry() }}
+        message="Create or restore your Privy public wallet before activating private trading."
+        title="Set up your public wallet"
       />
     );
   }
@@ -69,33 +67,28 @@ export function PortfolioScreen() {
       <PortfolioState
         action={recoveryRequired
           ? undefined
-          : { label: 'Open Wallet', onPress: () => router.push('/(tabs)/account') }}
+          : { label: 'Retry private trading', onPress: session.retryRestore }}
         message={recoveryRequired
           ? 'The derived trading wallet does not match the recorded identity. No new identity was adopted.'
-          : 'Private trading setup did not complete. Open Wallet to retry.'}
+          : 'Restore private wallet T to view funds, positions, and activity.'}
         title={recoveryRequired ? 'Trading wallet recovery required' : 'Private trading setup paused'}
       />
     );
   }
 
   if (session.address === null || session.signer === null) {
-    return <PortfolioState title="Trading signer unavailable" message="Open Wallet and retry the secure restore." />;
+    return <LoadingState label="Restoring private trading" />;
   }
 
   return (
     <PacificaPortfolioContent
       balances={walletBalances.balances}
-      balancesPending={walletBalances.status !== 'ready' && walletBalances.status !== 'error'}
       onBalancesChanged={walletBalances.refresh}
       onPacificaRefresh={portfolio.refresh}
       onVelocityRefresh={velocity.refresh}
-      portfolioPending={portfolio.status !== 'ready' && portfolio.status !== 'error'}
-      portfolioUnavailable={portfolio.status === 'error'}
       snapshot={portfolio.snapshot}
       velocity={velocity.account.snapshot}
       velocityHistory={velocity.history}
-      velocityPending={velocity.account.status === 'loading'}
-      velocityUnavailable={velocity.account.status === 'error' || velocity.account.status === 'stale'}
     />
   );
 }

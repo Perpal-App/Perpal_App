@@ -41,21 +41,15 @@ const REVEAL_SIZE = 34;
 export function AccountOverviewCard({
   activationRequired = false,
   balances,
-  balancesPending,
   onActivate,
   portfolio,
-  portfolioPending,
   velocity,
-  velocityPending,
 }: {
   readonly activationRequired?: boolean;
   readonly balances: WalletBalances | null;
-  readonly balancesPending: boolean;
   readonly onActivate?: () => void;
   readonly portfolio: PacificaPortfolioSnapshot | null;
-  readonly portfolioPending: boolean;
   readonly velocity: VelocityAccountSnapshot | null;
-  readonly velocityPending: boolean;
 }) {
   // Session-scoped on purpose: this exists for the moment someone is standing behind you, not as a
   // setting. Persisting it belongs in AppPreferences, and would need to be a deliberate choice
@@ -67,7 +61,26 @@ export function AccountOverviewCard({
   const total = sum(publicBalance, privateBalance);
   const pnl = unrealizedPnl(portfolio, velocity);
   const pnlRate = unrealizedRate(portfolio, velocity, pnl);
-  const totalPending = balancesPending || portfolioPending || velocityPending;
+
+  if (activationRequired && onActivate !== undefined) {
+    return (
+      <View style={styles.activation}>
+        <Text style={styles.activationTitle}>Activate private trading</Text>
+        <Text style={styles.activationMessage}>
+          Create or restore private wallet T to hold private funds and sign trades on this device.
+        </Text>
+        <PressableScale
+          accessibilityHint="Creates or restores private wallet T"
+          accessibilityLabel="Activate private trading"
+          accessibilityRole="button"
+          onPress={onActivate}
+          style={styles.activate}
+        >
+          <Text style={styles.activateLabel}>Activate private trading</Text>
+        </PressableScale>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.block}>
@@ -82,17 +95,7 @@ export function AccountOverviewCard({
             <Rate hidden={hidden} value={pnlRate} />
           </View>
 
-          {activationRequired && onActivate !== undefined ? (
-            <PressableScale
-              accessibilityHint="Creates or restores private wallet T"
-              accessibilityLabel="Activate private trading"
-              accessibilityRole="button"
-              onPress={onActivate}
-              style={styles.activate}
-            >
-              <Text style={styles.activateLabel}>Activate</Text>
-            </PressableScale>
-          ) : totalPending && total === null ? (
+          {total === null ? (
             <View style={styles.heroPending}>
               <SkeletonText role="display" width={196} />
             </View>
@@ -103,7 +106,7 @@ export function AccountOverviewCard({
               selectable={!hidden}
               style={styles.hero}
             >
-              {hidden ? MASK : money(total) ?? 'Unavailable'}
+              {hidden ? MASK : money(total)}
             </Text>
           )}
         </View>
@@ -129,18 +132,15 @@ export function AccountOverviewCard({
         <Part
           hidden={hidden}
           label={walletLabel('Public funds', balances?.publicWallet ?? null)}
-          pending={balancesPending}
           value={money(publicBalance)}
         />
         <Part
           hidden={hidden}
           label={walletLabel('Private funds', balances?.privateWallet ?? null)}
-          pending={balancesPending || portfolioPending || velocityPending}
           value={money(privateBalance)}
         />
         <Part
           label="Active trades"
-          pending={portfolioPending || velocityPending}
           value={portfolio === null || velocity === null
             ? null
             : String(portfolio.positions.length + velocity.positions.length)}
@@ -148,7 +148,6 @@ export function AccountOverviewCard({
         <Part
           hidden={hidden}
           label="PnL"
-          pending={portfolioPending || velocityPending}
           tone={pnl === null || pnl.baseUnits === 0n ? 'plain' : pnl.baseUnits > 0n ? 'positive' : 'negative'}
           value={signedMoney(pnl)}
         />
@@ -193,20 +192,18 @@ function Rate({ hidden, value }: { readonly hidden: boolean; readonly value: num
 function Part({
   hidden = false,
   label,
-  pending,
   tone = 'plain',
   value,
 }: {
   readonly hidden?: boolean;
   readonly label: string;
-  readonly pending: boolean;
   readonly tone?: 'positive' | 'negative' | 'plain';
   readonly value: string | null;
 }) {
   return (
     <View style={styles.part}>
       <Text style={styles.partLabel}>{label}</Text>
-      {pending && value === null ? (
+      {value === null ? (
         <SkeletonText role="label" width={56} />
       ) : (
         <Text
@@ -218,7 +215,7 @@ function Part({
             tone === 'negative' && styles.negative,
           ]}
         >
-          {hidden ? MASK : value ?? 'Unavailable'}
+          {hidden ? MASK : value}
         </Text>
       )}
     </View>
@@ -387,12 +384,18 @@ const styles = StyleSheet.create({
   },
   // Holds the figure's line so the move below does not shift when the number lands.
   heroPending: { height: typography.display.lineHeight, justifyContent: 'center' },
+  activation: { gap: spacing.xs },
+  activationTitle: { ...typography.label, color: colors.textPrimary },
+  activationMessage: { ...typography.bodyCompact, color: colors.textSecondary },
   activate: {
-    minHeight: typography.display.lineHeight,
+    minHeight: 44,
     alignSelf: 'flex-start',
+    paddingHorizontal: spacing.md,
     justifyContent: 'center',
+    borderRadius: radii.sm,
+    backgroundColor: colors.accent,
   },
-  activateLabel: { ...typography.title, color: colors.accentSoft },
+  activateLabel: { ...typography.label, color: colors.onAccent },
   // Boxy, and small: a capsule at this size would read as a button rather than as a figure's unit.
   pill: {
     overflow: 'hidden',

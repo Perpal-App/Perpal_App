@@ -61,7 +61,7 @@ const MAX_ARTICLES = 6;
  */
 type NewsFilter = 'all' | NewsCategory | 'events';
 
-export function MarketNewsSection({ data, status }: MarketBriefingState) {
+export function MarketNewsSection({ data }: MarketBriefingState) {
   const [filter, setFilter] = useState<NewsFilter>('all');
 
   // Only categories the feed actually carries get a tab. The briefing does not promise every
@@ -129,15 +129,13 @@ export function MarketNewsSection({ data, status }: MarketBriefingState) {
       <LayoutAnimationConfig skipEntering>
         <Animated.View layout={layoutMorph()} style={styles.list}>
           {data === null ? (
-            status === 'loading'
-              ? Array.from({ length: 4 }, (_unused, index) => (
-                <View key={index} style={styles.item}>
-                  <SkeletonText role="label" width="90%" />
-                </View>
-              ))
-              : <Text accessibilityRole="alert" style={styles.unavailable}>News unavailable</Text>
+            Array.from({ length: 4 }, (_unused, index) => (
+              <View key={index} style={styles.item}>
+                <SkeletonText role="label" width="90%" />
+              </View>
+            ))
           ) : active === 'events' ? (
-            <MajorEventsList data={data} status={status} />
+            <MajorEventsList data={data} />
           ) : articles.map((article) => (
             // The animation sits on a wrapper rather than on the Pressable so the row keeps its
             // own `pressed` style function, which an animated component would have to give up.
@@ -221,6 +219,5 @@ const styles = StyleSheet.create({
   category: { ...typography.eyebrow, color: colors.accent },
   metaText: { ...typography.caption, flex: 1, color: colors.textMuted },
   headline: { ...typography.bodyCompact, color: colors.textPrimary },
-  unavailable: { ...typography.bodyCompact, color: colors.textMuted },
   pressed: { opacity: 0.6 },
 });
