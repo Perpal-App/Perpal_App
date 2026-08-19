@@ -43,9 +43,9 @@ export function mergeActivity(
 ): readonly ActivityItem[] {
   const items: ActivityItem[] = [
     ...(remote?.trades.map(tradeItem) ?? []),
-    ...(velocity?.trades.map(velocityTradeItem) ?? []),
+    ...(velocity?.trades.map(velocityTradeActivityItem) ?? []),
     ...(remote?.balances.filter(isFundMovement).map(balanceItem) ?? []),
-    ...local.filter((item) => item.kind === 'funding' || item.kind === 'withdrawal').map(localItem),
+    ...local.filter((item) => item.kind !== 'wallet').map(localItem),
   ];
 
   return items.sort(
@@ -91,7 +91,7 @@ function tradeItem(trade: PacificaTradeActivity): ActivityItem {
   };
 }
 
-function velocityTradeItem(trade: VelocityTradeActivity): ActivityItem {
+export function velocityTradeActivityItem(trade: VelocityTradeActivity): ActivityItem {
   return {
     createdAtMs: trade.createdAtMs,
     detail: `${baseUnits(trade.amountBaseUnits, 9)} ${trade.symbol} at ${usd(
@@ -124,7 +124,9 @@ function localItem(item: InAppNotification): ActivityItem {
     createdAtMs: item.createdAtMs,
     detail: item.message,
     id: `local:${item.id}`,
-    kind: item.kind === 'withdrawal' ? 'withdrawal' : 'funding',
+    kind: item.kind === 'trade'
+      ? 'trade'
+      : item.kind === 'withdrawal' ? 'withdrawal' : 'funding',
     outcome: item.outcome,
     title: item.title,
     value: null,

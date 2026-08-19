@@ -5,6 +5,7 @@ import { colors, spacing, typography } from '@/theme/tokens';
 export const pacificaOrderTicketStyles = StyleSheet.create({
   panel: { gap: spacing.xs, paddingVertical: spacing.xs },
   title: { ...typography.heading, color: colors.textPrimary },
+  loading: { minHeight: 180, justifyContent: 'center', gap: spacing.sm },
   message: { ...typography.bodyCompact, color: colors.textSecondary },
   controls: { flexDirection: 'row', gap: spacing.xs },
   summary: { gap: spacing.xxs, paddingTop: spacing.xs },

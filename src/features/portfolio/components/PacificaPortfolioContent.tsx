@@ -32,6 +32,7 @@ type Props = {
   readonly balances: WalletBalances | null;
   readonly balancesPending: boolean;
   readonly onBalancesChanged: () => void;
+  readonly onPacificaRefresh: () => void;
   readonly onVelocityRefresh: () => void;
   readonly portfolioPending: boolean;
   readonly portfolioUnavailable: boolean;
@@ -59,6 +60,7 @@ export function PacificaPortfolioContent({
   balances,
   balancesPending,
   onBalancesChanged,
+  onPacificaRefresh,
   onVelocityRefresh,
   portfolioPending,
   portfolioUnavailable,
@@ -105,7 +107,6 @@ export function PacificaPortfolioContent({
               title: 'Cancellation failed',
               message: `${order.symbol} order remains open.`,
             });
-            Alert.alert('Cancellation failed', 'The order remains open. Try again.');
           });
         },
       },
@@ -181,7 +182,14 @@ export function PacificaPortfolioContent({
         <Text accessibilityRole="header" style={styles.heading}>Funds</Text>
         {/* The screen already polls both of these for the overview card above, so they are handed down
             rather than fetched again inside the sheet — one owner per refresh. */}
-        <Funds balances={balances} onBalancesChanged={onBalancesChanged} snapshot={snapshot} />
+        <Funds
+          balances={balances}
+          onBalancesChanged={onBalancesChanged}
+          onPacificaRefresh={onPacificaRefresh}
+          onVelocityRefresh={onVelocityRefresh}
+          snapshot={snapshot}
+          velocity={velocity}
+        />
       </RiseInView>
 
       <RiseInView delay={motion.rise.stagger * 4} layout={layoutMorph()}>
@@ -207,11 +215,17 @@ export function PacificaPortfolioContent({
 function Funds({
   balances,
   onBalancesChanged,
+  onPacificaRefresh,
+  onVelocityRefresh,
   snapshot,
+  velocity,
 }: {
   readonly balances: WalletBalances | null;
   readonly onBalancesChanged: () => void;
+  readonly onPacificaRefresh: () => void;
+  readonly onVelocityRefresh: () => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
+  readonly velocity: VelocityAccountSnapshot | null;
 }) {
   const [mode, setMode] = useState<FundsMode | null>(null);
 
@@ -232,6 +246,13 @@ function Funds({
           tone="neutral"
         />
         <ActionButton
+          accessibilityHint="Moves available provider collateral back to private wallet T"
+          label="Move to T"
+          onPress={() => setMode('providers')}
+          style={styles.action}
+          tone="neutral"
+        />
+        <ActionButton
           accessibilityHint="Opens the withdrawal panel"
           label="Withdraw"
           onPress={() => setMode('withdraw')}
@@ -244,7 +265,10 @@ function Funds({
         mode={mode}
         onClose={() => setMode(null)}
         onBalancesChanged={onBalancesChanged}
+        onPacificaRefresh={onPacificaRefresh}
+        onVelocityRefresh={onVelocityRefresh}
         snapshot={snapshot}
+        velocity={velocity}
       />
     </>
   );
@@ -268,7 +292,7 @@ const styles = StyleSheet.create({
   // screen that already had a card edge every few points.
   section: { gap: spacing.sm },
   heading: { ...typography.label, color: colors.textPrimary },
-  actions: { flexDirection: 'row', gap: spacing.sm },
-  action: { flex: 1 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  action: { flexGrow: 1, flexBasis: '42%' },
   alert: { ...typography.bodyCompact, color: colors.negative },
 });

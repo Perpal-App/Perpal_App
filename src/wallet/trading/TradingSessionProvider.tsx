@@ -181,6 +181,12 @@ export function TradingSessionProvider({
           setError('The saved private trading wallet could not be verified.');
           setStatus('error');
           logActivationError('restore', cause);
+          publishInAppNotification({
+            kind: 'wallet',
+            outcome: 'error',
+            title: 'Private wallet restore paused',
+            message: 'Retry private wallet T from the profile screen.',
+          });
         }
       });
 

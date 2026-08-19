@@ -68,6 +68,11 @@ export function PositionCard({ position }: { readonly position: PacificaPosition
         />
         <Figure label="MARGIN" value={usd(position.margin)} />
         <Figure label="FUNDING" value={usd(position.funding)} />
+        <Figure
+          label="PNL"
+          tone={decimalTone(position.unrealizedPnl)}
+          value={position.unrealizedPnl === null ? UNAVAILABLE : signedUsd(position.unrealizedPnl)}
+        />
       </View>
     </Card>
   );
@@ -128,7 +133,13 @@ export function VelocityPositionCard({
         <Figure label="SIZE" value={`${base(position.baseAssetAmount)} ${position.symbol}`} />
         <Figure label="ENTRY" value={usdBase(position.entryPriceBaseUnits)} />
         <Figure label="MARK" value={usdBase(position.markPriceBaseUnits)} />
-        <Figure label="PNL" value={signedUsdBase(position.pnlBaseUnits)} />
+        <Figure
+          label="PNL"
+          tone={position.pnlBaseUnits > 0n
+            ? 'positive'
+            : position.pnlBaseUnits < 0n ? 'negative' : 'plain'}
+          value={signedUsdBase(position.pnlBaseUnits)}
+        />
         <Figure
           label="LIQ."
           tone="negative"
@@ -173,8 +184,7 @@ function Figure({
   value,
 }: {
   readonly label: string;
-  /** `negative` marks the one figure that is a threshold rather than a balance. */
-  readonly tone?: 'negative' | 'plain';
+  readonly tone?: 'negative' | 'plain' | 'positive';
   readonly value: string;
 }) {
   return (
@@ -186,6 +196,7 @@ function Figure({
         style={[
           styles.figureValue,
           tone === 'negative' && styles.negativeValue,
+          tone === 'positive' && styles.positiveValue,
           value === UNAVAILABLE && styles.absent,
         ]}
       >
@@ -218,6 +229,17 @@ function signedUsdBase(value: bigint): string {
   if (value === 0n) return '$0';
   const absolute = value < 0n ? -value : value;
   return `${value < 0n ? '-' : '+'}${usdBase(absolute)}`;
+}
+
+function signedUsd(value: string): string {
+  if (/^-?0+(?:\.0+)?$/u.test(value)) return '$0';
+  const negative = value.startsWith('-');
+  return `${negative ? '-' : '+'}${usd(negative ? value.slice(1) : value)}`;
+}
+
+function decimalTone(value: string | null): 'negative' | 'plain' | 'positive' {
+  if (value === null || /^-?0+(?:\.0+)?$/u.test(value)) return 'plain';
+  return value.startsWith('-') ? 'negative' : 'positive';
 }
 
 const styles = StyleSheet.create({
@@ -266,5 +288,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   negativeValue: { color: colors.negative },
+  positiveValue: { color: colors.positive },
   absent: { color: colors.textMuted },
 });

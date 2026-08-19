@@ -87,6 +87,7 @@ export function PortfolioScreen() {
       balances={walletBalances.balances}
       balancesPending={walletBalances.status !== 'ready' && walletBalances.status !== 'error'}
       onBalancesChanged={walletBalances.refresh}
+      onPacificaRefresh={portfolio.refresh}
       onVelocityRefresh={velocity.refresh}
       portfolioPending={portfolio.status !== 'ready' && portfolio.status !== 'error'}
       portfolioUnavailable={portfolio.status === 'error'}

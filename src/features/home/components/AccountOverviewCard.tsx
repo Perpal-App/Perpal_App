@@ -39,15 +39,19 @@ const REVEAL_SIZE = 34;
  * Hierarchy here is size and spacing, which is all it needs.
  */
 export function AccountOverviewCard({
+  activationRequired = false,
   balances,
   balancesPending,
+  onActivate,
   portfolio,
   portfolioPending,
   velocity,
   velocityPending,
 }: {
+  readonly activationRequired?: boolean;
   readonly balances: WalletBalances | null;
   readonly balancesPending: boolean;
+  readonly onActivate?: () => void;
   readonly portfolio: PacificaPortfolioSnapshot | null;
   readonly portfolioPending: boolean;
   readonly velocity: VelocityAccountSnapshot | null;
@@ -78,7 +82,17 @@ export function AccountOverviewCard({
             <Rate hidden={hidden} value={pnlRate} />
           </View>
 
-          {totalPending && total === null ? (
+          {activationRequired && onActivate !== undefined ? (
+            <PressableScale
+              accessibilityHint="Creates or restores private wallet T"
+              accessibilityLabel="Activate private trading"
+              accessibilityRole="button"
+              onPress={onActivate}
+              style={styles.activate}
+            >
+              <Text style={styles.activateLabel}>Activate</Text>
+            </PressableScale>
+          ) : totalPending && total === null ? (
             <View style={styles.heroPending}>
               <SkeletonText role="display" width={196} />
             </View>
@@ -131,6 +145,13 @@ export function AccountOverviewCard({
             ? null
             : String(portfolio.positions.length + velocity.positions.length)}
         />
+        <Part
+          hidden={hidden}
+          label="PnL"
+          pending={portfolioPending || velocityPending}
+          tone={pnl === null || pnl.baseUnits === 0n ? 'plain' : pnl.baseUnits > 0n ? 'positive' : 'negative'}
+          value={signedMoney(pnl)}
+        />
       </View>
     </View>
   );
@@ -173,11 +194,13 @@ function Part({
   hidden = false,
   label,
   pending,
+  tone = 'plain',
   value,
 }: {
   readonly hidden?: boolean;
   readonly label: string;
   readonly pending: boolean;
+  readonly tone?: 'positive' | 'negative' | 'plain';
   readonly value: string | null;
 }) {
   return (
@@ -186,7 +209,15 @@ function Part({
       {pending && value === null ? (
         <SkeletonText role="label" width={56} />
       ) : (
-        <Text numberOfLines={1} selectable={!hidden} style={styles.partValue}>
+        <Text
+          numberOfLines={1}
+          selectable={!hidden}
+          style={[
+            styles.partValue,
+            tone === 'positive' && styles.positive,
+            tone === 'negative' && styles.negative,
+          ]}
+        >
           {hidden ? MASK : value ?? 'Unavailable'}
         </Text>
       )}
@@ -325,6 +356,13 @@ function money(value: Amount | null): string | null {
   return value === null ? null : formatDetailedUsd(value);
 }
 
+function signedMoney(value: Amount | null): string | null {
+  const formatted = money(value);
+  return formatted === null || value === null || value.baseUnits <= 0n
+    ? formatted
+    : `+${formatted}`;
+}
+
 function percent(basisPoints: number): string {
   const absolute = Math.abs(basisPoints);
   const sign = basisPoints > 0 ? '+' : basisPoints < 0 ? '-' : '';
@@ -349,6 +387,12 @@ const styles = StyleSheet.create({
   },
   // Holds the figure's line so the move below does not shift when the number lands.
   heroPending: { height: typography.display.lineHeight, justifyContent: 'center' },
+  activate: {
+    minHeight: typography.display.lineHeight,
+    alignSelf: 'flex-start',
+    justifyContent: 'center',
+  },
+  activateLabel: { ...typography.title, color: colors.accentSoft },
   // Boxy, and small: a capsule at this size would read as a button rather than as a figure's unit.
   pill: {
     overflow: 'hidden',
@@ -367,8 +411,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  parts: { flexDirection: 'row', gap: spacing.lg },
-  part: { flexShrink: 1, minWidth: 0, gap: 2 },
+  parts: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg },
+  part: { flexBasis: '42%', flexGrow: 1, minWidth: 0, gap: 2 },
   partLabel: { ...typography.caption, color: colors.textSecondary },
   partValue: {
     ...typography.label,

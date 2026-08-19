@@ -19,15 +19,18 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { AppToastHost } from '@/components/feedback/AppToastHost';
 import { PressableScale } from '@/components/ui/PressableScale';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
 import { PrivateWithdrawPanel } from '@/features/portfolio/components/PrivateWithdrawPanel';
 import { PrivateSwapPanel } from '@/features/portfolio/components/PrivateSwapPanel';
+import { ProviderFundsPanel } from '@/features/portfolio/components/ProviderFundsPanel';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import type { VelocityAccountSnapshot } from '@/integrations/perps/velocity/velocityAccount';
 import { colors, layout, motion, radii, spacing } from '@/theme/tokens';
 
-export type FundsMode = 'deposit' | 'swap' | 'withdraw';
+export type FundsMode = 'deposit' | 'providers' | 'swap' | 'withdraw';
 
 /**
  * Share of the sheet's own height a release must be heading past for it to close.
@@ -82,14 +85,20 @@ export function FundsSheet({
   mode,
   onClose,
   onBalancesChanged,
+  onPacificaRefresh,
+  onVelocityRefresh,
   snapshot,
+  velocity,
 }: {
   /** Forwarded so the withdraw panel lists the tokens actually held, not every supported one. */
   readonly balances: WalletBalances | null;
   readonly mode: FundsMode | null;
   readonly onClose: () => void;
   readonly onBalancesChanged: () => void;
+  readonly onPacificaRefresh: () => void;
+  readonly onVelocityRefresh: () => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
+  readonly velocity: VelocityAccountSnapshot | null;
 }) {
   const reduceMotion = useReducedMotion();
   // `mounted` keeps the modal in the tree; `offset` is where the sheet sits. A dismissal has to finish
@@ -266,11 +275,21 @@ export function FundsSheet({
                       onBalancesChanged={onBalancesChanged}
                     />
                   ) : null}
+                  {mode === 'providers' ? (
+                    <ProviderFundsPanel
+                      onBalancesChanged={onBalancesChanged}
+                      onPacificaRefresh={onPacificaRefresh}
+                      onVelocityRefresh={onVelocityRefresh}
+                      pacifica={snapshot}
+                      velocity={velocity}
+                    />
+                  ) : null}
                 </ScrollView>
               </View>
             </Animated.View>
           </KeyboardAvoidingView>
         </SafeAreaView>
+        <AppToastHost />
       </GestureHandlerRootView>
     </Modal>
   );

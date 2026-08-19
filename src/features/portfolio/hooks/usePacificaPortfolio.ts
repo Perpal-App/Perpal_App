@@ -12,6 +12,7 @@ const REFRESH_INTERVAL_MS = 5_000;
 export function usePacificaPortfolio(apiOrigin: string, walletAddress: string | null) {
   const [snapshot, setSnapshot] = useState<PacificaPortfolioSnapshot | null>(null);
   const [status, setStatus] = useState<PortfolioState>('idle');
+  const [refreshKey, setRefreshKey] = useState(0);
   const hasSnapshot = useRef(false);
 
   useEffect(() => {
@@ -51,7 +52,7 @@ export function usePacificaPortfolio(apiOrigin: string, walletAddress: string | 
       controller?.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [apiOrigin, walletAddress]));
+  }, [apiOrigin, refreshKey, walletAddress]));
 
-  return { snapshot, status };
+  return { snapshot, status, refresh: () => setRefreshKey((value) => value + 1) };
 }

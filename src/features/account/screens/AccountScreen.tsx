@@ -1,6 +1,6 @@
 import * as Application from 'expo-application';
 import { useRef, useState } from 'react';
-import { Alert, Linking, StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
@@ -17,7 +17,8 @@ import { usePrivyAuth } from '@/integrations/privy/usePrivyAuth';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
-import { colors, layout, motion, spacing, typography } from '@/theme/tokens';
+import { showAppToast } from '@/storage/appToast';
+import { colors, layout, motion, spacing } from '@/theme/tokens';
 import {
   useTradingSession,
   type TradingSessionStatus,
@@ -61,7 +62,6 @@ export function AccountScreen() {
   const signOutInFlight = useRef(false);
   const [signingOut, setSigningOut] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const version = Application.nativeApplicationVersion ?? 'Unavailable';
 
   const handlePrivateWallet = () => {
@@ -84,11 +84,14 @@ export function AccountScreen() {
 
     signOutInFlight.current = true;
     setSigningOut(true);
-    setError(null);
     showOnboardingIntro();
 
     void auth.logout()
-      .catch(() => setError('Sign out could not be completed. Try again.'))
+      .catch(() => showAppToast({
+        outcome: 'error',
+        title: 'Sign out paused',
+        message: 'Sign out could not be completed. Try again.',
+      }))
       .finally(() => {
         signOutInFlight.current = false;
         setSigningOut(false);
@@ -108,12 +111,6 @@ export function AccountScreen() {
     ? undefined
     : privateWalletState(session.status);
   const walletRetryable = wallet.status === 'error' || wallet.status === 'needs-recovery';
-  const alerts = [
-    session.recovery === null ? null : 'Private wallet recovery is required before trading.',
-    session.error,
-    error,
-  ].filter((message): message is string => message !== null);
-
   return (
     // A plain tinted fill rather than a gradient: the band at the top is the gradient, and a second
     // ramp under it would give the page a direction of its own to argue with. Mounted through
@@ -243,21 +240,6 @@ export function AccountScreen() {
         visible={rotateOpen}
       />
 
-      {alerts.length === 0 ? null : (
-        <RiseInView layout={layoutMorph()} style={styles.alerts}>
-          {alerts.map((message, index) => (
-            <Text
-              accessibilityLiveRegion="polite"
-              accessibilityRole="alert"
-              key={index}
-              selectable
-              style={styles.alert}
-            >
-              {message}
-            </Text>
-          ))}
-        </RiseInView>
-      )}
     </AppScreen>
   );
 }
@@ -284,7 +266,7 @@ async function openLink(url: string, unavailable: string): Promise<void> {
   try {
     await Linking.openURL(url);
   } catch {
-    Alert.alert('Could not open', unavailable);
+    showAppToast({ outcome: 'error', title: 'Could not open', message: unavailable });
   }
 }
 
@@ -345,6 +327,4 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   group: { paddingHorizontal: layout.screenPadding },
-  alerts: { gap: spacing.xs, paddingHorizontal: layout.screenPadding },
-  alert: { ...typography.bodyCompact, color: colors.negative },
 });

@@ -15,6 +15,7 @@ import {
   type PrivateWalletSwapPlan,
 } from '@/integrations/solana/privateWalletSwap';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
+import { showAppToast } from '@/storage/appToast';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
@@ -31,7 +32,6 @@ export function PrivateSwapPanel({
   const [amount, setAmount] = useState('');
   const [plan, setPlan] = useState<PrivateWalletSwapPlan | null>(null);
   const [phase, setPhase] = useState<'idle' | 'preparing' | 'submitting' | 'pending'>('idle');
-  const [message, setMessage] = useState<string | null>(null);
   const prepareAbort = useRef<AbortController | null>(null);
   const to: PrivateStablecoin = from === 'USDC' ? 'USDT' : 'USDC';
   const sourceBalance = from === 'USDC'
@@ -44,7 +44,6 @@ export function PrivateSwapPanel({
   const invalidate = useCallback(() => {
     prepareAbort.current?.abort();
     setPlan(null);
-    setMessage(null);
     setPhase('idle');
   }, []);
 
@@ -62,14 +61,16 @@ export function PrivateSwapPanel({
     }).then((status) => {
       if (controller.signal.aborted || status === 'none' || status === 'expired') return;
       if (status === 'confirmed') {
-        setMessage('Previous swap confirmed.');
+        showAppToast({ outcome: 'success', title: 'Swap confirmed', message: 'Private balances were updated.' });
         onBalancesChanged();
         return;
       }
       setPhase('pending');
-      setMessage('Previous swap is confirming.');
+      showAppToast({ outcome: 'info', title: 'Swap confirming', message: 'The signed swap was not submitted again.' });
     }).catch((cause) => {
-      if (!controller.signal.aborted) setMessage(userMessage(cause));
+      if (!controller.signal.aborted) {
+        showAppToast({ outcome: 'error', title: 'Swap recovery paused', message: userMessage(cause) });
+      }
     });
     return () => controller.abort();
   }, [config, onBalancesChanged, session.address, session.signer]);
@@ -83,7 +84,7 @@ export function PrivateSwapPanel({
 
   const prepare = async () => {
     if (!config.ok || session.address === null || session.signer === null) {
-      setMessage('Private wallet T is not ready.');
+      showAppToast({ outcome: 'error', title: 'Swap unavailable', message: 'Private wallet T is not ready.' });
       return;
     }
 
@@ -96,7 +97,7 @@ export function PrivateSwapPanel({
         throw new Error(`Available balance is ${token(sourceBalance)} ${from}.`);
       }
     } catch (cause) {
-      setMessage(userMessage(cause));
+      showAppToast({ outcome: 'error', title: 'Review swap', message: userMessage(cause) });
       return;
     }
 
@@ -104,7 +105,6 @@ export function PrivateSwapPanel({
     const controller = new AbortController();
     prepareAbort.current = controller;
     setPhase('preparing');
-    setMessage(null);
     setPlan(null);
     try {
       const next = await preparePrivateWalletSwap({
@@ -126,7 +126,7 @@ export function PrivateSwapPanel({
       if (!controller.signal.aborted) {
         logSwapFailure('preparation', cause);
         setPhase('idle');
-        setMessage(userMessage(cause));
+        showAppToast({ outcome: 'error', title: 'Swap unavailable', message: userMessage(cause) });
       }
     }
   };
@@ -134,7 +134,6 @@ export function PrivateSwapPanel({
   const submit = async (confirmedPlan: PrivateWalletSwapPlan) => {
     if (!config.ok || session.address === null || session.signer === null) return;
     setPhase('submitting');
-    setMessage(null);
     try {
       const result = await submitPrivateWalletSwap({
         owner: session.address,
@@ -146,7 +145,6 @@ export function PrivateSwapPanel({
       setPhase(confirmed ? 'idle' : 'pending');
       setPlan(null);
       setAmount('');
-      setMessage(confirmed ? 'Swap confirmed.' : 'Swap submitted and confirming.');
       onBalancesChanged();
       publishInAppNotification({
         kind: 'wallet',
@@ -157,7 +155,7 @@ export function PrivateSwapPanel({
     } catch (cause) {
       logSwapFailure('submission', cause);
       setPhase('idle');
-      setMessage(userMessage(cause));
+      showAppToast({ outcome: 'error', title: 'Swap failed', message: userMessage(cause) });
     }
   };
 
@@ -261,12 +259,9 @@ export function PrivateSwapPanel({
         </>
       )}
 
-      {message === null ? null : (
-        <Text accessibilityLiveRegion="polite" selectable style={styles.message}>{message}</Text>
-      )}
       <Button
         disabled={phase === 'pending' || balances === null || sourceBalance === 0n || amountExceedsBalance}
-        label={plan === null ? 'Review swap' : 'Confirm swap'}
+        label={phase === 'pending' ? 'Swap confirming' : plan === null ? 'Review swap' : 'Confirm swap'}
         loading={phase === 'preparing' || phase === 'submitting'}
         onPress={plan === null ? () => void prepare() : confirm}
       />
@@ -332,5 +327,4 @@ const styles = StyleSheet.create({
   max: { minWidth: 64 },
   note: { ...typography.caption, color: colors.textMuted },
   warning: { ...typography.caption, color: colors.negative },
-  message: { ...typography.bodyCompact, color: colors.textSecondary },
 });

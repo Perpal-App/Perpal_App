@@ -44,8 +44,8 @@ const QUOTE_MARKET_INDEX = 0;
 
 export type VelocitySide = 'long' | 'short';
 
-type VelocityTransactionPlan = {
-  readonly action: 'setup' | 'collateral' | 'trade' | 'close';
+export type VelocityTransactionPlan = {
+  readonly action: 'setup' | 'collateral' | 'trade' | 'close' | 'withdraw';
   readonly amountBaseUnits: bigint;
   readonly expiresAtMs: number;
   readonly feeLamports: bigint;
@@ -72,6 +72,7 @@ export async function prepareVelocityTrade(input: {
   readonly swapBuildUrl: string;
   readonly usdcMint: string;
   readonly usdtMint: string;
+  readonly fundingOnly?: boolean;
 }): Promise<VelocityTradePreparation> {
   if (
     input.collateralBaseUnits <= 0n ||
@@ -131,7 +132,7 @@ export async function prepareVelocityTrade(input: {
           )).ixs;
       return {
         kind: 'velocity',
-        plan: await transactionPlan({
+        plan: await prepareVelocityTransactionPlan({
           action: userExists ? 'collateral' : 'setup',
           amountBaseUnits: shortfall,
           client,
@@ -145,6 +146,9 @@ export async function prepareVelocityTrade(input: {
       };
     }
 
+    if (input.fundingOnly) {
+      throw new Error('Velocity already has available trading balance.');
+    }
     if (!userExists) throw new Error('Velocity account setup is required before trading.');
     const market = client.getPerpMarketAccountOrThrow(input.marketIndex);
     if (input.leverage > Math.floor(10_000 / market.marginRatioInitial)) {
@@ -173,7 +177,7 @@ export async function prepareVelocityTrade(input: {
     const instruction = await client.getPlaceAndTakePerpOrderIx(order, undefined, undefined, undefined, 0);
     return {
       kind: 'velocity',
-      plan: await transactionPlan({
+      plan: await prepareVelocityTransactionPlan({
         action: 'trade',
         amountBaseUnits: input.collateralBaseUnits,
         client,
@@ -227,7 +231,7 @@ export async function prepareVelocityClose(input: {
     );
     return {
       kind: 'velocity',
-      plan: await transactionPlan({
+      plan: await prepareVelocityTransactionPlan({
         action: 'close',
         amountBaseUnits: close.amountBaseUnits,
         client,
@@ -302,7 +306,7 @@ async function conversionForMinimumOutput(
   throw new Error('A sufficient USDC to USDT quote is unavailable.');
 }
 
-async function transactionPlan(input: {
+export async function prepareVelocityTransactionPlan(input: {
   readonly action: VelocityTransactionPlan['action'];
   readonly amountBaseUnits: bigint;
   readonly client: VelocityClient;

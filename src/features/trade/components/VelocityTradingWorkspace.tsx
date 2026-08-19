@@ -16,6 +16,7 @@ import { VelocityTradeAccountPanel } from '@/features/trade/components/VelocityT
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { useVelocityPublicMarket } from '@/features/trade/hooks/useVelocityPublicMarket';
 import { useVelocityMarketHistory } from '@/features/trade/hooks/useVelocityMarketHistory';
+import { useVelocityAccount } from '@/features/portfolio/hooks/useVelocityAccount';
 import type {
   VelocityMarket,
   VelocityMarketSnapshot,
@@ -23,6 +24,7 @@ import type {
 import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
 import type { VelocityBookAggregation } from '@/integrations/perps/velocity/velocityPublicMarket';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type WorkspaceView = 'trade' | 'chart';
 type MarketPanel = 'orderbook' | 'trades' | 'liquidations' | 'funding' | 'info';
@@ -48,6 +50,7 @@ export function VelocityTradingWorkspace({
   readonly market: VelocityMarket;
   readonly snapshot: VelocityMarketSnapshot | null;
 }) {
+  const session = useTradingSession();
   const [view, setView] = useState<WorkspaceView>('trade');
   const [panel, setPanel] = useState<MarketPanel>('orderbook');
   const [aggregation, setAggregation] = useState<VelocityBookAggregation>(1);
@@ -67,6 +70,13 @@ export function VelocityTradingWorkspace({
     timeframe,
     view === 'chart',
   );
+  const velocity = useVelocityAccount({
+    historyRpcUrl: config.api.rpcUrl,
+    historySigner: session.status === 'ready' ? session.signer : null,
+    owner: session.status === 'ready' ? session.address : null,
+    programId: config.perps.velocityProgramId,
+    publicRpcUrl: config.api.publicRpcUrl,
+  });
 
   return (
     <View style={styles.workspace}>
@@ -77,7 +87,13 @@ export function VelocityTradingWorkspace({
           <View style={[styles.tradeGrid, wide && styles.tradeGridWide]}>
             <View style={styles.tradePanel}>
               {snapshot !== null && !snapshot.priceStale ? (
-                <VelocityOrderTicket config={config} market={market} snapshot={snapshot} />
+                <VelocityOrderTicket
+                  account={velocity.account}
+                  config={config}
+                  market={market}
+                  onAccountRefresh={velocity.refresh}
+                  snapshot={snapshot}
+                />
               ) : (
                 <View style={styles.waiting}>
                   <Text accessibilityLiveRegion="polite" style={styles.waitingTitle}>
@@ -97,7 +113,12 @@ export function VelocityTradingWorkspace({
               />
             </View>
           </View>
-          <VelocityTradeAccountPanel config={config} />
+          <VelocityTradeAccountPanel
+            account={velocity.account}
+            config={config}
+            history={velocity.history}
+            onRefresh={velocity.refresh}
+          />
         </FadeInView>
       ) : null}
 

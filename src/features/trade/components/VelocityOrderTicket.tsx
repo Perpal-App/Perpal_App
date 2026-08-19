@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
+import { SkeletonText } from '@/components/feedback/Skeleton';
 import type { AppConfig } from '@/config/appConfig';
 import {
   amountFromBaseUnits,
@@ -19,6 +20,7 @@ import {
 } from '@/features/trade/components/OrderTicketControls';
 import { PrivateTradingTicketState } from '@/features/trade/components/PrivateTradingTicketState';
 import { useTradeActionRecovery } from '@/features/trade/hooks/useTradeActionRecovery';
+import type { VelocityAccountState } from '@/features/portfolio/hooks/useVelocityAccount';
 import { useTradingStablecoinBalances } from '@/features/trade/hooks/useTradingStablecoinBalances';
 import { logTradeError } from '@/integrations/observability/tradeError';
 import { reconcilePendingTradeAction } from '@/integrations/perps/tradeActionRecovery';
@@ -33,18 +35,23 @@ import type {
   VelocityMarketSnapshot,
 } from '@/integrations/perps/velocity/velocityMarketData';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
+import { showAppToast } from '@/storage/appToast';
 import { colors, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Phase = 'idle' | 'preparing' | 'submitting' | 'pending';
 
 export function VelocityOrderTicket({
+  account,
   config,
   market,
+  onAccountRefresh,
   snapshot,
 }: {
+  readonly account: VelocityAccountState;
   readonly config: AppConfig;
   readonly market: VelocityMarket;
+  readonly onAccountRefresh: () => void;
   readonly snapshot: VelocityMarketSnapshot;
 }) {
   const session = useTradingSession();
@@ -53,7 +60,6 @@ export function VelocityOrderTicket({
   const [leverage, setLeverage] = useState(String(Math.min(5, market.maxLeverage)));
   const [phase, setPhase] = useState<Phase>('idle');
   const [preparation, setPreparation] = useState<VelocityTradePreparation | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [presetPercent, setPresetPercent] = useState<number | null>(null);
   const [sliderReset, setSliderReset] = useState(0);
   const controller = useRef<AbortController | null>(null);
@@ -70,14 +76,20 @@ export function VelocityOrderTicket({
     usdcMint: config.perps.usdcMint,
     usdtMint: config.perps.usdtMint,
   });
+  const fundingOnly = account.status === 'not-created' ||
+    (account.snapshot !== null && account.snapshot.freeCollateralBaseUnits <= 0n);
 
   useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => {
+    if (recovery.error !== null) {
+      showAppToast({ outcome: 'error', title: 'Recovery paused', message: recovery.error });
+    }
+  }, [recovery.error]);
   useEffect(() => {
     controller.current?.abort();
     setCollateral('');
     setLeverage(String(Math.min(5, market.maxLeverage)));
     setPreparation(null);
-    setMessage(null);
     setPresetPercent(null);
     setSliderReset((value) => value + 1);
     setPhase('idle');
@@ -96,10 +108,11 @@ export function VelocityOrderTicket({
   const signer = session.signer;
   const clearPreview = () => {
     setPreparation(null);
-    setMessage(null);
   };
   const applyPercentage = (next: number) => {
-    const available = balances.balances?.usdtBaseUnits;
+    const available = balances.balances === null
+      ? undefined
+      : balances.balances.usdtBaseUnits + balances.balances.usdcBaseUnits;
     if (available === undefined) return;
     const percent = Math.max(0, Math.min(100, Math.round(next)));
     setCollateral(stable((available * BigInt(percent)) / 100n));
@@ -108,15 +121,19 @@ export function VelocityOrderTicket({
 
   const prepare = async () => {
     let collateralBaseUnits: bigint;
-    const leverageValue = Number(leverage);
+    const leverageValue = fundingOnly ? 1 : Number(leverage);
     try {
       collateralBaseUnits = parseAmount(collateral, 6).baseUnits;
       if (collateralBaseUnits <= 0n) throw new Error('Enter collateral greater than zero.');
-      if (!Number.isSafeInteger(leverageValue) || leverageValue < 1 || leverageValue > market.maxLeverage) {
+      if (!fundingOnly && (
+        !Number.isSafeInteger(leverageValue) ||
+        leverageValue < 1 ||
+        leverageValue > market.maxLeverage
+      )) {
         throw new Error(`Leverage must be between 1× and ${market.maxLeverage}×.`);
       }
     } catch (cause) {
-      setMessage(userMessage(cause));
+      showAppToast({ outcome: 'error', title: 'Review deposit', message: userMessage(cause) });
       return;
     }
 
@@ -125,7 +142,6 @@ export function VelocityOrderTicket({
     controller.current = abort;
     setPhase('preparing');
     setPreparation(null);
-    setMessage(null);
     try {
       const [velocityStatus, walletStatus] = await Promise.all([
         recovery.reconcile(abort.signal),
@@ -139,11 +155,15 @@ export function VelocityOrderTicket({
       ]);
       if (velocityStatus === 'pending' || walletStatus === 'pending') {
         setPhase('pending');
-        setMessage('A previous transaction is still confirming.');
+        showAppToast({
+          outcome: 'info', title: 'Transaction confirming',
+          message: 'A previous transaction is still confirming.',
+        });
         return;
       }
       const next = await prepareVelocityTrade({
         collateralBaseUnits,
+        fundingOnly,
         leverage: leverageValue,
         marketIndex: market.marketIndex,
         owner,
@@ -164,7 +184,7 @@ export function VelocityOrderTicket({
     } catch (cause) {
       if (!abort.signal.aborted) {
         logTradeError('velocity', 'preparation', cause);
-        setMessage(userMessage(cause));
+        showAppToast({ outcome: 'error', title: 'Preparation failed', message: userMessage(cause) });
         setPhase('idle');
       }
     }
@@ -172,7 +192,6 @@ export function VelocityOrderTicket({
 
   const submit = async (reviewed: VelocityTradePreparation) => {
     setPhase('submitting');
-    setMessage(null);
     try {
       const result = await submitVelocityTradePreparation({
         owner,
@@ -183,16 +202,16 @@ export function VelocityOrderTicket({
       if (result.status !== 'confirmed') {
         setPreparation(null);
         setPhase('pending');
-        setMessage('Transaction submitted and confirming.');
+        showAppToast({
+          outcome: 'info', title: 'Transaction submitted',
+          message: 'The transaction is still confirming and will resume safely.',
+        });
         return;
       }
 
       const finalOrder = reviewed.kind === 'velocity' && reviewed.plan.action === 'trade';
       setPreparation(null);
       setPhase('idle');
-      setMessage(finalOrder
-        ? 'Order confirmed.'
-        : 'Preparation confirmed. Review the order again when the balance refreshes.');
       publishInAppNotification({
         kind: finalOrder ? 'trade' : 'funding',
         outcome: 'success',
@@ -201,10 +220,11 @@ export function VelocityOrderTicket({
           ? `${side === 'long' ? 'Long' : 'Short'} ${market.baseAsset} order confirmed.`
           : 'The confirmed balance is ready for the next reviewed step.',
       });
+      onAccountRefresh();
     } catch (cause) {
       logTradeError('velocity', 'submission', cause);
       setPhase('idle');
-      setMessage(userMessage(cause));
+      showAppToast({ outcome: 'error', title: 'Submission failed', message: userMessage(cause) });
     }
   };
 
@@ -217,39 +237,63 @@ export function VelocityOrderTicket({
     ]);
   };
 
+  if (account.status === 'loading') {
+    return (
+      <View accessibilityLabel="Loading Velocity balance" style={styles.loading}>
+        <SkeletonText role="heading" width={92} />
+        <SkeletonText role="label" width="100%" />
+        <SkeletonText role="label" width="100%" />
+      </View>
+    );
+  }
+  if (account.status === 'error' || account.status === 'stale') {
+    return (
+      <View style={styles.loading}>
+        <Text accessibilityRole="alert" style={styles.message}>
+          Velocity balance needs to refresh before trading.
+        </Text>
+        <ActionButton label="Retry balance" onPress={onAccountRefresh} tone="neutral" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.panel}>
-      <Text accessibilityRole="header" style={styles.title}>Order</Text>
-      <View style={styles.controls}>
-        <StaticControl accessibilityLabel="Margin mode Cross" label="Cross" />
-        <Field
-          accessibilityLabel="Leverage"
-          align="center"
-          onChangeText={(value) => {
-            setLeverage(value.replace(/\D/gu, ''));
-            clearPreview();
-          }}
-          suffix="×"
-          value={leverage}
-        />
-      </View>
-      <StaticControl accessibilityLabel="Order type Market" label="Market" />
-      <View accessibilityRole="radiogroup" style={styles.controls}>
-        <Choice
-          accessibilityLabel={`Buy ${market.baseAsset}`}
-          label={`Buy ${market.baseAsset}`}
-          onPress={() => { setSide('long'); clearPreview(); }}
-          selected={side === 'long'}
-          tone="long"
-        />
-        <Choice
-          accessibilityLabel={`Sell ${market.baseAsset}`}
-          label={`Sell ${market.baseAsset}`}
-          onPress={() => { setSide('short'); clearPreview(); }}
-          selected={side === 'short'}
-          tone="short"
-        />
-      </View>
+      <Text accessibilityRole="header" style={styles.title}>{fundingOnly ? 'Deposit' : 'Order'}</Text>
+      {fundingOnly ? null : (
+        <>
+          <View style={styles.controls}>
+            <StaticControl accessibilityLabel="Margin mode Cross" label="Cross" />
+            <Field
+              accessibilityLabel="Leverage"
+              align="center"
+              onChangeText={(value) => {
+                setLeverage(value.replace(/\D/gu, ''));
+                clearPreview();
+              }}
+              suffix="×"
+              value={leverage}
+            />
+          </View>
+          <StaticControl accessibilityLabel="Order type Market" label="Market" />
+          <View accessibilityRole="radiogroup" style={styles.controls}>
+            <Choice
+              accessibilityLabel={`Buy ${market.baseAsset}`}
+              label={`Buy ${market.baseAsset}`}
+              onPress={() => { setSide('long'); clearPreview(); }}
+              selected={side === 'long'}
+              tone="long"
+            />
+            <Choice
+              accessibilityLabel={`Sell ${market.baseAsset}`}
+              label={`Sell ${market.baseAsset}`}
+              onPress={() => { setSide('short'); clearPreview(); }}
+              selected={side === 'short'}
+              tone="short"
+            />
+          </View>
+        </>
+      )}
       <Field
         accessibilityLabel="Collateral amount"
         onChangeText={(value) => {
@@ -275,24 +319,25 @@ export function VelocityOrderTicket({
         selected={presetPercent}
       />
       {preparation === null ? null : <PreparationRows preparation={preparation} />}
-      {recovery.error ?? message ? (
-        <Text accessibilityLiveRegion="polite" selectable style={styles.message}>
-          {recovery.error ?? message}
-        </Text>
-      ) : null}
       <ActionButton
         disabled={phase === 'pending'}
-        label={preparation === null ? `Review ${side}` : 'Confirm transaction'}
+        label={preparation === null
+          ? fundingOnly ? 'Review deposit' : `Review ${side}`
+          : 'Confirm transaction'}
         loading={phase === 'preparing' || phase === 'submitting'}
         onPress={preparation === null ? () => void prepare() : confirm}
-        tone={side === 'long' ? 'positive' : 'negative'}
+        tone={fundingOnly ? 'accent' : side === 'long' ? 'positive' : 'negative'}
       />
       <View style={styles.riskRows}>
-        <TicketRow label="Type" screenReaderLabel="Order type" value="Market" />
-        <TicketRow label="Oracle" value={`$${formatAmountWithCommas(snapshot.oraclePrice)}`} />
-        <TicketRow label="Order value" value={orderValue(collateral, leverage)} />
-        <TicketRow label="Margin" value={stableInput(collateral)} />
-        <TicketRow label="Min. size" value={`${market.minOrderSize} ${market.baseAsset}`} />
+        {fundingOnly ? null : (
+          <>
+            <TicketRow label="Type" screenReaderLabel="Order type" value="Market" />
+            <TicketRow label="Oracle" value={`$${formatAmountWithCommas(snapshot.oraclePrice)}`} />
+            <TicketRow label="Order value" value={orderValue(collateral, leverage)} />
+            <TicketRow label="Min. size" value={`${market.minOrderSize} ${market.baseAsset}`} />
+          </>
+        )}
+        <TicketRow label={fundingOnly ? 'Deposit' : 'Margin'} value={stableInput(collateral)} />
         <TicketRow label="Private USDT" value={balances.balances === null ? 'Loading' : `${stable(balances.balances.usdtBaseUnits)} USDT`} />
         <TicketRow label="Private USDC" value={balances.balances === null ? 'Loading' : `${stable(balances.balances.usdcBaseUnits)} USDC`} />
       </View>
@@ -386,6 +431,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   title: { ...typography.heading, color: colors.textPrimary },
+  loading: { minHeight: 180, justifyContent: 'center', gap: spacing.sm },
   controls: { flexDirection: 'row', gap: spacing.xs },
   riskRows: {
     gap: spacing.xxs,

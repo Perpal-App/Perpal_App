@@ -75,7 +75,6 @@ export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: s
               kind: 'trade', outcome: 'error', title: 'Cancellation failed',
               message: `${order.symbol} order remains open.`,
             });
-            Alert.alert('Cancellation failed', 'The order remains open. Try again.');
           }).finally(() => setCancelling(null));
         },
       },

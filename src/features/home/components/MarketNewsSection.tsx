@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, LayoutAnimationConfig } from 'react-native-reanimated';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
@@ -8,6 +8,7 @@ import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/Underlin
 import { MajorEventsList } from '@/features/home/components/MajorEventsList';
 import type { MarketBriefingState } from '@/features/home/hooks/useMarketBriefing';
 import type { NewsCategory } from '@/integrations/market-data/marketBriefing';
+import { showAppToast } from '@/storage/appToast';
 import { colors, motion, spacing, typography } from '@/theme/tokens';
 
 /** The tag printed on each article. All caps, so it reads as a label rather than as prose. */
@@ -171,7 +172,11 @@ async function openArticle(url: string): Promise<void> {
   try {
     await Linking.openURL(url);
   } catch {
-    Alert.alert('Article unavailable', 'The source link could not be opened.');
+    showAppToast({
+      outcome: 'error',
+      title: 'Article unavailable',
+      message: 'The source link could not be opened.',
+    });
   }
 }
 

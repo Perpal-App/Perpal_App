@@ -1,5 +1,7 @@
 import { createMMKV, type MMKV } from 'react-native-mmkv';
 
+import { showAppToast } from '@/storage/appToast';
+
 export type InAppNotificationKind = 'trade' | 'funding' | 'withdrawal' | 'wallet';
 
 export type InAppNotification = {
@@ -56,22 +58,28 @@ export function subscribeInAppNotifications(listener: () => void): () => void {
 }
 
 export function publishInAppNotification(input: NotificationInput): void {
+  const normalized = {
+    ...input,
+    message: input.message.slice(0, 160),
+    title: input.title.slice(0, 80),
+  };
   const now = Date.now();
   const current = readInAppNotifications();
   const latest = current[0];
 
   if (
-    latest?.title === input.title &&
-    latest.message === input.message &&
+    latest?.title === normalized.title &&
+    latest.message === normalized.message &&
     now - latest.createdAtMs < 5_000
   ) return;
 
   commit([{
-    ...input,
+    ...normalized,
     createdAtMs: now,
     id: `${now}-${sequence++}`,
     readAtMs: null,
   }, ...current].slice(0, MAX_ITEMS));
+  showAppToast(normalized);
 }
 
 /**

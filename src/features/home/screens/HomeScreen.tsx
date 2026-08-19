@@ -178,8 +178,12 @@ export function HomeScreen() {
           physics matters for the same reason; two springs at different rates visibly come apart. */}
       <RiseInView delay={motion.rise.stagger} layout={layoutMorph()} style={styles.summary}>
         <AccountOverviewCard
+          activationRequired={tradingSession.status === 'inactive' || tradingSession.status === 'error'}
           balances={walletBalances.balances}
           balancesPending={balancesPending}
+          onActivate={tradingSession.status === 'error'
+            ? tradingSession.retryRestore
+            : () => void tradingSession.activate()}
           portfolio={portfolio.snapshot}
           portfolioPending={portfolioPending}
           velocity={velocity.account.snapshot}

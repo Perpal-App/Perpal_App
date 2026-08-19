@@ -11,10 +11,29 @@ const POLL_ATTEMPTS = 6;
 const POLL_INTERVAL_MS = 2_000;
 const MINIMUM_WITHDRAWAL_BASE_UNITS = 1_000_000n;
 
+export function availablePacificaReturnBaseUnits(
+  availableBaseUnits: bigint,
+  withdrawalFeeBaseUnits: bigint,
+): bigint {
+  const amount = availableBaseUnits - withdrawalFeeBaseUnits;
+  return amount >= MINIMUM_WITHDRAWAL_BASE_UNITS ? amount : 0n;
+}
+
+type WithdrawalInput = {
+  readonly account: string;
+  readonly apiOrigin: string;
+  readonly mint: string;
+  readonly rpcUrl: string;
+  readonly signer: GatewayRequestSigner;
+  readonly signal?: AbortSignal;
+  readonly withdrawalFeeBaseUnits: bigint;
+};
+
 type PendingWithdrawal = {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly account: string;
   readonly amountBaseUnits: string;
+  readonly targetWalletBalanceBaseUnits?: string;
   readonly idempotencyKey: string;
   readonly batchNonce: string | null;
   readonly updatedAtMs: number;
@@ -22,15 +41,7 @@ type PendingWithdrawal = {
 
 export async function ensurePacificaCollateralInWallet(
   requestedBaseUnits: bigint,
-  input: {
-    readonly account: string;
-    readonly apiOrigin: string;
-    readonly mint: string;
-    readonly rpcUrl: string;
-    readonly signer: GatewayRequestSigner;
-    readonly signal?: AbortSignal;
-    readonly withdrawalFeeBaseUnits: bigint;
-  },
+  input: WithdrawalInput,
 ): Promise<void> {
   if (requestedBaseUnits <= 0n) throw new Error('Withdrawal amount is invalid.');
   const inWallet = await balance(input);
@@ -42,6 +53,38 @@ export async function ensurePacificaCollateralInWallet(
   const providerAmount = shortfall < MINIMUM_WITHDRAWAL_BASE_UNITS
     ? MINIMUM_WITHDRAWAL_BASE_UNITS
     : shortfall;
+  await withdrawToWallet(providerAmount, requestedBaseUnits, input);
+}
+
+export async function withdrawPacificaCollateralToWallet(
+  amountBaseUnits: bigint,
+  input: WithdrawalInput,
+): Promise<void> {
+  if (amountBaseUnits < MINIMUM_WITHDRAWAL_BASE_UNITS) {
+    throw new Error('Pacifica requires at least 1 USDC per withdrawal.');
+  }
+  const current = await balance(input);
+  await withdrawToWallet(amountBaseUnits, current + amountBaseUnits, input);
+}
+
+export async function resumePacificaCollateralWithdrawalToWallet(
+  input: WithdrawalInput,
+): Promise<bigint> {
+  const pending = await read(input.account);
+  if (pending === null) throw new Error('No Pacifica withdrawal is waiting to resume.');
+  if (pending.version !== 2) {
+    throw new Error('Resume this older withdrawal from the action that created it.');
+  }
+  const amount = BigInt(pending.amountBaseUnits);
+  await withdrawToWallet(amount, BigInt(pending.targetWalletBalanceBaseUnits!), input);
+  return amount;
+}
+
+async function withdrawToWallet(
+  providerAmount: bigint,
+  targetWalletBalanceBaseUnits: bigint,
+  input: WithdrawalInput,
+): Promise<void> {
   let pending = await read(input.account);
   if (pending !== null && BigInt(pending.amountBaseUnits) !== providerAmount) {
     throw new Error('Resume the pending trading withdrawal before changing the amount.');
@@ -54,15 +97,20 @@ export async function ensurePacificaCollateralInWallet(
       throw new Error('Your private balance does not have enough withdrawable USDC for this amount and its fee.');
     }
     pending = {
-      version: 1,
+      version: 2,
       account: input.account,
       amountBaseUnits: providerAmount.toString(),
+      targetWalletBalanceBaseUnits: targetWalletBalanceBaseUnits.toString(),
       idempotencyKey: Crypto.randomUUID(),
       batchNonce: null,
       updatedAtMs: Date.now(),
     };
     await write(pending);
   }
+
+  const target = pending.version === 2
+    ? BigInt(pending.targetWalletBalanceBaseUnits!)
+    : targetWalletBalanceBaseUnits;
 
   if (pending.batchNonce === null) {
     const response = object(await pacificaPostSigned<unknown>({
@@ -83,7 +131,7 @@ export async function ensurePacificaCollateralInWallet(
   }
 
   for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
-    if (await balance(input) >= requestedBaseUnits) {
+    if (await balance(input) >= target) {
       await clear(input.account);
       return;
     }
@@ -118,10 +166,14 @@ async function read(account: string): Promise<PendingWithdrawal | null> {
   try {
     const record = JSON.parse(value) as Record<string, unknown>;
     if (
-      record.version !== 1 ||
+      (record.version !== 1 && record.version !== 2) ||
       record.account !== account ||
       typeof record.amountBaseUnits !== 'string' ||
       !/^\d+$/u.test(record.amountBaseUnits) ||
+      (record.version === 2 && (
+        typeof record.targetWalletBalanceBaseUnits !== 'string' ||
+        !/^\d+$/u.test(record.targetWalletBalanceBaseUnits)
+      )) ||
       typeof record.idempotencyKey !== 'string' ||
       (record.batchNonce !== null && typeof record.batchNonce !== 'string') ||
       !Number.isSafeInteger(record.updatedAtMs)

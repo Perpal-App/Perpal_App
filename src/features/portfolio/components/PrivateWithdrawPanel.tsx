@@ -14,7 +14,6 @@ import {
   type MenuOption,
 } from '@/components/ui/AnchoredMenu';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
@@ -27,6 +26,7 @@ import {
   type PrivateExitAsset,
 } from '@/integrations/umbra/PrivateExitProvider';
 import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
+import { showAppToast } from '@/storage/appToast';
 
 /**
  * One token the account can actually withdraw, and how much of it there is.
@@ -51,7 +51,6 @@ export function PrivateWithdrawPanel({
   const [amount, setAmount] = useState('');
   const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>('privy');
   const [externalAddress, setExternalAddress] = useState('');
-  const [inputError, setInputError] = useState<string | null>(null);
   const [chosenMint, setChosenMint] = useState('');
   const configured = useMemo(() => {
     const config = readAppConfig();
@@ -85,7 +84,10 @@ export function PrivateWithdrawPanel({
 
   const confirm = () => {
     if (asset === null) {
-      setInputError('Withdrawal configuration is unavailable.');
+      showAppToast({
+        outcome: 'error', title: 'Withdrawal unavailable',
+        message: 'Withdrawal configuration is unavailable.',
+      });
       return;
     }
     try {
@@ -95,7 +97,6 @@ export function PrivateWithdrawPanel({
         : externalAddress.trim();
       if (parsed <= 0n || destination === null) throw new Error('invalid input');
       const validated = new PublicKey(destination).toBase58();
-      setInputError(null);
       Alert.alert(
         nativeSol ? 'Withdraw SOL privately' : 'Withdraw privately',
         [
@@ -117,7 +118,10 @@ export function PrivateWithdrawPanel({
         ],
       );
     } catch {
-      setInputError(`Enter a valid ${asset.symbol} amount and destination.`);
+      showAppToast({
+        outcome: 'error', title: 'Review withdrawal',
+        message: `Enter a valid ${asset.symbol} amount and destination.`,
+      });
     }
   };
 
@@ -189,20 +193,6 @@ export function PrivateWithdrawPanel({
           style={styles.input}
           value={externalAddress}
         />
-      ) : null}
-
-      {privateExit.record ? (
-        <StatusRow label="Status" value={exitStatus(privateExit.record.phase)} />
-      ) : null}
-      {privateExit.isRunning ? (
-        <Text accessibilityLiveRegion="polite" style={styles.note}>
-          Private withdrawal is progressing automatically. Recovery state is saved.
-        </Text>
-      ) : null}
-      {inputError ?? privateExit.error ? (
-        <Text accessibilityRole="alert" style={styles.error}>
-          {inputError ?? privateExit.error}
-        </Text>
       ) : null}
 
       {pending ? (
@@ -408,17 +398,6 @@ function feeLabel(): string {
   return `${formatAmount(amountFromBaseUnits(units, 6))} USDC`;
 }
 
-function exitStatus(phase: string): string {
-  switch (phase) {
-    case 'depositing':
-    case 'scanning':
-    case 'proving': return 'Preparing private withdrawal';
-    case 'relaying': return 'Sending privately';
-    case 'complete': return 'Delivered privately';
-    default: return 'Ready';
-  }
-}
-
 function parseTokenAmount(value: string, decimals: number): bigint {
   const trimmed = value.trim();
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) throw new Error('invalid');
@@ -492,5 +471,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   tokenLabel: { ...typography.label, color: colors.textPrimary },
-  error: { ...typography.bodyCompact, color: colors.negative },
 });

@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
-
 import { ActionButton } from '@/components/ui/ActionButton';
-import { StatusRow } from '@/components/ui/StatusRow';
 import {
   AmountError,
   amountFromBaseUnits,
@@ -23,15 +21,18 @@ import { PrivateTradingTicketState } from '@/features/trade/components/PrivateTr
 import { TradeCollateralStepView } from '@/features/trade/components/TradeCollateralStepView';
 import {
   availableTradingFundsBaseUnits,
-  decimalUsd,
   orderConfirmation,
   orderTypeText,
   priceText,
-  privateStablecoinText,
   usdcText,
 } from '@/features/trade/components/PacificaOrderTicketFormatting';
 import { pacificaOrderTicketStyles as styles } from '@/features/trade/components/PacificaOrderTicketStyles';
 import { PacificaOrderTypeFields } from '@/features/trade/components/PacificaOrderTypeFields';
+import {
+  PacificaBalanceState,
+  PacificaFundingRequirementRows,
+  PacificaRiskRows,
+} from '@/features/trade/components/PacificaOrderTicketSummary';
 import { useTradeActionRecovery } from '@/features/trade/hooks/useTradeActionRecovery';
 import { useTradingStablecoinBalances } from '@/features/trade/hooks/useTradingStablecoinBalances';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
@@ -59,8 +60,8 @@ import {
 } from '@/integrations/perps/tradeCollateral';
 import { logTradeError } from '@/integrations/observability/tradeError';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
+import { showAppToast } from '@/storage/appToast';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
-
 type Phase = 'idle' | 'preparing' | 'prepared' | 'submitting' | 'complete';
 
 export function PacificaOrderTicket(props: {
@@ -93,10 +94,9 @@ export function PacificaOrderTicket(props: {
   const [phase, setPhase] = useState<Phase>('idle');
   const [plan, setPlan] = useState<PacificaOrderPlan | null>(null);
   const [preparation, setPreparation] = useState<TradeCollateralStep | null>(null);
-  const [orderId, setOrderId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [fundingRequirement, setFundingRequirement] = useState<TradeFundingRequirement | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const [portfolioRevision, setPortfolioRevision] = useState(0);
   const marginMode: PacificaMarginMode = props.market.isolatedOnly ? 'isolated' : 'cross';
   const controller = useRef<AbortController | null>(null);
   const recovery = useTradeActionRecovery({
@@ -112,18 +112,13 @@ export function PacificaOrderTicket(props: {
     usdcMint: props.usdcMint,
     usdtMint: props.usdtMint,
   });
-
   const reset = () => {
     controller.current?.abort();
     setPlan(null);
     setPreparation(null);
-    setOrderId(null);
-    setError(null);
     setFundingRequirement(null);
-    setValidationError(null);
     setPhase('idle');
   };
-
   useEffect(() => {
     reset();
     setCollateral('');
@@ -135,6 +130,8 @@ export function PacificaOrderTicket(props: {
     setStopLoss('');
     setTriggerPrice('');
     setLeverage(String(Math.min(5, props.market.maxLeverage)));
+    setPortfolio(null);
+    setLoadError(false);
     if (session.status !== 'ready' || session.address === null) return;
     const abort = new AbortController();
     controller.current = abort;
@@ -143,11 +140,14 @@ export function PacificaOrderTicket(props: {
       .catch((cause) => {
         if (!abort.signal.aborted) {
           logTradeError('pacifica', 'preparation', cause);
-          setError(cause instanceof Error ? cause.message : 'Trading balance is unavailable.');
+          setLoadError(true);
         }
       });
     return () => abort.abort();
-  }, [props.apiOrigin, props.market.venueRef, session.address, session.status]);
+  }, [props.apiOrigin, props.market.venueRef, portfolioRevision, session.address, session.status]);
+
+  const fundingOnly = portfolio !== null &&
+    parseAmount(portfolio.availableToSpend, 6).baseUnits <= 0n;
 
   const applyPercentage = (next: number) => {
     const available = availableTradingFundsBaseUnits(
@@ -166,13 +166,21 @@ export function PacificaOrderTicket(props: {
       return;
     }
     try {
-      validatePacificaOrderDraft({
-        action, collateral, leverage, market: props.market, orderPrice: limitPrice, orderType, side,
-        snapshot: props.snapshot, stopLossPrice: stopLoss, takeProfitPrice: takeProfit,
-        tpSlEnabled, triggerPrice,
-      });
+      if (fundingOnly) {
+        const amount = parseAmount(collateral, 6).baseUnits;
+        if (amount <= 0n) throw new AmountError('Enter a deposit greater than zero.');
+      } else {
+        validatePacificaOrderDraft({
+          action, collateral, leverage, market: props.market, orderPrice: limitPrice, orderType, side,
+          snapshot: props.snapshot, stopLossPrice: stopLoss, takeProfitPrice: takeProfit,
+          tpSlEnabled, triggerPrice,
+        });
+      }
     } catch (cause) {
-      setValidationError(cause instanceof Error ? cause.message : 'Review the order inputs.');
+      showAppToast({
+        outcome: 'error', title: fundingOnly ? 'Review deposit' : 'Review order',
+        message: cause instanceof Error ? cause.message : 'Review the order inputs.',
+      });
       return;
     }
     const abort = new AbortController();
@@ -181,9 +189,7 @@ export function PacificaOrderTicket(props: {
     setPhase('preparing');
     setPlan(null);
     setPreparation(null);
-    setError(null);
     setFundingRequirement(null);
-    setValidationError(null);
     try {
       if (await recovery.reconcile(abort.signal) === 'pending') {
         throw new Error('A previous collateral transaction is still confirming.');
@@ -208,6 +214,9 @@ export function PacificaOrderTicket(props: {
           setPreparation(next);
           setPhase('prepared');
           return;
+        }
+        if (fundingOnly) {
+          throw new Error('Pacifica already has available trading balance. Refresh the ticket.');
         }
       }
       const latestPortfolio = await fetchPacificaPortfolio(props.apiOrigin, session.address, abort.signal);
@@ -235,10 +244,13 @@ export function PacificaOrderTicket(props: {
         if (cause instanceof TradeFundingRequirementError) {
           setFundingRequirement(cause.requirement);
         } else if (cause instanceof AmountError || cause instanceof PacificaOrderValidationError) {
-          setValidationError(cause.message);
+          showAppToast({ outcome: 'error', title: 'Review order', message: cause.message });
         } else {
           logTradeError('pacifica', 'preparation', cause);
-          setError(cause instanceof Error ? cause.message : 'Pacifica order preview failed.');
+          showAppToast({
+            outcome: 'error', title: 'Preparation failed',
+            message: cause instanceof Error ? cause.message : 'Pacifica order preview failed.',
+          });
         }
         setPhase('idle');
       }
@@ -250,7 +262,6 @@ export function PacificaOrderTicket(props: {
     const abort = new AbortController();
     controller.current = abort;
     setPhase('submitting');
-    setError(null);
     try {
       const result = await submitTradeCollateralStep({
         owner: session.address,
@@ -265,7 +276,7 @@ export function PacificaOrderTicket(props: {
       }
       recovery.setPending(false);
       setPreparation(null);
-      setPhase('idle');
+      setPhase('complete');
       setFundingRequirement(null);
       publishInAppNotification({
         kind: 'funding', outcome: 'success', title: 'Trading collateral confirmed',
@@ -274,11 +285,10 @@ export function PacificaOrderTicket(props: {
     } catch (cause) {
       if (!abort.signal.aborted) {
         logTradeError('pacifica', 'submission', cause);
-        setError(cause instanceof Error ? cause.message : 'Trade preparation failed.');
         setPhase('idle');
         publishInAppNotification({
           kind: 'funding', outcome: 'error', title: 'Trading collateral not confirmed',
-          message: 'Open the order ticket to review the collateral step.',
+          message: cause instanceof Error ? cause.message : 'Review the collateral step.',
         });
       }
     }
@@ -287,17 +297,15 @@ export function PacificaOrderTicket(props: {
   const submit = async (confirmed: PacificaOrderPlan) => {
     if (session.address === null || session.signer === null) return;
     setPhase('submitting');
-    setError(null);
     try {
-      const result = await submitPacificaOrder({
+      await submitPacificaOrder({
         account: session.address,
         apiOrigin: props.apiOrigin,
         intentStartedAtMs: performance.now(),
         plan: confirmed,
         signer: session.signer,
       });
-      setOrderId(result.orderId);
-      setPhase('complete');
+      setPhase('idle');
       publishInAppNotification({
         kind: 'trade', outcome: 'success',
         title: `${confirmed.action === 'open' ? 'Open' : 'Close'} order accepted`,
@@ -305,7 +313,6 @@ export function PacificaOrderTicket(props: {
       });
     } catch (cause) {
       logTradeError('pacifica', 'submission', cause);
-      setError(cause instanceof Error ? cause.message : 'Pacifica order failed.');
       setPlan(null);
       setPhase('idle');
       publishInAppNotification({
@@ -321,6 +328,18 @@ export function PacificaOrderTicket(props: {
         baseAsset={props.market.baseAsset}
         onRetry={session.retryRestore}
         status={session.status}
+      />
+    );
+  }
+
+  if (portfolio === null) {
+    return (
+      <PacificaBalanceState
+        failed={loadError}
+        onRetry={() => {
+          setLoadError(false);
+          setPortfolioRevision((value) => value + 1);
+        }}
       />
     );
   }
@@ -341,7 +360,8 @@ export function PacificaOrderTicket(props: {
 
   return (
     <View style={styles.panel}>
-      <View style={styles.controls}>
+      <Text accessibilityRole="header" style={styles.title}>{fundingOnly ? 'Deposit' : 'Order'}</Text>
+      {fundingOnly ? null : <View style={styles.controls}>
         <StaticControl
           accessibilityLabel={`Margin mode ${marginMode}`}
           label={marginMode === 'cross' ? 'Cross' : 'Isolated'}
@@ -353,8 +373,8 @@ export function PacificaOrderTicket(props: {
           suffix="×"
           value={leverage}
         />
-      </View>
-      <PacificaOrderTypeFields
+      </View>}
+      {fundingOnly ? null : <PacificaOrderTypeFields
         disabled={reduceOnly}
         limitPrice={limitPrice}
         markPrice={`$${formatAmountWithCommas(props.snapshot.price)}`}
@@ -366,8 +386,8 @@ export function PacificaOrderTicket(props: {
         onTriggerPriceChange={(value) => { reset(); setTriggerPrice(value); }}
         orderType={orderType}
         triggerPrice={triggerPrice}
-      />
-      <View style={styles.controls}>
+      />}
+      {fundingOnly ? null : <View style={styles.controls}>
         <Choice
           accessibilityLabel={reduceOnly
             ? `Close long ${props.market.baseAsset}`
@@ -386,7 +406,7 @@ export function PacificaOrderTicket(props: {
           selected={side === 'short'}
           tone="short"
         />
-      </View>
+      </View>}
       {reduceOnly ? null : (
         <>
           <Field
@@ -415,7 +435,7 @@ export function PacificaOrderTicket(props: {
           />
         </>
       )}
-      <Toggle
+      {fundingOnly ? null : <Toggle
         label="Reduce only"
         onChange={(value) => {
           reset();
@@ -428,38 +448,15 @@ export function PacificaOrderTicket(props: {
           }
         }}
         value={reduceOnly}
-      />
-      <Toggle disabled={reduceOnly || stopOrder} label="TP / SL" onChange={(value) => { reset(); setTpSlEnabled(value); }} value={tpSlEnabled} />
-      {tpSlEnabled && !reduceOnly ? (
+      />}
+      {fundingOnly ? null : <Toggle disabled={reduceOnly || stopOrder} label="TP / SL" onChange={(value) => { reset(); setTpSlEnabled(value); }} value={tpSlEnabled} />}
+      {!fundingOnly && tpSlEnabled && !reduceOnly ? (
         <>
           <Field accessibilityLabel="Take-profit price" onChangeText={(value) => { reset(); setTakeProfit(value); }} placeholder="Take profit" suffix="USD" value={takeProfit} />
           <Field accessibilityLabel="Stop-loss price" onChangeText={(value) => { reset(); setStopLoss(value); }} placeholder="Stop loss" suffix="USD" value={stopLoss} />
         </>
       ) : null}
-      {validationError !== null ? (
-        <Text accessibilityRole="alert" selectable style={styles.validationError}>
-          {validationError}
-        </Text>
-      ) : null}
-      {fundingRequirement !== null ? (
-        <View accessibilityLiveRegion="polite" style={styles.summary}>
-          <StatusRow
-            label="Min required"
-            selectable
-            singleLine
-            value={usdcText(fundingRequirement.minimumBaseUnits)}
-          />
-          <StatusRow
-            label="Available"
-            selectable
-            singleLine
-            value={privateStablecoinText({
-              usdcBaseUnits: fundingRequirement.usdcAvailableBaseUnits,
-              usdtBaseUnits: fundingRequirement.usdtAvailableBaseUnits,
-            })}
-          />
-        </View>
-      ) : null}
+      <PacificaFundingRequirementRows requirement={fundingRequirement} />
       {preparation !== null ? (
         <TradeCollateralStepView loading={phase === 'submitting'} onConfirm={() => void submitPreparation()} step={preparation} />
       ) : plan !== null ? (
@@ -472,24 +469,31 @@ export function PacificaOrderTicket(props: {
           <TicketRow label="Fee" screenReaderLabel="Estimated fee" value={usdcText(plan.estimatedFeeBaseUnits)} />
           <ActionButton label="Review and confirm" loading={phase === 'submitting'} onPress={confirm} tone={side === 'long' ? 'positive' : 'negative'} />
         </View>
-      ) : phase === 'complete' ? (
-        <Text accessibilityLiveRegion="polite" style={styles.success}>Pacifica accepted order {orderId}.</Text>
       ) : (
-        <ActionButton label={`Review ${reduceOnly ? 'close' : side}`} loading={phase === 'preparing'} onPress={() => void prepare()} tone={side === 'long' ? 'positive' : 'negative'} />
-      )}
-      <View style={styles.riskRows}>
-        <TicketRow label="Slippage" screenReaderLabel="Maximum slippage" value="0.5%" />
-        <TicketRow
-          label="Liq."
-          screenReaderLabel="Liquidation price"
-          value={position?.liquidationPrice ? `$${priceText(position.liquidationPrice)}` : '--'}
+        <ActionButton
+          label={fundingOnly
+            ? phase === 'complete' ? 'Refresh balance' : 'Review deposit'
+            : `Review ${reduceOnly ? 'close' : side}`}
+          loading={phase === 'preparing'}
+          onPress={phase === 'complete' && fundingOnly
+            ? () => {
+                setPhase('idle');
+                setPortfolio(null);
+                setPortfolioRevision((value) => value + 1);
+              }
+            : () => void prepare()}
+          tone={fundingOnly ? 'accent' : side === 'long' ? 'positive' : 'negative'}
         />
-        <TicketRow label="Margin" value={reduceOnly ? decimalUsd(position?.margin) : decimalUsd(collateral)} />
-        <TicketRow label="Min. notional" value={decimalUsd(props.market.minOrderSize)} />
-        <TicketRow label="Pacifica" screenReaderLabel="Available in Pacifica" value={decimalUsd(portfolio?.availableToSpend)} />
-        <TicketRow label="Private" value={privateStablecoinText(privateBalances.balances)} />
-      </View>
-      {error !== null ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+      )}
+      <PacificaRiskRows
+        collateral={collateral}
+        fundingOnly={fundingOnly}
+        minimumOrderSize={props.market.minOrderSize}
+        portfolio={portfolio}
+        position={position}
+        privateBalances={privateBalances.balances}
+        reduceOnly={reduceOnly}
+      />
     </View>
   );
 }

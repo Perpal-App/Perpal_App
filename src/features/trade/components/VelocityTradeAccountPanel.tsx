@@ -5,7 +5,12 @@ import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/Underlin
 import { StatusRow } from '@/components/ui/StatusRow';
 import type { AppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmountWithCommas } from '@/domain/money/amount';
-import { useVelocityAccount } from '@/features/portfolio/hooks/useVelocityAccount';
+import { ActivityRow } from '@/features/portfolio/components/ActivityRow';
+import { velocityTradeActivityItem } from '@/features/portfolio/components/activityItems';
+import type {
+  VelocityAccountState,
+  VelocityHistoryState,
+} from '@/features/portfolio/hooks/useVelocityAccount';
 import {
   type VelocityAccountSnapshot,
   type VelocityOpenOrder,
@@ -20,28 +25,31 @@ import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
-type AccountTab = 'positions' | 'orders' | 'balance';
+type AccountTab = 'positions' | 'orders' | 'balance' | 'history';
 
 const TABS: readonly UnderlineTabOption<AccountTab>[] = [
   { id: 'positions', label: 'Positions' },
   { id: 'orders', label: 'Open orders' },
   { id: 'balance', label: 'Balance' },
+  { id: 'history', label: 'Trade history' },
 ];
 
-export function VelocityTradeAccountPanel({ config }: { readonly config: AppConfig }) {
+export function VelocityTradeAccountPanel({
+  account,
+  config,
+  history,
+  onRefresh,
+}: {
+  readonly account: VelocityAccountState;
+  readonly config: AppConfig;
+  readonly history: VelocityHistoryState;
+  readonly onRefresh: () => void;
+}) {
   const session = useTradingSession();
   const owner = session.status === 'ready' ? session.address : null;
   const [tab, setTab] = useState<AccountTab>('positions');
-  const [revision, setRevision] = useState(0);
   const [busyMarket, setBusyMarket] = useState<number | null>(null);
   const controller = useRef<AbortController | null>(null);
-  const { account } = useVelocityAccount({
-    owner,
-    programId: config.perps.velocityProgramId,
-    publicRpcUrl: config.api.publicRpcUrl,
-    revision,
-  });
-
   useEffect(() => () => controller.current?.abort(), []);
 
   const prepareClose = async (position: VelocityPosition) => {
@@ -64,7 +72,10 @@ export function VelocityTradeAccountPanel({ config }: { readonly config: AppConf
     } catch (cause) {
       if (!abort.signal.aborted) {
         console.warn('[Perpal Velocity close preparation failed]', safeError(cause));
-        Alert.alert('Close unavailable', userMessage(cause));
+        publishInAppNotification({
+          kind: 'trade', outcome: 'error', title: 'Close unavailable',
+          message: userMessage(cause),
+        });
       }
     } finally {
       if (!abort.signal.aborted) setBusyMarket(null);
@@ -111,7 +122,10 @@ export function VelocityTradeAccountPanel({ config }: { readonly config: AppConf
         signer: session.signer,
       });
       if (result.status !== 'confirmed') {
-        Alert.alert('Close submitted', 'The reduce-only close is still confirming.');
+        publishInAppNotification({
+          kind: 'trade', outcome: 'info', title: 'Close submitted',
+          message: 'The reduce-only close is still confirming.',
+        });
         return;
       }
       publishInAppNotification({
@@ -120,10 +134,12 @@ export function VelocityTradeAccountPanel({ config }: { readonly config: AppConf
         title: `${position.symbol} position closed`,
         message: 'The reduce-only market close confirmed.',
       });
-      setRevision((value) => value + 1);
+      onRefresh();
     } catch (cause) {
       console.warn('[Perpal Velocity close submission failed]', safeError(cause));
-      Alert.alert('Close failed', userMessage(cause));
+      publishInAppNotification({
+        kind: 'trade', outcome: 'error', title: 'Close failed', message: userMessage(cause),
+      });
     } finally {
       setBusyMarket(null);
     }
@@ -139,7 +155,7 @@ export function VelocityTradeAccountPanel({ config }: { readonly config: AppConf
       ) : account.snapshot === null ? (
         <View style={styles.errorRow}>
           <Text accessibilityRole="alert" style={styles.error}>Your Velocity trades are unavailable.</Text>
-          <Pressable accessibilityRole="button" onPress={() => setRevision((value) => value + 1)} style={styles.retry}>
+          <Pressable accessibilityRole="button" onPress={onRefresh} style={styles.retry}>
             <Text style={styles.retryLabel}>Retry</Text>
           </Pressable>
         </View>
@@ -157,6 +173,7 @@ export function VelocityTradeAccountPanel({ config }: { readonly config: AppConf
           ) : null}
           {tab === 'orders' ? <Orders orders={account.snapshot.orders} /> : null}
           {tab === 'balance' ? <Balance snapshot={account.snapshot} /> : null}
+          {tab === 'history' ? <TradeHistory history={history} onRefresh={onRefresh} /> : null}
         </>
       )}
     </View>
@@ -194,7 +211,13 @@ function Positions(props: {
           </View>
           <StatusRow label="Size" value={`${base(position.baseAssetAmount)} ${position.symbol}`} />
           <StatusRow label="Entry / mark" value={`$${quote(position.entryPriceBaseUnits)} / $${quote(position.markPriceBaseUnits)}`} />
-          <StatusRow label="Unrealized PnL" value={`${position.pnlBaseUnits >= 0n ? '+' : ''}$${quote(position.pnlBaseUnits)}`} />
+          <StatusRow
+            label="Unrealized PnL"
+            tone={position.pnlBaseUnits > 0n
+              ? 'positive'
+              : position.pnlBaseUnits < 0n ? 'negative' : 'plain'}
+            value={`${position.pnlBaseUnits >= 0n ? '+' : ''}$${quote(position.pnlBaseUnits)}`}
+          />
           <StatusRow label="Liquidation" value={position.liquidationPriceBaseUnits === null ? '--' : `$${quote(position.liquidationPriceBaseUnits)}`} />
           <StatusRow label="Margin" value={position.marginMode} />
         </View>
@@ -229,6 +252,37 @@ function Balance({ snapshot }: { readonly snapshot: VelocityAccountSnapshot }) {
     <View style={styles.balance}>
       <StatusRow label="Account equity" value={`$${quote(snapshot.equityBaseUnits)}`} />
       <StatusRow label="Available to trade" value={`$${quote(snapshot.freeCollateralBaseUnits)}`} />
+    </View>
+  );
+}
+
+function TradeHistory({
+  history,
+  onRefresh,
+}: {
+  readonly history: VelocityHistoryState;
+  readonly onRefresh: () => void;
+}) {
+  if (history.status === 'loading' || history.status === 'idle') {
+    return <Empty message="Loading trade history…" />;
+  }
+  if (history.status === 'error' || history.data === null) {
+    return (
+      <View style={styles.errorRow}>
+        <Text accessibilityRole="alert" style={styles.error}>Trade history is unavailable.</Text>
+        <Pressable accessibilityRole="button" onPress={onRefresh} style={styles.retry}>
+          <Text style={styles.retryLabel}>Retry</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  if (history.data.trades.length === 0) return <Empty message="No executed trades." />;
+  const items = history.data.trades.slice(0, 20).map(velocityTradeActivityItem);
+  return (
+    <View style={styles.list}>
+      {items.map((item, index) => (
+        <ActivityRow item={item} key={item.id} last={index === items.length - 1} />
+      ))}
     </View>
   );
 }

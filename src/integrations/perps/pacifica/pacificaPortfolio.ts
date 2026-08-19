@@ -12,6 +12,7 @@ export type PacificaPosition = {
   readonly funding: string;
   readonly marginMode: 'isolated' | 'cross';
   readonly liquidationPrice: string | null;
+  readonly unrealizedPnl: string | null;
 };
 
 export type PacificaOpenOrder = {
@@ -99,6 +100,7 @@ function parsePositions(value: unknown): readonly PacificaPosition[] {
       funding: decimal(position.funding, 'funding'),
       marginMode: boolean(position.isolated, 'margin mode') ? 'isolated' : 'cross',
       liquidationPrice: nullableDecimal(position.liquidation_price, 'liquidation price'),
+      unrealizedPnl: nullableDecimal(position.unrealized_pnl ?? position.pnl, 'unrealized PnL'),
     };
   });
 }

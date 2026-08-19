@@ -8,11 +8,13 @@ export function StatusRow({
   value,
   selectable = false,
   singleLine = false,
+  tone = 'plain',
 }: {
   readonly label: string;
   readonly value: string;
   readonly selectable?: boolean;
   readonly singleLine?: boolean;
+  readonly tone?: 'negative' | 'plain' | 'positive';
 }) {
   return (
     <View
@@ -33,7 +35,11 @@ export function StatusRow({
         minimumFontScale={0.75}
         numberOfLines={singleLine ? 1 : selectable ? undefined : 2}
         selectable={selectable}
-        style={styles.value}
+        style={[
+          styles.value,
+          tone === 'positive' && styles.positive,
+          tone === 'negative' && styles.negative,
+        ]}
       >
         {value}
       </Text>
@@ -87,4 +93,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontVariant: ['tabular-nums'],
   },
+  positive: { color: colors.positive },
+  negative: { color: colors.negative },
 });

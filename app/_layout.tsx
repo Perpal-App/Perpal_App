@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import { Fragment } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
@@ -7,6 +8,7 @@ import {
 } from 'react-native-safe-area-context';
 
 import { readAppConfig } from '@/config/appConfig';
+import { AppToastHost } from '@/components/feedback/AppToastHost';
 import { ConfigErrorScreen } from '@/features/diagnostics/screens/ConfigErrorScreen';
 import { PrivyBoundary } from '@/integrations/privy/PrivyBoundary';
 import { WalletProvisioningProvider } from '@/integrations/privy/useWalletProvisioning';
@@ -39,7 +41,10 @@ export default function RootLayout() {
                 <PrivateFundingProvider>
                   <PrivateExitProvider>
                     <AppPreferencesProvider>
-                      <AuthNavigationGate />
+                      <Fragment>
+                        <AuthNavigationGate />
+                        <AppToastHost />
+                      </Fragment>
                     </AppPreferencesProvider>
                   </PrivateExitProvider>
                 </PrivateFundingProvider>
