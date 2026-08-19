@@ -2,7 +2,7 @@ diff --git a/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.b
 index 4708120..ecf8ad9 100644
 --- a/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.browser.js
 +++ b/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.browser.js
-@@ -51,16 +51,5 @@ exports.utils = {
+@@ -51,15 +51,5 @@ exports.utils = {
          },
      },
  };
@@ -24,7 +24,7 @@ diff --git a/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.j
 index 4708120..ecf8ad9 100644
 --- a/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.js
 +++ b/node_modules/@velocity-exchange/sdk/lib/browser/isomorphic/anchor.js
-@@ -51,16 +51,5 @@ exports.utils = {
+@@ -51,15 +51,5 @@ exports.utils = {
          },
      },
  };

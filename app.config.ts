@@ -88,11 +88,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: BACKGROUND,
     },
   },
-  androidNavigationBar: {
-    backgroundColor: BACKGROUND,
-    barStyle: 'light-content',
-    enforceContrast: false,
-  },
   updates: {
     url: 'https://u.expo.dev/0eadd12d-2151-4907-931e-774656309e72',
   },
@@ -103,6 +98,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-router',
     'expo-asset',
     'expo-image',
+    [
+      'expo-navigation-bar',
+      {
+        style: 'light',
+        enforceContrast: false,
+      },
+    ],
     'expo-secure-store',
     'expo-status-bar',
     [
