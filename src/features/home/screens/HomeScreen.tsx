@@ -24,6 +24,7 @@ import { NotificationsPanel } from '@/features/home/components/NotificationsPane
 import { useFearGreed } from '@/features/home/hooks/useFearGreed';
 import { useMarketBriefing } from '@/features/home/hooks/useMarketBriefing';
 import { usePacificaPortfolio } from '@/features/portfolio/hooks/usePacificaPortfolio';
+import { useVelocityAccount } from '@/features/portfolio/hooks/useVelocityAccount';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
@@ -73,6 +74,11 @@ export function HomeScreen() {
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     tradingSession.status === 'ready' ? tradingSession.address : null,
   );
+  const velocity = useVelocityAccount({
+    owner: tradingSession.status === 'ready' ? tradingSession.address : null,
+    programId: config.ok ? config.value.perps.velocityProgramId : '',
+    publicRpcUrl: config.ok ? config.value.api.publicRpcUrl : '',
+  });
   const tradingWalletPending = tradingSession.status === 'waiting-for-wallet'
     || tradingSession.status === 'restoring'
     || tradingSession.status === 'activating'
@@ -87,6 +93,8 @@ export function HomeScreen() {
   const portfolioPending = tradingWalletPending
     || (tradingSession.status === 'ready'
       && (portfolio.status === 'idle' || portfolio.status === 'loading'));
+  const velocityPending = tradingWalletPending
+    || (tradingSession.status === 'ready' && velocity.account.status === 'loading');
 
   // Indexed, not scanned. Every price message hands back a new snapshot array, so this
   // runs at socket tick rate — and a `find` per market made that a full pass over the
@@ -174,6 +182,8 @@ export function HomeScreen() {
           balancesPending={balancesPending}
           portfolio={portfolio.snapshot}
           portfolioPending={portfolioPending}
+          velocity={velocity.account.snapshot}
+          velocityPending={velocityPending}
         />
       </RiseInView>
 

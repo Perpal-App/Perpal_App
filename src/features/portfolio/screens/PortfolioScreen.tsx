@@ -9,6 +9,7 @@ import { readAppConfig } from '@/config/appConfig';
 import { useWalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PacificaPortfolioContent } from '@/features/portfolio/components/PacificaPortfolioContent';
 import { usePacificaPortfolio } from '@/features/portfolio/hooks/usePacificaPortfolio';
+import { useVelocityAccount } from '@/features/portfolio/hooks/useVelocityAccount';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { layout, spacing } from '@/theme/tokens';
@@ -23,6 +24,13 @@ export function PortfolioScreen() {
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     session.status === 'ready' ? session.address : null,
   );
+  const velocity = useVelocityAccount({
+    historyRpcUrl: config.ok ? config.value.api.rpcUrl : undefined,
+    historySigner: session.status === 'ready' ? session.signer : null,
+    owner: session.status === 'ready' ? session.address : null,
+    programId: config.ok ? config.value.perps.velocityProgramId : '',
+    publicRpcUrl: config.ok ? config.value.api.publicRpcUrl : '',
+  });
   const walletBalances = useWalletBalances({
     privateAddress: session.status === 'ready' ? session.address : null,
     publicAddress: publicWallet.embeddedWalletAddress,
@@ -79,9 +87,14 @@ export function PortfolioScreen() {
       balances={walletBalances.balances}
       balancesPending={walletBalances.status !== 'ready' && walletBalances.status !== 'error'}
       onBalancesChanged={walletBalances.refresh}
+      onVelocityRefresh={velocity.refresh}
       portfolioPending={portfolio.status !== 'ready' && portfolio.status !== 'error'}
       portfolioUnavailable={portfolio.status === 'error'}
       snapshot={portfolio.snapshot}
+      velocity={velocity.account.snapshot}
+      velocityHistory={velocity.history}
+      velocityPending={velocity.account.status === 'loading'}
+      velocityUnavailable={velocity.account.status === 'error' || velocity.account.status === 'stale'}
     />
   );
 }

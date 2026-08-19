@@ -14,6 +14,7 @@ import {
 } from '@/domain/money/amount';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import type { VelocityAccountSnapshot } from '@/integrations/perps/velocity/velocityAccount';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 /** Stands in for every figure while balances are hidden. */
@@ -42,11 +43,15 @@ export function AccountOverviewCard({
   balancesPending,
   portfolio,
   portfolioPending,
+  velocity,
+  velocityPending,
 }: {
   readonly balances: WalletBalances | null;
   readonly balancesPending: boolean;
   readonly portfolio: PacificaPortfolioSnapshot | null;
   readonly portfolioPending: boolean;
+  readonly velocity: VelocityAccountSnapshot | null;
+  readonly velocityPending: boolean;
 }) {
   // Session-scoped on purpose: this exists for the moment someone is standing behind you, not as a
   // setting. Persisting it belongs in AppPreferences, and would need to be a deliberate choice
@@ -54,11 +59,11 @@ export function AccountOverviewCard({
   const [hidden, setHidden] = useState(false);
 
   const publicBalance = walletFunds(balances?.publicWallet ?? null);
-  const privateBalance = privateFunds(balances, portfolio);
+  const privateBalance = privateFunds(balances, portfolio, velocity);
   const total = sum(publicBalance, privateBalance);
-  const pnl = unrealizedPnl(portfolio);
-  const pnlRate = unrealizedRate(portfolio, pnl);
-  const totalPending = balancesPending || portfolioPending;
+  const pnl = unrealizedPnl(portfolio, velocity);
+  const pnlRate = unrealizedRate(portfolio, velocity, pnl);
+  const totalPending = balancesPending || portfolioPending || velocityPending;
 
   return (
     <View style={styles.block}>
@@ -116,13 +121,15 @@ export function AccountOverviewCard({
         <Part
           hidden={hidden}
           label={walletLabel('Private funds', balances?.privateWallet ?? null)}
-          pending={balancesPending || portfolioPending}
+          pending={balancesPending || portfolioPending || velocityPending}
           value={money(privateBalance)}
         />
         <Part
           label="Active trades"
-          pending={portfolioPending}
-          value={portfolio === null ? null : String(portfolio.positions.length)}
+          pending={portfolioPending || velocityPending}
+          value={portfolio === null || velocity === null
+            ? null
+            : String(portfolio.positions.length + velocity.positions.length)}
         />
       </View>
     </View>
@@ -233,14 +240,18 @@ function walletFunds(
 function privateFunds(
   balances: WalletBalances | null,
   portfolio: PacificaPortfolioSnapshot | null,
+  velocity: VelocityAccountSnapshot | null,
 ): Amount | null {
-  if (balances === null || portfolio === null) return null;
+  if (balances === null || portfolio === null || velocity === null) return null;
 
   const wallet = walletFunds(balances.privateWallet);
   if (wallet === null) return null;
 
   try {
-    return addAmounts(wallet, parseAmount(portfolio.accountEquity, 6));
+    return addAmounts(
+      addAmounts(wallet, parseAmount(portfolio.accountEquity, 6)),
+      amountFromBaseUnits(velocity.equityBaseUnits, 6),
+    );
   } catch {
     return null;
   }
@@ -256,11 +267,15 @@ function walletLabel(
 
 function unrealizedPnl(
   portfolio: PacificaPortfolioSnapshot | null,
+  velocity: VelocityAccountSnapshot | null,
 ): Amount | null {
-  if (portfolio === null) return null;
+  if (portfolio === null || velocity === null) return null;
 
   try {
-    return subtractAmounts(parseAmount(portfolio.accountEquity, 6), parseAmount(portfolio.balance, 6));
+    return addAmounts(
+      subtractAmounts(parseAmount(portfolio.accountEquity, 6), parseAmount(portfolio.balance, 6)),
+      amountFromBaseUnits(velocity.unrealizedPnlBaseUnits, 6),
+    );
   } catch {
     return null;
   }
@@ -274,12 +289,19 @@ function unrealizedPnl(
  */
 function unrealizedRate(
   portfolio: PacificaPortfolioSnapshot | null,
+  velocity: VelocityAccountSnapshot | null,
   pnl: Amount | null,
 ): number | null {
-  if (portfolio === null || pnl === null) return null;
+  if (portfolio === null || velocity === null || pnl === null) return null;
 
   try {
-    const base = parseAmount(portfolio.balance, 6);
+    const base = addAmounts(
+      parseAmount(portfolio.balance, 6),
+      amountFromBaseUnits(
+        velocity.equityBaseUnits - velocity.unrealizedPnlBaseUnits,
+        6,
+      ),
+    );
     if (base.baseUnits === 0n) return null;
 
     return Number((pnl.baseUnits * 10_000n) / base.baseUnits);

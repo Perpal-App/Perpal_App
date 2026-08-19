@@ -37,6 +37,14 @@ export type VelocityAccountSnapshot = {
   readonly unrealizedPnlBaseUnits: bigint;
 };
 
+export const EMPTY_VELOCITY_ACCOUNT_SNAPSHOT: VelocityAccountSnapshot = {
+  equityBaseUnits: 0n,
+  freeCollateralBaseUnits: 0n,
+  orders: [],
+  positions: [],
+  unrealizedPnlBaseUnits: 0n,
+};
+
 export function readVelocityAccountSnapshot(client: VelocityClient): VelocityAccountSnapshot {
   const user = client.getUser(0);
   const positions = user.getActivePerpPositions()

@@ -27,6 +27,7 @@ import {
   fetchPacificaActivity,
   type PacificaActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
+import type { VelocityHistoryState } from '@/features/portfolio/hooks/useVelocityAccount';
 import {
   readInAppNotifications,
   subscribeInAppNotifications,
@@ -55,9 +56,13 @@ type RemoteState = {
 export function GlobalActivityTracker({
   account,
   apiOrigin,
+  onVelocityRefresh,
+  velocityHistory,
 }: {
   readonly account: string;
   readonly apiOrigin: string;
+  readonly onVelocityRefresh: () => void;
+  readonly velocityHistory: VelocityHistoryState;
 }) {
   const remote = usePacificaActivity(apiOrigin, account);
   const local = useSyncExternalStore(
@@ -69,8 +74,8 @@ export function GlobalActivityTracker({
   const [query, setQuery] = useState('');
 
   const items = useMemo(
-    () => mergeActivity(remote.state.data, local),
-    [local, remote.state.data],
+    () => mergeActivity(remote.state.data, velocityHistory.data, local),
+    [local, remote.state.data, velocityHistory.data],
   );
   const visible = useMemo(
     () => items.filter((item) => (
@@ -79,8 +84,11 @@ export function GlobalActivityTracker({
     [filter, items, query],
   );
 
-  const remoteUnavailable = remote.state.status === 'error' || remote.state.status === 'stale';
-  const loading = remote.state.status === 'loading' && items.length === 0;
+  const remoteUnavailable = remote.state.status === 'error'
+    || remote.state.status === 'stale'
+    || velocityHistory.status === 'error';
+  const loading = (remote.state.status === 'loading' || velocityHistory.status === 'loading')
+    && items.length === 0;
   const narrowed = filter !== 'all' || query.trim().length > 0;
 
   return (
@@ -91,7 +99,10 @@ export function GlobalActivityTracker({
           <PressableScale
             accessibilityLabel="Retry activity"
             accessibilityRole="button"
-            onPress={remote.refresh}
+            onPress={() => {
+              remote.refresh();
+              onVelocityRefresh();
+            }}
             style={styles.retry}
           >
             <Text style={styles.retryText}>Retry</Text>
@@ -111,8 +122,13 @@ export function GlobalActivityTracker({
 
       {remoteUnavailable ? (
         <Text accessibilityRole="alert" selectable style={styles.error}>
-          Trade history is temporarily unavailable. Confirmed private fund events on this device
-          remain visible.
+          Some venue history is temporarily unavailable. Confirmed events remain visible.
+        </Text>
+      ) : null}
+
+      {velocityHistory.data?.truncated ? (
+        <Text accessibilityRole="alert" selectable style={styles.error}>
+          Showing the latest 1,000 Velocity account transactions.
         </Text>
       ) : null}
 

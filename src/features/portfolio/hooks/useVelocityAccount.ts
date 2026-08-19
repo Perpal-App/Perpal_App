@@ -6,6 +6,7 @@ import type { VelocityClient } from '@velocity-exchange/sdk/lib/browser/velocity
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
+  EMPTY_VELOCITY_ACCOUNT_SNAPSHOT,
   readVelocityAccountSnapshot,
   type VelocityAccountSnapshot,
 } from '@/integrations/perps/velocity/velocityAccount';
@@ -28,7 +29,7 @@ export type VelocityHistoryState = {
 const DISPLAY_REFRESH_MS = 2_000;
 
 export function useVelocityAccount(input: {
-  readonly historyRpcUrl?: string;
+  readonly historyRpcUrl?: string | undefined;
   readonly historySigner?: GatewayRequestSigner | null;
   readonly owner: string | null;
   readonly programId: string;
@@ -40,6 +41,7 @@ export function useVelocityAccount(input: {
     status: 'loading',
   });
   const [history, setHistory] = useState<VelocityHistoryState>({ data: null, status: 'idle' });
+  const [refreshKey, setRefreshKey] = useState(0);
   const lastSnapshot = useRef<VelocityAccountSnapshot | null>(null);
 
   useFocusEffect(useCallback(() => {
@@ -83,7 +85,7 @@ export function useVelocityAccount(input: {
         const userExists = await connection.getAccountInfo(userPda, 'confirmed') !== null;
         if (!active) return;
         if (!userExists) {
-          setAccount({ snapshot: null, status: 'not-created' });
+          setAccount({ snapshot: EMPTY_VELOCITY_ACCOUNT_SNAPSHOT, status: 'not-created' });
           setHistory({ data: { trades: [], truncated: false }, status: 'ready' });
           return;
         }
@@ -145,10 +147,15 @@ export function useVelocityAccount(input: {
     input.owner,
     input.programId,
     input.publicRpcUrl,
+    refreshKey,
     input.revision,
   ]));
 
-  return { account, history };
+  return {
+    account,
+    history,
+    refresh: () => setRefreshKey((value) => value + 1),
+  };
 }
 
 function safeError(cause: unknown): { readonly message: string; readonly name: string } {

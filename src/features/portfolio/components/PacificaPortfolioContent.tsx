@@ -10,12 +10,19 @@ import type { WalletBalances } from '@/features/account/hooks/useWalletBalances'
 import { AccountOverviewCard } from '@/features/home/components/AccountOverviewCard';
 import { FundsSheet, type FundsMode } from '@/features/portfolio/components/FundsSheet';
 import { GlobalActivityTracker } from '@/features/portfolio/components/GlobalActivityTracker';
-import { OrderCard, PositionCard } from '@/features/portfolio/components/PortfolioCards';
+import {
+  OrderCard,
+  PositionCard,
+  VelocityOrderCard,
+  VelocityPositionCard,
+} from '@/features/portfolio/components/PortfolioCards';
+import type { VelocityHistoryState } from '@/features/portfolio/hooks/useVelocityAccount';
 import { cancelPacificaOrder } from '@/integrations/perps/pacifica/pacificaOrder';
 import type {
   PacificaOpenOrder,
   PacificaPortfolioSnapshot,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import type { VelocityAccountSnapshot } from '@/integrations/perps/velocity/velocityAccount';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { colors, layout, motion, spacing, typography } from '@/theme/tokens';
@@ -25,9 +32,14 @@ type Props = {
   readonly balances: WalletBalances | null;
   readonly balancesPending: boolean;
   readonly onBalancesChanged: () => void;
+  readonly onVelocityRefresh: () => void;
   readonly portfolioPending: boolean;
   readonly portfolioUnavailable: boolean;
   readonly snapshot: PacificaPortfolioSnapshot | null;
+  readonly velocity: VelocityAccountSnapshot | null;
+  readonly velocityHistory: VelocityHistoryState;
+  readonly velocityPending: boolean;
+  readonly velocityUnavailable: boolean;
 };
 
 /**
@@ -47,14 +59,21 @@ export function PacificaPortfolioContent({
   balances,
   balancesPending,
   onBalancesChanged,
+  onVelocityRefresh,
   portfolioPending,
   portfolioUnavailable,
   snapshot,
+  velocity,
+  velocityHistory,
+  velocityPending,
+  velocityUnavailable,
 }: Props) {
   const config = readAppConfig();
   const session = useTradingSession();
   const positions = snapshot?.positions ?? [];
   const orders = snapshot?.orders ?? [];
+  const velocityPositions = velocity?.positions ?? [];
+  const velocityOrders = velocity?.orders ?? [];
 
   const cancel = (order: PacificaOpenOrder) => Alert.alert(
     `Cancel ${order.symbol} order?`,
@@ -109,10 +128,12 @@ export function PacificaPortfolioContent({
           balancesPending={balancesPending}
           portfolio={snapshot}
           portfolioPending={portfolioPending}
+          velocity={velocity}
+          velocityPending={velocityPending}
         />
       </RiseInView>
 
-      {portfolioUnavailable ? (
+      {portfolioUnavailable || velocityUnavailable ? (
         <RiseInView layout={layoutMorph()}>
           <Text accessibilityRole="alert" selectable style={styles.alert}>
             Some active trades are temporarily unavailable. Your wallet balances remain visible.
@@ -129,11 +150,29 @@ export function PacificaPortfolioContent({
         </RiseInView>
       )}
 
+      {velocityPositions.length === 0 ? null : (
+        <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.section}>
+          <Text accessibilityRole="header" style={styles.heading}>Velocity positions</Text>
+          {velocityPositions.map((position) => (
+            <VelocityPositionCard key={position.marketIndex} position={position} />
+          ))}
+        </RiseInView>
+      )}
+
       {orders.length === 0 ? null : (
         <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.section}>
           <Text accessibilityRole="header" style={styles.heading}>Orders</Text>
           {orders.map((order) => (
             <OrderCard key={order.orderId} onCancel={() => cancel(order)} order={order} />
+          ))}
+        </RiseInView>
+      )}
+
+      {velocityOrders.length === 0 ? null : (
+        <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.section}>
+          <Text accessibilityRole="header" style={styles.heading}>Velocity orders</Text>
+          {velocityOrders.map((order) => (
+            <VelocityOrderCard key={order.orderId} order={order} />
           ))}
         </RiseInView>
       )}
@@ -149,6 +188,8 @@ export function PacificaPortfolioContent({
         <GlobalActivityTracker
           account={session.address ?? ''}
           apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
+          onVelocityRefresh={onVelocityRefresh}
+          velocityHistory={velocityHistory}
         />
       </RiseInView>
     </AppScreen>

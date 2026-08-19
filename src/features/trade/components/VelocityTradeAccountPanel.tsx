@@ -1,21 +1,16 @@
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Connection, PublicKey } from '@solana/web3.js';
-import { getUserAccountPublicKeySync } from '@velocity-exchange/sdk/lib/browser/addresses/pda';
-import type { VelocityClient } from '@velocity-exchange/sdk/lib/browser/velocityClient';
 
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import { StatusRow } from '@/components/ui/StatusRow';
 import type { AppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmountWithCommas } from '@/domain/money/amount';
+import { useVelocityAccount } from '@/features/portfolio/hooks/useVelocityAccount';
 import {
-  readVelocityAccountSnapshot,
   type VelocityAccountSnapshot,
   type VelocityOpenOrder,
   type VelocityPosition,
 } from '@/integrations/perps/velocity/velocityAccount';
-import { subscribedVelocityClient } from '@/integrations/perps/velocity/velocityClient';
 import {
   prepareVelocityClose,
   submitVelocityTradePreparation,
@@ -26,17 +21,12 @@ import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type AccountTab = 'positions' | 'orders' | 'balance';
-type AccountState = {
-  readonly snapshot: VelocityAccountSnapshot | null;
-  readonly status: 'loading' | 'ready' | 'stale' | 'error' | 'not-created';
-};
 
 const TABS: readonly UnderlineTabOption<AccountTab>[] = [
   { id: 'positions', label: 'Positions' },
   { id: 'orders', label: 'Open orders' },
   { id: 'balance', label: 'Balance' },
 ];
-const DISPLAY_REFRESH_MS = 2_000;
 
 export function VelocityTradeAccountPanel({ config }: { readonly config: AppConfig }) {
   const session = useTradingSession();
@@ -45,12 +35,12 @@ export function VelocityTradeAccountPanel({ config }: { readonly config: AppConf
   const [revision, setRevision] = useState(0);
   const [busyMarket, setBusyMarket] = useState<number | null>(null);
   const controller = useRef<AbortController | null>(null);
-  const account = useVelocityAccount(
+  const { account } = useVelocityAccount({
     owner,
-    config.api.publicRpcUrl,
-    config.perps.velocityProgramId,
+    programId: config.perps.velocityProgramId,
+    publicRpcUrl: config.api.publicRpcUrl,
     revision,
-  );
+  });
 
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -245,77 +235,6 @@ function Balance({ snapshot }: { readonly snapshot: VelocityAccountSnapshot }) {
 
 function Empty({ message }: { readonly message: string }) {
   return <Text accessibilityLiveRegion="polite" style={styles.status}>{message}</Text>;
-}
-
-function useVelocityAccount(
-  owner: string | null,
-  rpcUrl: string,
-  programId: string,
-  revision: number,
-): AccountState {
-  const [state, setState] = useState<AccountState>({ snapshot: null, status: 'loading' });
-  const lastSnapshot = useRef<VelocityAccountSnapshot | null>(null);
-
-  useFocusEffect(useCallback(() => {
-    if (owner === null || rpcUrl.length === 0 || programId.length === 0) return undefined;
-    let active = true;
-    let client: VelocityClient | null = null;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    setState({ snapshot: null, status: 'loading' });
-    lastSnapshot.current = null;
-
-    const publish = () => {
-      if (!active || client === null) return;
-      try {
-        const snapshot = readVelocityAccountSnapshot(client);
-        lastSnapshot.current = snapshot;
-        setState({ snapshot, status: 'ready' });
-      } catch (cause) {
-        console.warn('[Perpal Velocity account refresh failed]', safeError(cause));
-        setState({ snapshot: lastSnapshot.current, status: lastSnapshot.current === null ? 'error' : 'stale' });
-      }
-    };
-    const start = async () => {
-      try {
-        const connection = new Connection(rpcUrl, 'confirmed');
-        const ownerKey = new PublicKey(owner);
-        const velocityProgram = new PublicKey(programId);
-        const userPda = getUserAccountPublicKeySync(velocityProgram, ownerKey, 0);
-        const userExists = await connection.getAccountInfo(userPda, 'confirmed') !== null;
-        if (!active) return;
-        if (!userExists) {
-          setState({ snapshot: null, status: 'not-created' });
-          return;
-        }
-        client = await subscribedVelocityClient({
-          connection,
-          owner: ownerKey,
-          programId: velocityProgram,
-          userExists,
-        });
-        if (!active) {
-          await client.unsubscribe();
-          client = null;
-          return;
-        }
-        publish();
-        timer = setInterval(publish, DISPLAY_REFRESH_MS);
-      } catch (cause) {
-        if (active) {
-          console.warn('[Perpal Velocity account load failed]', safeError(cause));
-          setState({ snapshot: lastSnapshot.current, status: lastSnapshot.current === null ? 'error' : 'stale' });
-        }
-      }
-    };
-    void start();
-    return () => {
-      active = false;
-      if (timer !== undefined) clearInterval(timer);
-      if (client !== null) void client.unsubscribe();
-    };
-  }, [owner, programId, revision, rpcUrl]));
-
-  return state;
 }
 
 function base(value: bigint): string {

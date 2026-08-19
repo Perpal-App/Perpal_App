@@ -3,6 +3,10 @@ import type {
   PacificaBalanceActivity,
   PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
+import type {
+  VelocityTradeActivity,
+  VelocityTradeHistory,
+} from '@/integrations/perps/velocity/velocityActivity';
 import type { InAppNotification } from '@/storage/inAppNotifications';
 
 /**
@@ -25,16 +29,6 @@ export type ActivityItem = {
 };
 
 /**
- * Rows held in memory at once.
- *
- * The cap is applied after merging and before filtering, deliberately: it bounds what the venue and
- * the local log can hand the screen, and filtering a bounded list is cheap. Applying it after a
- * filter instead would mean the newest forty *matches*, which quietly turns a search into a
- * different query than the one the reader typed.
- */
-const MAX_VISIBLE_ITEMS = 40;
-
-/**
  * The venue's history and this device's own log, as one list newest first.
  *
  * Local events are included because a private funding or withdrawal step confirmed on the device is
@@ -44,17 +38,19 @@ const MAX_VISIBLE_ITEMS = 40;
  */
 export function mergeActivity(
   remote: PacificaActivity | null,
+  velocity: VelocityTradeHistory | null,
   local: readonly InAppNotification[],
 ): readonly ActivityItem[] {
   const items: ActivityItem[] = [
     ...(remote?.trades.map(tradeItem) ?? []),
+    ...(velocity?.trades.map(velocityTradeItem) ?? []),
     ...(remote?.balances.filter(isFundMovement).map(balanceItem) ?? []),
     ...local.filter((item) => item.kind === 'funding' || item.kind === 'withdrawal').map(localItem),
   ];
 
-  return items
-    .sort((left, right) => right.createdAtMs - left.createdAtMs || left.id.localeCompare(right.id))
-    .slice(0, MAX_VISIBLE_ITEMS);
+  return items.sort(
+    (left, right) => right.createdAtMs - left.createdAtMs || left.id.localeCompare(right.id),
+  );
 }
 
 /**
@@ -92,6 +88,20 @@ function tradeItem(trade: PacificaTradeActivity): ActivityItem {
     outcome: trade.cause === 'normal' ? 'success' : 'info',
     title,
     value: opening ? null : signedUsd(trade.pnl),
+  };
+}
+
+function velocityTradeItem(trade: VelocityTradeActivity): ActivityItem {
+  return {
+    createdAtMs: trade.createdAtMs,
+    detail: `${baseUnits(trade.amountBaseUnits, 9)} ${trade.symbol} at ${usd(
+      baseUnits(trade.priceBaseUnits, 6),
+    )} · ${capitalize(trade.role)} fee ${signedUsd(baseUnits(trade.feeBaseUnits, 6))}`,
+    id: trade.id,
+    kind: 'trade',
+    outcome: 'success',
+    title: `${capitalize(trade.effect)} ${trade.symbol} ${trade.side}`,
+    value: usd(baseUnits(trade.quoteBaseUnits, 6)),
   };
 }
 
@@ -161,4 +171,14 @@ function trimDecimal(value: string): string {
   const visibleFraction = fraction.replace(/0+$/u, '');
   const body = visibleFraction.length === 0 ? grouped : `${grouped}.${visibleFraction}`;
   return negative ? `-${body}` : body;
+}
+
+function baseUnits(value: bigint, decimals: number): string {
+  const negative = value < 0n;
+  const absolute = negative ? -value : value;
+  const scale = 10n ** BigInt(decimals);
+  const whole = absolute / scale;
+  const fraction = (absolute % scale).toString().padStart(decimals, '0').replace(/0+$/u, '');
+  const rendered = fraction.length === 0 ? whole.toString() : `${whole}.${fraction}`;
+  return negative ? `-${rendered}` : rendered;
 }

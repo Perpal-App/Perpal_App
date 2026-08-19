@@ -3,10 +3,15 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
+import { amountFromBaseUnits, formatAmountWithCommas } from '@/domain/money/amount';
 import type {
   PacificaOpenOrder,
   PacificaPosition,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import type {
+  VelocityOpenOrder,
+  VelocityPosition,
+} from '@/integrations/perps/velocity/velocityAccount';
 import { colors, fonts, gradients, radii, spacing, typography } from '@/theme/tokens';
 
 /**
@@ -103,6 +108,62 @@ export function OrderCard({
   );
 }
 
+export function VelocityPositionCard({
+  position,
+}: {
+  readonly position: VelocityPosition;
+}) {
+  const long = position.side === 'long';
+
+  return (
+    <Card>
+      <View style={styles.header}>
+        <Text accessibilityRole="header" numberOfLines={1} style={styles.symbol}>
+          {position.symbol}
+        </Text>
+        <Text numberOfLines={1} style={styles.mode}>{position.marginMode}</Text>
+        <Text style={long ? styles.long : styles.short}>{long ? 'Long' : 'Short'}</Text>
+      </View>
+      <View style={styles.figures}>
+        <Figure label="SIZE" value={`${base(position.baseAssetAmount)} ${position.symbol}`} />
+        <Figure label="ENTRY" value={usdBase(position.entryPriceBaseUnits)} />
+        <Figure label="MARK" value={usdBase(position.markPriceBaseUnits)} />
+        <Figure label="PNL" value={signedUsdBase(position.pnlBaseUnits)} />
+        <Figure
+          label="LIQ."
+          tone="negative"
+          value={position.liquidationPriceBaseUnits === null
+            ? UNAVAILABLE
+            : usdBase(position.liquidationPriceBaseUnits)}
+        />
+      </View>
+    </Card>
+  );
+}
+
+export function VelocityOrderCard({ order }: { readonly order: VelocityOpenOrder }) {
+  const long = order.side === 'long';
+
+  return (
+    <Card>
+      <View style={styles.header}>
+        <Text accessibilityRole="header" numberOfLines={1} style={styles.symbol}>
+          {order.symbol}
+        </Text>
+        <Text style={long ? styles.long : styles.short}>{long ? 'Buy' : 'Sell'}</Text>
+      </View>
+      <View style={styles.figures}>
+        <Figure label="TYPE" value={`${order.orderType}${order.reduceOnly ? ' · Reduce' : ''}`} />
+        <Figure label="REMAINING" value={`${base(order.remainingBaseUnits)} ${order.symbol}`} />
+        <Figure
+          label="PRICE"
+          value={order.priceBaseUnits === null ? 'Market' : usdBase(order.priceBaseUnits)}
+        />
+      </View>
+    </Card>
+  );
+}
+
 /** Printed where the venue has not published a usable value. Shared with the markets table. */
 const UNAVAILABLE = '--.--';
 
@@ -142,6 +203,21 @@ function usd(value: string): string {
   const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
   const body = fraction === undefined ? grouped : `${grouped}.${fraction}`;
   return negative ? `-$${body}` : `$${body}`;
+}
+
+function base(value: bigint): string {
+  const absolute = value < 0n ? -value : value;
+  return formatAmountWithCommas(amountFromBaseUnits(absolute, 9));
+}
+
+function usdBase(value: bigint): string {
+  return `$${formatAmountWithCommas(amountFromBaseUnits(value, 6))}`;
+}
+
+function signedUsdBase(value: bigint): string {
+  if (value === 0n) return '$0';
+  const absolute = value < 0n ? -value : value;
+  return `${value < 0n ? '-' : '+'}${usdBase(absolute)}`;
 }
 
 const styles = StyleSheet.create({
