@@ -1,12 +1,19 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { AppScreen } from '@/components/layout/AppScreen';
-import { ActionButton } from '@/components/ui/ActionButton';
+import {
+  AnchoredMenu,
+  anchorBelow,
+  type MenuAnchor,
+  type MenuOption,
+} from '@/components/ui/AnchoredMenu';
+import { ChevronDown } from '@/components/ui/ChevronDown';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { SearchField } from '@/components/ui/SearchField';
-import { readAppConfig } from '@/config/appConfig';
+import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
 import {
   MarketTableHeader,
   MarketTableRow,
@@ -22,6 +29,11 @@ import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { useMinimizeOnScroll } from '@/navigation/tabs/minimizeState';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 import { useAppPreferences } from '@/storage/AppPreferencesProvider';
+
+const PROVIDERS: readonly MenuOption<PerpsProviderId>[] = [
+  { id: 'pacifica', label: 'Pacifica' },
+  { id: 'velocity', label: 'Velocity' },
+];
 
 export function TradeScreen() {
   const router = useRouter();
@@ -102,21 +114,9 @@ export function TradeScreen() {
           <View>
             <View style={[styles.header, compact && styles.compactGutter]}>
               <Text accessibilityRole="header" style={styles.title}>Markets</Text>
-            </View>
-            <View accessibilityRole="radiogroup" style={[styles.provider, compact && styles.compactGutter]}>
-              <ActionButton
-                label="Pacifica"
-                onPress={() => setPerpsProvider('pacifica')}
-                selected={perpsProvider === 'pacifica'}
-                style={styles.providerButton}
-                tone={perpsProvider === 'pacifica' ? 'accent' : 'neutral'}
-              />
-              <ActionButton
-                label="Velocity"
-                onPress={() => setPerpsProvider('velocity')}
-                selected={perpsProvider === 'velocity'}
-                style={styles.providerButton}
-                tone={perpsProvider === 'velocity' ? 'accent' : 'neutral'}
+              <ProviderSelector
+                onSelect={setPerpsProvider}
+                selected={perpsProvider}
               />
             </View>
             <SearchField
@@ -155,6 +155,57 @@ export function TradeScreen() {
         windowSize={3}
       />
     </AppScreen>
+  );
+}
+
+function ProviderSelector({
+  onSelect,
+  selected,
+}: {
+  readonly onSelect: (provider: PerpsProviderId) => void;
+  readonly selected: PerpsProviderId;
+}) {
+  const anchorRef = useRef<View>(null);
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  const [open, setOpen] = useState(false);
+  const label = selected === 'pacifica' ? 'Pacifica' : 'Velocity';
+
+  const openMenu = () => {
+    anchorRef.current?.measureInWindow((x, y, width, height) => {
+      setAnchor(anchorBelow(x, y, width, height, width));
+      setOpen(true);
+    });
+  };
+
+  return (
+    <>
+      <View ref={anchorRef}>
+        <PressableScale
+          accessibilityHint="Selects the perpetuals provider"
+          accessibilityLabel={`Trading provider, ${label}`}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          onPress={openMenu}
+          pressedScale={0.97}
+          style={styles.providerTrigger}
+        >
+          <Text numberOfLines={1} style={styles.providerLabel}>{label}</Text>
+          <ChevronDown color={colors.textSecondary} />
+        </PressableScale>
+      </View>
+      <AnchoredMenu
+        anchor={anchor}
+        onClose={() => setOpen(false)}
+        onSelect={(provider) => {
+          onSelect(provider);
+          setOpen(false);
+        }}
+        options={PROVIDERS}
+        selected={selected}
+        title="Provider"
+        visible={open}
+      />
+    </>
   );
 }
 
@@ -258,13 +309,21 @@ const styles = StyleSheet.create({
   },
   title: { ...typography.title, color: colors.textPrimary },
 
-  provider: {
+  providerTrigger: {
+    minWidth: 144,
+    minHeight: layout.minTouchTarget,
     flexDirection: 'row',
-    gap: spacing.sm,
-    paddingHorizontal: layout.screenPadding,
-    paddingBottom: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderStrong,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+    backgroundColor: colors.surface,
   },
-  providerButton: { flex: 1 },
+  providerLabel: { ...typography.label, color: colors.textPrimary },
 
 
   notice: {

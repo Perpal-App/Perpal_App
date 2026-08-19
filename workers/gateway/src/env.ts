@@ -180,7 +180,7 @@ export function resolveMarketDataConfig(env: WorkerEnv): MarketDataConfig {
 }
 
 export function resolveFearGreedUrl(env: WorkerEnv): string {
-  return parseHttpsUrl(env.FEAR_GREED_URL, 'FEAR_GREED_URL');
+  return parseHttpsUrl(env.FEAR_GREED_URL, 'FEAR_GREED_URL', true);
 }
 
 export type PublicMarketBriefingConfig = {
@@ -213,7 +213,11 @@ export function resolvePublicMarketBriefingConfig(
   };
 }
 
-function parseHttpsUrl(raw: string | undefined, variable: string): string {
+function parseHttpsUrl(
+  raw: string | undefined,
+  variable: string,
+  allowQuery = false,
+): string {
   const value = raw?.trim() ?? '';
 
   try {
@@ -223,7 +227,7 @@ function parseHttpsUrl(raw: string | undefined, variable: string): string {
       parsed.protocol === 'https:' &&
       parsed.username.length === 0 &&
       parsed.password.length === 0 &&
-      parsed.search.length === 0 &&
+      (allowQuery || parsed.search.length === 0) &&
       parsed.hash.length === 0
     ) {
       return value;

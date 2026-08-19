@@ -32,12 +32,17 @@ export async function subscribedVelocityClient(input: {
     oracleInfos: subscriptions.oracleInfos,
     perpMarketIndexes: subscriptions.perpMarketIndexes,
     programID: input.programId,
-    skipLoadUsers: !input.userExists,
+    // Velocity 0.13 returns from its configured sub-account loop before the async
+    // user subscription finishes. Load the exact account explicitly below.
+    skipLoadUsers: true,
     spotMarketIndexes: [0],
-    ...(input.userExists ? { subAccountIds: [0] } : {}),
     wallet: readOnlyWallet(input.owner),
   });
   if (!await client.subscribe()) throw new Error('Velocity accounts could not be loaded.');
+  if (input.userExists && !await client.addUser(0, input.owner)) {
+    await client.unsubscribe();
+    throw new Error('Velocity user account could not be loaded.');
+  }
   return client;
 }
 

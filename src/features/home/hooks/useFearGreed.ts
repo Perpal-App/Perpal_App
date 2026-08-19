@@ -35,11 +35,14 @@ export function useFearGreed(url: string): FearGreedState {
       } catch (cause) {
         if (!active || controller.signal.aborted) return;
         if (__DEV__) {
-          console.error('[Perpal Fear and Greed failed]', {
+          console.warn('[Perpal Fear and Greed failed]', {
             error: cause instanceof Error ? cause.message : typeof cause,
           });
         }
-        setState((current) => ({ data: current.data, status: 'error' }));
+        setState((current) => ({
+          data: current.data,
+          status: current.data === null ? 'error' : 'ready',
+        }));
       } finally {
         if (active) timer = setTimeout(() => void refresh(), REFRESH_INTERVAL_MS);
       }
