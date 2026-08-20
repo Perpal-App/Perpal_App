@@ -92,7 +92,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     url: 'https://u.expo.dev/0eadd12d-2151-4907-931e-774656309e72',
   },
   runtimeVersion: {
-    policy: 'fingerprint',
+    policy: 'appVersion',
   },
   plugins: [
     'expo-router',
