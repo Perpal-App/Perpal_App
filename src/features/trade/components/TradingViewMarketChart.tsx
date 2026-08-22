@@ -250,8 +250,22 @@ export function TradingViewMarketChart({
           ) : (
             <View accessibilityLiveRegion="polite" style={styles.placeholder}>
               <Text style={styles.placeholderText}>
-                {status === 'loading' ? 'Loading market candles' : 'Price history unavailable'}
+                {failed ? 'Chart renderer needs a retry' :
+                  status === 'loading' ? 'Loading market candles' : 'Reconnecting market candles'}
               </Text>
+              {failed ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    shouldFit.current = true;
+                    setReady(false);
+                    setFailed(false);
+                  }}
+                  style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+                >
+                  <Text style={styles.retryText}>Retry chart</Text>
+                </Pressable>
+              ) : null}
             </View>
           )}
           {status === 'stale' ? <Text style={styles.stale}>History reconnecting</Text> : null}
@@ -400,6 +414,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.surface,
   },
+  retry: {
+    minHeight: layout.minTouchTarget,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.sm,
+  },
+  retryText: { ...typography.label, color: colors.textPrimary },
   placeholderText: { ...typography.bodyCompact, color: colors.textMuted },
   stale: {
     ...typography.caption,

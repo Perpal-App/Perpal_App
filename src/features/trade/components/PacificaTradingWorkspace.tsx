@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
+import { SkeletonText } from '@/components/feedback/Skeleton';
 import { FadeInView } from '@/components/motion/FadeInView';
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import type { AppConfig } from '@/config/appConfig';
@@ -15,7 +16,7 @@ import { TradingViewMarketChart } from '@/features/trade/components/TradingViewM
 import type { MarketHistoryStatus } from '@/features/trade/hooks/usePacificaMarketHistory';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
 import type { MarketCandle, MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, radii, spacing } from '@/theme/tokens';
 
 type WorkspaceView = 'trade' | 'chart';
 type MarketPanel = 'orderbook' | 'trades' | 'liquidations' | 'funding' | 'info';
@@ -73,9 +74,14 @@ export function PacificaTradingWorkspace(props: {
                   vault={props.config.perps.pacificaVault}
                 />
               ) : (
-                <View style={styles.waiting}>
-                  <Text accessibilityLiveRegion="polite" style={styles.waitingTitle}>Trade unavailable</Text>
-                  <Text style={styles.waitingText}>Waiting for a current Pacifica mark price.</Text>
+                <View
+                  accessibilityLabel="Refreshing Pacifica mark price"
+                  accessibilityRole="progressbar"
+                  style={styles.waiting}
+                >
+                  <SkeletonText role="heading" width={104} />
+                  <SkeletonText role="bodyCompact" width="100%" />
+                  <SkeletonText role="bodyCompact" width="82%" />
                 </View>
               )}
             </View>
@@ -161,8 +167,6 @@ const styles = StyleSheet.create({
   // them instead of on a second, narrower inset.
   bookPanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
   waiting: { minHeight: 180, justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
-  waitingTitle: { ...typography.heading, color: colors.textPrimary },
-  waitingText: { ...typography.bodyCompact, color: colors.textSecondary },
   chartVisible: { minWidth: 0 },
   chartHidden: { display: 'none' },
 });

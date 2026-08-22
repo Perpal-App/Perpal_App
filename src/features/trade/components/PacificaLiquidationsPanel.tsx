@@ -40,7 +40,7 @@ export function PacificaLiquidationsPanel({
         <Text style={styles.title}>Liquidations</Text>
         <Text accessibilityLiveRegion="polite" style={styles.muted}>
           {market.status === 'live' ? 'Live Pacifica executions' :
-            market.status === 'error' ? 'Liquidation feed unavailable' : 'Connecting to Pacifica'}
+            market.status === 'error' ? 'Retrying Pacifica liquidations' : 'Connecting to Pacifica'}
         </Text>
       </View>
       <View accessibilityLabel="Liquidation cause" style={styles.filters}>

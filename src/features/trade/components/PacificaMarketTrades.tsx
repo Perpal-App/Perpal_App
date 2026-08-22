@@ -41,7 +41,7 @@ export function PacificaTradesPanel({
     <View style={styles.panel}>
       <Text accessibilityLiveRegion="polite" style={styles.status}>
         {market.status === 'live' ? 'Live Pacifica executions' :
-          market.status === 'error' ? 'Market trades unavailable' : 'Connecting to Pacifica'}
+          market.status === 'error' ? 'Retrying Pacifica executions' : 'Connecting to Pacifica'}
       </Text>
       <MarketTrades baseAsset={baseAsset} trades={market.trades} />
     </View>

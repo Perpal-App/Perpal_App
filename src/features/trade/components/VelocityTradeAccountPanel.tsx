@@ -154,7 +154,7 @@ export function VelocityTradeAccountPanel({
         <Text accessibilityLiveRegion="polite" style={styles.status}>No Velocity account yet.</Text>
       ) : account.snapshot === null ? (
         <View style={styles.errorRow}>
-          <Text accessibilityRole="alert" style={styles.error}>Your Velocity trades are unavailable.</Text>
+          <Text accessibilityRole="alert" style={styles.error}>Velocity account refresh failed.</Text>
           <Pressable accessibilityRole="button" onPress={onRefresh} style={styles.retry}>
             <Text style={styles.retryLabel}>Retry</Text>
           </Pressable>
@@ -269,7 +269,7 @@ function TradeHistory({
   if (history.status === 'error' || history.data === null) {
     return (
       <View style={styles.errorRow}>
-        <Text accessibilityRole="alert" style={styles.error}>Trade history is unavailable.</Text>
+        <Text accessibilityRole="alert" style={styles.error}>Trade history refresh failed.</Text>
         <Pressable accessibilityRole="button" onPress={onRefresh} style={styles.retry}>
           <Text style={styles.retryLabel}>Retry</Text>
         </Pressable>

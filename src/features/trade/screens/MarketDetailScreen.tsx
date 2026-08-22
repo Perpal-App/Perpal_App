@@ -83,8 +83,8 @@ function PacificaMarketDetailScreen({ venueRef }: { readonly venueRef: string })
           action={{ label: 'Back to markets', onPress: () => router.replace('/(tabs)/trade') }}
           message={config.ok
             ? 'This Pacifica market is not present in the current public catalog.'
-            : 'Market configuration is unavailable in this build.'}
-          title="Market unavailable"
+            : 'Market configuration is missing from this build.'}
+          title="Market not found"
         />
       </AppScreen>
     );
@@ -97,6 +97,7 @@ function PacificaMarketDetailScreen({ venueRef }: { readonly venueRef: string })
   // No snapshot yet means the request is still out, which is what shimmers. A
   // snapshot that omits a value shows the placeholder instead.
   const pending = snapshot === null;
+  const pricePending = snapshot === null || snapshot.priceStale;
 
   return (
     <AppScreen contentContainerStyle={[styles.content, compact && styles.compactGutter]}>
@@ -127,7 +128,7 @@ function PacificaMarketDetailScreen({ venueRef }: { readonly venueRef: string })
           </View>
         </View>
         <View style={styles.priceSummary}>
-          {pending ? (
+          {pricePending ? (
             <>
               <SkeletonText align="right" role="heading" width={84} />
               <SkeletonText align="right" role="caption" width={52} />

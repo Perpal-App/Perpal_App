@@ -228,7 +228,7 @@ function connectionLabel(
   feed: string,
 ): string {
   if (status === 'live') return `Live Velocity ${feed}`;
-  if (status === 'error') return `Velocity ${feed} unavailable`;
+  if (status === 'error') return `Retrying Velocity ${feed}`;
   if (status === 'reconnecting') return `Reconnecting to Velocity ${feed}`;
   return `Connecting to Velocity ${feed}`;
 }

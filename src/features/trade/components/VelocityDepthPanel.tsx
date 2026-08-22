@@ -130,7 +130,7 @@ function formatPriceStep(tickSize: string, aggregation: VelocityBookAggregation)
 
 function statusLabel(status: VelocityPublicMarketState['status']): string {
   if (status === 'reconnecting') return 'Reconnecting · showing the last book';
-  if (status === 'error') return 'Velocity depth unavailable';
+  if (status === 'error') return 'Retrying Velocity depth';
   return 'Loading Velocity depth';
 }
 

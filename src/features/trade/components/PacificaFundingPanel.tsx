@@ -41,7 +41,7 @@ export function PacificaFundingPanel({
           <Text style={styles.title}>Funding rate</Text>
           <Text accessibilityLiveRegion="polite" style={styles.muted}>
             {history.status === 'ready' ? 'Hourly Pacifica history' :
-              history.status === 'error' ? 'Funding history unavailable' : 'Loading history'}
+              history.status === 'error' ? 'Retrying funding history' : 'Loading history'}
           </Text>
         </View>
         <View accessibilityLabel="Funding history range" style={styles.filters}>

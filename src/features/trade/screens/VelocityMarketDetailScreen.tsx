@@ -47,14 +47,15 @@ export function VelocityMarketDetailScreen({ venueRef }: { readonly venueRef: st
           action={{ label: 'Back to markets', onPress: () => router.replace('/(tabs)/trade') }}
           message={config.ok
             ? 'This market is not present in Velocity’s current on-chain catalog.'
-            : 'Market configuration is unavailable in this build.'}
-          title="Market unavailable"
+            : 'Market configuration is missing from this build.'}
+          title="Market not found"
         />
       </AppScreen>
     );
   }
 
   const pending = snapshot === null;
+  const pricePending = snapshot === null || snapshot.priceStale;
   const price = snapshot !== null && !snapshot.priceStale ? snapshot.price : null;
 
   return (
@@ -72,7 +73,7 @@ export function VelocityMarketDetailScreen({ venueRef }: { readonly venueRef: st
           </View>
         </View>
         <View style={styles.priceSummary}>
-          {pending ? (
+          {pricePending ? (
             <>
               <SkeletonText align="right" role="heading" width={84} />
               <SkeletonText align="right" role="caption" width={52} />
@@ -82,7 +83,7 @@ export function VelocityMarketDetailScreen({ venueRef }: { readonly venueRef: st
               <Text numberOfLines={1} selectable style={styles.price}>
                 {price === null ? UNAVAILABLE : `$${formatAmountWithCommas(price)}`}
               </Text>
-              <Text numberOfLines={1} style={[styles.change, styles.absent]}>{UNAVAILABLE}</Text>
+              <Text numberOfLines={1} style={[styles.change, styles.live]}>Live oracle</Text>
             </>
           )}
         </View>
@@ -258,5 +259,6 @@ const styles = StyleSheet.create({
   figureLabel: { ...typography.eyebrow, letterSpacing: 0.5, color: colors.textMuted },
   figureValue: { ...typography.caption, fontFamily: fonts.semiBold, color: colors.textPrimary },
   absent: { color: colors.textMuted },
+  live: { color: colors.positive },
   pressed: { opacity: 0.72 },
 });

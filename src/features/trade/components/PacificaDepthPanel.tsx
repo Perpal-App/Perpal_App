@@ -164,7 +164,7 @@ function formatPriceStep(tickSize: string, aggregation: PacificaBookAggregation)
 
 function statusLabel(status: PacificaPublicMarketStatus): string {
   if (status === 'reconnecting') return 'Reconnecting · showing the last book';
-  if (status === 'error') return 'Pacifica depth unavailable';
+  if (status === 'error') return 'Retrying Pacifica depth';
   return 'Loading Pacifica depth';
 }
 

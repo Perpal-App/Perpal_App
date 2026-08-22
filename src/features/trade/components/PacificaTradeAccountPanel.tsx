@@ -90,7 +90,7 @@ export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: s
         <Text accessibilityLiveRegion="polite" style={styles.status}>Loading trading account…</Text>
       ) : portfolio === null ? (
         <View style={styles.errorRow}>
-          <Text accessibilityRole="alert" selectable style={styles.error}>Trading account data is unavailable.</Text>
+          <Text accessibilityRole="alert" selectable style={styles.error}>Trading account refresh failed.</Text>
           <Pressable accessibilityRole="button" onPress={accountData.refresh} style={styles.retry}>
             <Text style={styles.retryLabel}>Retry</Text>
           </Pressable>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
+import { SkeletonText } from '@/components/feedback/Skeleton';
 import { FadeInView } from '@/components/motion/FadeInView';
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import type { AppConfig } from '@/config/appConfig';
@@ -23,7 +24,7 @@ import type {
 } from '@/integrations/perps/velocity/velocityMarketData';
 import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
 import type { VelocityBookAggregation } from '@/integrations/perps/velocity/velocityPublicMarket';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, radii, spacing } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type WorkspaceView = 'trade' | 'chart';
@@ -95,11 +96,14 @@ export function VelocityTradingWorkspace({
                   snapshot={snapshot}
                 />
               ) : (
-                <View style={styles.waiting}>
-                  <Text accessibilityLiveRegion="polite" style={styles.waitingTitle}>
-                    Trade unavailable
-                  </Text>
-                  <Text style={styles.waitingText}>Waiting for a current Velocity oracle price.</Text>
+                <View
+                  accessibilityLabel="Refreshing Velocity oracle price"
+                  accessibilityRole="progressbar"
+                  style={styles.waiting}
+                >
+                  <SkeletonText role="heading" width={104} />
+                  <SkeletonText role="bodyCompact" width="100%" />
+                  <SkeletonText role="bodyCompact" width="82%" />
                 </View>
               )}
             </View>
@@ -195,8 +199,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   waiting: { minHeight: 180, justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
-  waitingTitle: { ...typography.heading, color: colors.textPrimary },
-  waitingText: { ...typography.bodyCompact, color: colors.textSecondary },
   chartVisible: { minWidth: 0 },
   chartHidden: { display: 'none' },
 });

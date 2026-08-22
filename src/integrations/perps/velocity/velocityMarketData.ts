@@ -3,6 +3,11 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { initialize } from '@velocity-exchange/sdk/lib/browser/config';
 import { MainnetPerpMarkets } from '@velocity-exchange/sdk/lib/browser/constants/perpMarkets';
 import { VelocityCore } from '@velocity-exchange/sdk/lib/browser/core/VelocityCore';
+import type {
+  PerpMarketAccount,
+  PythLazerOracle,
+  StateAccount,
+} from '@velocity-exchange/sdk/lib/browser/types';
 
 import { amountFromBaseUnits, formatAmount, type Amount } from '@/domain/money/amount';
 
@@ -99,36 +104,6 @@ type AccountCoder = ReturnType<typeof VelocityCore.coder>;
 type AccountInfo = Awaited<
   ReturnType<Connection['getMultipleAccountsInfoAndContext']>
 >['value'][number];
-type IntegerValue = { readonly toString: () => string };
-type RawStateAccount = {
-  readonly oracle_guard_rails: {
-    readonly validity: { readonly slots_before_stale_for_amm: IntegerValue };
-  };
-};
-type RawPerpMarketAccount = {
-  readonly base_asset_amount_long: IntegerValue;
-  readonly base_asset_amount_short: IntegerValue;
-  readonly last_funding_rate: IntegerValue;
-  readonly last_funding_rate_ts: IntegerValue;
-  readonly margin_ratio_initial: number;
-  readonly margin_ratio_maintenance: number;
-  readonly market_index: number;
-  readonly market_stats: {
-    readonly funding_period: IntegerValue;
-    readonly last_24h_avg_funding_rate: IntegerValue;
-    readonly min_order_size: IntegerValue;
-    readonly volume_24h: IntegerValue;
-  };
-  readonly oracle: PublicKey;
-  readonly order_step_size: IntegerValue;
-  readonly order_tick_size: IntegerValue;
-};
-type RawPythLazerOracle = {
-  readonly exponent: number;
-  readonly posted_slot: IntegerValue;
-  readonly price: IntegerValue;
-};
-
 function decodeFeed(
   currentSlot: number,
   infos: readonly AccountInfo[],
@@ -137,9 +112,9 @@ function decodeFeed(
 ): VelocityMarketFeed {
   const stateInfo = infos[0];
   if (stateInfo == null) throw new Error('Velocity state account is unavailable.');
-  const state = coder.accounts.decode<RawStateAccount>('State', Buffer.from(stateInfo.data));
+  const state = coder.accounts.decode<StateAccount>('State', Buffer.from(stateInfo.data));
   const staleAfterSlots = BigInt(
-    state.oracle_guard_rails.validity.slots_before_stale_for_amm.toString(),
+    state.oracleGuardRails.validity.slotsBeforeStaleForAmm.toString(),
   );
   const marketOffset = 1;
   const oracleOffset = marketOffset + MainnetPerpMarkets.length;
@@ -153,16 +128,16 @@ function decodeFeed(
     const oracleInfo = infos[oracleOffset + index];
     if (config === undefined || marketInfo == null || oracleInfo == null) continue;
 
-    const account = coder.accounts.decode<RawPerpMarketAccount>(
+    const account = coder.accounts.decode<PerpMarketAccount>(
       'PerpMarket',
       Buffer.from(marketInfo.data),
     );
-    if (account.market_index !== config.marketIndex || !account.oracle.equals(config.oracle)) {
+    if (account.marketIndex !== config.marketIndex || !account.oracle.equals(config.oracle)) {
       throw new Error(`Velocity market ${config.marketIndex} does not match the installed SDK.`);
     }
-    if (account.margin_ratio_initial <= 0) continue;
+    if (account.marginRatioInitial <= 0) continue;
 
-    const oracle = coder.accounts.decode<RawPythLazerOracle>(
+    const oracle = coder.accounts.decode<PythLazerOracle>(
       'PythLazerOracle',
       Buffer.from(oracleInfo.data),
     );
@@ -173,15 +148,15 @@ function decodeFeed(
     if (priceBaseUnits <= 0n) continue;
 
     const baseOpenInterest = max(
-      absolute(BigInt(account.base_asset_amount_long.toString())),
-      absolute(BigInt(account.base_asset_amount_short.toString())),
+      absolute(BigInt(account.baseAssetAmountLong.toString())),
+      absolute(BigInt(account.baseAssetAmountShort.toString())),
     );
-    const lastFundingRate = BigInt(account.last_funding_rate.toString());
+    const lastFundingRate = BigInt(account.lastFundingRate.toString());
     const averageFundingRate = BigInt(
-      account.market_stats.last_24h_avg_funding_rate.toString(),
+      account.marketStats.last24HAvgFundingRate.toString(),
     );
-    const lastFundingAtSeconds = BigInt(account.last_funding_rate_ts.toString());
-    const fundingPeriodSeconds = BigInt(account.market_stats.funding_period.toString());
+    const lastFundingAtSeconds = BigInt(account.lastFundingRateTs.toString());
+    const fundingPeriodSeconds = BigInt(account.marketStats.fundingPeriod.toString());
     const lastFundingAtMs = safeUnixMilliseconds(lastFundingAtSeconds);
     const nextFundingAtMs = safeUnixMilliseconds(
       lastFundingAtSeconds + fundingPeriodSeconds,
@@ -192,19 +167,19 @@ function decodeFeed(
       displayName: config.fullName ?? config.baseAssetSymbol,
       iconUrl: `${assetOrigin}/imgs/tokens/${encodeURIComponent(config.baseAssetSymbol)}.svg`,
       lotSize: formatAmount(amountFromBaseUnits(
-        BigInt(account.order_step_size.toString()),
+        BigInt(account.orderStepSize.toString()),
         9,
       )),
-      maintenanceMarginBps: account.margin_ratio_maintenance,
+      maintenanceMarginBps: account.marginRatioMaintenance,
       marketIndex: config.marketIndex,
       marketName: `${config.baseAssetSymbol}-PERP`,
-      maxLeverage: Math.max(1, Math.floor(MARGIN_PRECISION / account.margin_ratio_initial)),
+      maxLeverage: Math.max(1, Math.floor(MARGIN_PRECISION / account.marginRatioInitial)),
       minOrderSize: formatAmount(amountFromBaseUnits(
-        BigInt(account.market_stats.min_order_size.toString()),
+        BigInt(account.marketStats.minOrderSize.toString()),
         9,
       )),
       tickSize: formatAmount(amountFromBaseUnits(
-        BigInt(account.order_tick_size.toString()),
+        BigInt(account.orderTickSize.toString()),
         PRICE_DECIMALS,
       )),
       venueRef,
@@ -231,13 +206,13 @@ function decodeFeed(
       price: amountFromBaseUnits(priceBaseUnits, PRICE_DECIMALS),
       priceStale: isVelocityOracleStale(
         currentSlot,
-        BigInt(oracle.posted_slot.toString()),
+        BigInt(oracle.postedSlot.toString()),
         staleAfterSlots,
       ),
       publishedAtMs,
       venueRef,
       volume24h: amountFromBaseUnits(
-        BigInt(account.market_stats.volume_24h.toString()),
+        BigInt(account.marketStats.volume24H.toString()),
         QUOTE_DECIMALS,
       ),
     });

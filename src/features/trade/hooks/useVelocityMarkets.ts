@@ -14,12 +14,14 @@ type State = {
 };
 
 const EMPTY: State = { markets: [], snapshots: [], status: 'idle' };
+const IDLE_GRACE_MS = 20_000;
 const listeners = new Set<() => void>();
 let state = EMPTY;
 let activeKey = '';
 let holders = 0;
 let stop: (() => Promise<void>) | null = null;
-let starting = false;
+let expiry: ReturnType<typeof setTimeout> | undefined;
+const starting = new Set<string>();
 
 function publish(next: Partial<State>): void {
   state = { ...state, ...next };
@@ -39,29 +41,37 @@ function retain(
     state = EMPTY;
     publish(EMPTY);
   }
+  if (expiry !== undefined) {
+    clearTimeout(expiry);
+    expiry = undefined;
+  }
   holders += 1;
 
-  if (!starting && stop === null && rpcUrl.length > 0) {
-    starting = true;
+  if (!starting.has(key) && stop === null && rpcUrl.length > 0) {
+    starting.add(key);
     publish({ status: 'loading' });
     void openVelocityMarketFeed({
       assetOrigin,
       onError: (cause) => {
+        if (activeKey !== key) return;
         publish({ status: 'error' });
         logOnce(cause);
       },
-      onUpdate: (feed) => publish({ ...feed, status: 'ready' }),
+      onUpdate: (feed) => {
+        if (activeKey === key) publish({ ...feed, status: 'ready' });
+      },
       programId,
       rpcUrl,
     }).then((release) => {
-      starting = false;
+      starting.delete(key);
       if (holders === 0 || activeKey !== key) {
         void release();
         return;
       }
       stop = release;
     }).catch((cause) => {
-      starting = false;
+      starting.delete(key);
+      if (activeKey !== key) return;
       publish({ status: 'error' });
       logOnce(cause);
     });
@@ -72,10 +82,14 @@ function retain(
     if (released) return;
     released = true;
     holders -= 1;
-    if (holders !== 0) return;
-    const release = stop;
-    stop = null;
-    if (release !== null) void release();
+    if (holders > 0) return;
+    expiry = setTimeout(() => {
+      expiry = undefined;
+      if (holders > 0) return;
+      const release = stop;
+      stop = null;
+      if (release !== null) void release();
+    }, IDLE_GRACE_MS);
   };
 }
 

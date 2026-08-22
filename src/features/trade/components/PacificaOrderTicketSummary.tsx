@@ -30,7 +30,7 @@ export function PacificaBalanceState(props: {
     </View>
   ) : (
     <View style={styles.loading}>
-      <Text accessibilityRole="alert" style={styles.error}>Pacifica balance is unavailable.</Text>
+      <Text accessibilityRole="alert" style={styles.error}>Pacifica balance refresh failed.</Text>
       <ActionButton label="Retry balance" onPress={props.onRetry} tone="neutral" />
     </View>
   );
