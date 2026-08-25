@@ -57,6 +57,12 @@ export async function writePrivateExitRecord(
   );
 }
 
+export async function deletePrivateExitRecord(
+  sourceWalletAddress: string,
+): Promise<void> {
+  await SecureStore.deleteItemAsync(await key(sourceWalletAddress));
+}
+
 function parseRecord(value: string): PrivateExitRecord | null {
   try {
     const record = JSON.parse(value) as Record<string, unknown>;

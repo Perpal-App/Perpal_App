@@ -56,6 +56,7 @@ export type PrivateFundingLegState = {
 };
 
 export async function runPrivateFundingLeg(input: {
+  readonly beforeDeposit?: () => Promise<void>;
   readonly client: IUmbraClient;
   readonly config: AppConfig;
   readonly deferRelayPolling?: boolean;
@@ -139,6 +140,7 @@ export async function runPrivateFundingLeg(input: {
     if (recoveredMatches[0] !== undefined) {
       await save({}, 'scanning');
     } else {
+      await input.beforeDeposit?.();
       logFundingLeg('deposit_prepare_started');
       const prover = createNativeUmbraProver(
         input.config.privacy.umbraZkAssetBaseUrl,

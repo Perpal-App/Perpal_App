@@ -196,17 +196,29 @@ export function PrivateWithdrawPanel({
       ) : null}
 
       {pending ? (
-        <ActionButton
-          disabled={privateExit.isRunning}
-          label={privateExit.isRunning
-            ? 'Withdrawal in progress'
-            : privateExit.error === null
-              ? 'Resume withdrawal'
-              : 'Retry withdrawal'}
-          loading={privateExit.isRunning}
-          onPress={() => void privateExit.resume()}
-          tone="neutral"
-        />
+        <View style={styles.buttons}>
+          <ActionButton
+            disabled={privateExit.isRunning}
+            label={privateExit.isRunning
+              ? 'Withdrawal in progress'
+              : privateExit.error === null
+                ? 'Resume withdrawal'
+                : 'Retry withdrawal'}
+            loading={privateExit.isRunning}
+            onPress={() => void privateExit.resume()}
+            style={styles.button}
+            tone="neutral"
+          />
+          {privateExit.canReset ? (
+            <ActionButton
+              disabled={privateExit.isRunning}
+              label="Change amount"
+              onPress={() => void privateExit.reset()}
+              style={styles.button}
+              tone="neutral"
+            />
+          ) : null}
+        </View>
       ) : (
         <ActionButton
           disabled={asset === null || empty || privateExit.mainWalletAddress === null}

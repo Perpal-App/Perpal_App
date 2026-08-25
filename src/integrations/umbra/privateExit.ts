@@ -1,9 +1,14 @@
 import * as Crypto from 'expo-crypto';
+import { NATIVE_MINT } from '@solana/spl-token';
 import { getUmbraRelayer } from '@umbra-privacy/sdk/relayer';
 
 import type { AppConfig } from '@/config/appConfig';
+import { amountFromBaseUnits, formatAmount } from '@/domain/money/amount';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
-import { PrivateFundingError } from '@/integrations/umbra/privateFundingErrors';
+import {
+  classifyPrivateFundingFailure,
+  PrivateFundingError,
+} from '@/integrations/umbra/privateFundingErrors';
 import {
   assertRelayerSupportsMint,
   createPrivateFundingClient,
@@ -14,12 +19,20 @@ import {
   type PrivateFundingLegState,
 } from '@/integrations/umbra/privateFundingLeg';
 import { ensurePrivateFundingRegistration } from '@/integrations/umbra/privateFundingRegistration';
+import { preparePrivateFundingPreflight } from '@/integrations/umbra/privateFundingPreflight';
 import { createUmbraLocalGatewayDependencies } from '@/integrations/umbra/umbraGateway';
 import {
+  deletePrivateExitRecord,
   readPrivateExitRecord,
   writePrivateExitRecord,
   type PrivateExitRecord,
 } from '@/integrations/umbra/privateExitStorage';
+
+const RESETTABLE_UNSUBMITTED_ERRORS = new Set([
+  'insufficient_collateral',
+  'insufficient_sol',
+  'rpc_-32002',
+]);
 
 type Input = {
   readonly amountBaseUnits: bigint;
@@ -91,6 +104,28 @@ export async function resumePrivateExit(
   );
 }
 
+export function canResetPrivateExit(record: PrivateExitRecord): boolean {
+  return record.phase !== 'complete' &&
+    record.errorCode !== null &&
+    RESETTABLE_UNSUBMITTED_ERRORS.has(record.errorCode) &&
+    [
+      record.populateSignature,
+      record.depositSignature,
+      record.relayRequestId,
+      record.claimSignature,
+    ].every((value) => value === null);
+}
+
+export async function resetPrivateExit(record: PrivateExitRecord): Promise<void> {
+  if (!canResetPrivateExit(record)) {
+    throw new PrivateFundingError(
+      'This withdrawal may have been submitted and must be resumed instead.',
+      'operation_pending',
+    );
+  }
+  await deletePrivateExitRecord(record.sourceWalletAddress);
+}
+
 async function runExit(
   initial: PrivateExitRecord,
   input: Input,
@@ -128,6 +163,7 @@ async function runExit(
     const relayer = getUmbraRelayer({ apiEndpoint: input.config.privacy.umbraRelayerUrl });
     await assertRelayerSupportsMint(relayer, record.mint);
     await runPrivateFundingLeg({
+      beforeDeposit: () => assertPrivateExitPreflight(record, input),
       client,
       config: input.config,
       dependencies,
@@ -138,9 +174,46 @@ async function runExit(
     await save({ ...record, phase: 'complete', errorCode: null, updatedAtMs: Date.now() });
     return record;
   } catch (cause) {
-    const code = cause instanceof PrivateFundingError ? cause.code : 'withdraw_failed';
+    const code = classifyPrivateFundingFailure(cause);
     await save({ ...record, errorCode: code, updatedAtMs: Date.now() });
-    throw cause;
+    throw cause instanceof PrivateFundingError
+      ? cause
+      : new PrivateFundingError(
+        'Private withdrawal did not complete. Progress is saved for a safe retry.',
+        code,
+      );
+  }
+}
+
+async function assertPrivateExitPreflight(
+  record: PrivateExitRecord,
+  input: Input,
+): Promise<void> {
+  const native = record.mint === NATIVE_MINT.toBase58();
+  const preflight = await preparePrivateFundingPreflight({
+    amountBaseUnits: native ? 0n : BigInt(record.amountBaseUnits),
+    collateralLegPending: !native,
+    feeLegPending: native,
+    feeReserveLamports: native ? BigInt(record.amountBaseUnits) : 0n,
+    mint: record.mint,
+    rpcUrl: input.config.api.rpcUrl,
+    signer: input.gatewaySigner,
+    walletAddress: input.sourceWalletAddress,
+  });
+
+  if (preflight.missingCollateralBaseUnits > 0n) {
+    throw new PrivateFundingError(
+      `Private wallet T does not hold enough ${record.symbol} for this withdrawal.`,
+      'insufficient_collateral',
+    );
+  }
+  if (preflight.missingSolLamports > 0n) {
+    const available = formatAmount(amountFromBaseUnits(preflight.availableSolLamports, 9));
+    const required = formatAmount(amountFromBaseUnits(preflight.requiredSolLamports, 9));
+    throw new PrivateFundingError(
+      `Private wallet T has ${available} SOL; this withdrawal needs ${required} SOL including temporary rent and network fees.`,
+      'insufficient_sol',
+    );
   }
 }
 

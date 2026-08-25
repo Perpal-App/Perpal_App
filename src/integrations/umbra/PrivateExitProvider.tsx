@@ -15,14 +15,17 @@ import { readAppConfig } from '@/config/appConfig';
 import { ensurePacificaCollateralInWallet } from '@/integrations/perps/pacifica/pacificaWithdrawal';
 import {
   beginPrivateExit,
+  canResetPrivateExit,
+  resetPrivateExit,
   resumePrivateExit,
 } from '@/integrations/umbra/privateExit';
 import {
   readPrivateExitRecord,
   type PrivateExitRecord,
 } from '@/integrations/umbra/privateExitStorage';
-import { preparePrivateFundingPreflight } from '@/integrations/umbra/privateFundingPreflight';
+import { PrivateFundingError } from '@/integrations/umbra/privateFundingErrors';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
+import { showAppToast } from '@/storage/appToast';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type State = {
@@ -36,6 +39,8 @@ type State = {
     asset: PrivateExitAsset,
   ) => Promise<void>;
   readonly resume: () => Promise<void>;
+  readonly reset: () => Promise<void>;
+  readonly canReset: boolean;
 };
 
 export type PrivateExitAsset = {
@@ -112,12 +117,15 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
         });
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Private withdrawal did not complete.');
+      const message = cause instanceof PrivateFundingError
+        ? cause.message
+        : 'Private withdrawal did not complete. Progress is saved for a safe retry.';
+      setError(message);
       publishInAppNotification({
         kind: 'withdrawal',
         outcome: 'error',
         title: 'Private withdrawal needs attention',
-        message: 'Open Portfolio to review and safely resume the withdrawal.',
+        message,
       });
     } finally {
       runningRef.current = false;
@@ -138,9 +146,9 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
    * them for recovery, and `assertRelayerSupportsMint` refuses a mint the Umbra relayer cannot route
    * before any funds move. So this change opens the path that existed rather than widening it.
    *
-   * A shared preflight verifies the exact source token and enough native SOL for the deposit stage
-   * before a resumable record is created. For SOL, Umbra uses its native mint internally, wraps on
-   * deposit, and unwraps in the relayed claim callback.
+   * The protocol leg rechecks the live source-token and SOL balances after registration and recovery
+   * scanning, immediately before it prepares a new deposit. For SOL, Umbra uses its native mint
+   * internally, wraps on deposit, and unwraps in the relayed claim callback.
    */
   const start = useCallback(async (
     amountBaseUnits: bigint,
@@ -165,27 +173,6 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
         });
       }
 
-      const preflight = await preparePrivateFundingPreflight({
-        amountBaseUnits: asset.kind === 'native' ? 0n : amountBaseUnits,
-        collateralLegPending: asset.kind !== 'native',
-        feeLegPending: asset.kind === 'native',
-        feeReserveLamports: asset.kind === 'native' ? amountBaseUnits : 0n,
-        mint: asset.mint,
-        rpcUrl: input.config.api.rpcUrl,
-        signer: input.gatewaySigner,
-        walletAddress: input.sourceWalletAddress,
-      });
-      if (preflight.missingCollateralBaseUnits > 0n) {
-        throw new Error(
-          `Private wallet T does not hold enough ${asset.symbol} for this withdrawal.`,
-        );
-      }
-      if (preflight.missingSolLamports > 0n) {
-        throw new Error(
-          `Private wallet T needs more SOL for this withdrawal amount, temporary rent, and network fees.`,
-        );
-      }
-
       return beginPrivateExit(
         {
           ...input,
@@ -206,6 +193,31 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
     await run(() => resumePrivateExit(record, operationInput(), setRecord));
   }, [operationInput, record, run]);
 
+  const reset = useCallback(async () => {
+    if (record === null || runningRef.current) return;
+    runningRef.current = true;
+    setIsRunning(true);
+    try {
+      await resetPrivateExit(record);
+      setRecord(null);
+      setError(null);
+      showAppToast({
+        outcome: 'info',
+        title: 'Withdrawal reset',
+        message: 'No transaction was submitted. Enter a new amount.',
+      });
+    } catch {
+      showAppToast({
+        outcome: 'error',
+        title: 'Resume required',
+        message: 'This withdrawal may have been submitted and cannot be discarded.',
+      });
+    } finally {
+      runningRef.current = false;
+      setIsRunning(false);
+    }
+  }, [record]);
+
   const value = useMemo(() => ({
     record,
     isRunning,
@@ -213,7 +225,9 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
     mainWalletAddress,
     start,
     resume,
-  }), [error, isRunning, mainWalletAddress, record, resume, start]);
+    reset,
+    canReset: record !== null && canResetPrivateExit(record),
+  }), [error, isRunning, mainWalletAddress, record, reset, resume, start]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
