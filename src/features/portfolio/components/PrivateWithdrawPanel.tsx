@@ -197,8 +197,12 @@ export function PrivateWithdrawPanel({
 
       {pending ? (
         <ActionButton
-          disabled={privateExit.isRunning || privateExit.error === null}
-          label={privateExit.error === null ? 'Withdrawal in progress' : 'Retry withdrawal'}
+          disabled={privateExit.isRunning}
+          label={privateExit.isRunning
+            ? 'Withdrawal in progress'
+            : privateExit.error === null
+              ? 'Resume withdrawal'
+              : 'Retry withdrawal'}
           loading={privateExit.isRunning}
           onPress={() => void privateExit.resume()}
           tone="neutral"

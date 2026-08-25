@@ -57,10 +57,8 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const runningRef = useRef(false);
-  const autoResumedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    autoResumedRef.current = null;
     setRecord(null);
     if (session.status !== 'ready' || session.address === null) return;
     let cancelled = false;
@@ -207,22 +205,6 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
     if (record === null || record.phase === 'complete') return;
     await run(() => resumePrivateExit(record, operationInput(), setRecord));
   }, [operationInput, record, run]);
-
-  useEffect(() => {
-    if (
-      record === null ||
-      record.phase === 'complete' ||
-      autoResumedRef.current === record.id ||
-      isRunning
-    ) return;
-    autoResumedRef.current = record.id;
-    console.info('[Perpal recovery]', JSON.stringify({
-      event: 'auto_resume',
-      operation: 'private_withdrawal',
-      phase: record.phase,
-    }));
-    void resume();
-  }, [isRunning, record, resume]);
 
   const value = useMemo(() => ({
     record,

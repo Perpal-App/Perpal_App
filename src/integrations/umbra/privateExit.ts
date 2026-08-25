@@ -13,6 +13,7 @@ import {
   type PrivateFundingLegPhase,
   type PrivateFundingLegState,
 } from '@/integrations/umbra/privateFundingLeg';
+import { ensurePrivateFundingRegistration } from '@/integrations/umbra/privateFundingRegistration';
 import { createUmbraLocalGatewayDependencies } from '@/integrations/umbra/umbraGateway';
 import {
   readPrivateExitRecord,
@@ -117,6 +118,13 @@ async function runExit(
       gatewaySigner: input.gatewaySigner,
       mainWalletAddress: input.sourceWalletAddress,
     });
+    await save({ ...record, phase: 'proving', updatedAtMs: Date.now() });
+    await ensurePrivateFundingRegistration({
+      client,
+      config: input.config,
+      dependencies,
+    });
+    await save({ ...record, phase: 'depositing', updatedAtMs: Date.now() });
     const relayer = getUmbraRelayer({ apiEndpoint: input.config.privacy.umbraRelayerUrl });
     await assertRelayerSupportsMint(relayer, record.mint);
     await runPrivateFundingLeg({

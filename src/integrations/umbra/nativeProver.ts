@@ -180,7 +180,7 @@ function proveAndVerify(
       backend,
     );
   } catch (cause) {
-    console.error('[Perpal Umbra proof]', JSON.stringify({
+    console.warn('[Perpal Umbra proof]', JSON.stringify({
       backend: backendLabel(backend),
       circuit,
       durationMs: Math.round(performance.now() - startedAtMs),
@@ -194,7 +194,7 @@ function proveAndVerify(
   try {
     verified = Zk.mopro.verifyCircomProof(path, proofResult, backend);
   } catch (cause) {
-    console.error('[Perpal Umbra proof]', JSON.stringify({
+    console.warn('[Perpal Umbra proof]', JSON.stringify({
       backend: backendLabel(backend),
       circuit,
       durationMs: Math.round(performance.now() - generatedAtMs),
@@ -206,7 +206,7 @@ function proveAndVerify(
   const verifiedAtMs = performance.now();
 
   if (!verified) {
-    console.error('[Perpal Umbra proof]', JSON.stringify({
+    console.warn('[Perpal Umbra proof]', JSON.stringify({
       backend: backendLabel(backend),
       circuit,
       durationMs: Math.round(verifiedAtMs - generatedAtMs),
