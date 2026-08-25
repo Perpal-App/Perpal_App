@@ -70,7 +70,7 @@ export class DirectWithdrawalError extends Error {
 }
 
 export async function prepareDirectWithdrawal(input: {
-  readonly amountBaseUnits: bigint;
+  readonly amountBaseUnits: bigint | 'max';
   readonly decimals: number;
   readonly destinationAddress: string;
   readonly kind: 'native' | 'spl';
@@ -84,7 +84,7 @@ export async function prepareDirectWithdrawal(input: {
   const owner = publicKey(input.owner, 'Private wallet T');
   const destination = publicKey(input.destinationAddress, 'Destination wallet');
   if (
-    input.amountBaseUnits <= 0n ||
+    (input.amountBaseUnits !== 'max' && input.amountBaseUnits <= 0n) ||
     owner.equals(destination) ||
     !PublicKey.isOnCurve(destination.toBytes()) ||
     !new PublicKey(input.signer.publicKey).equals(owner)
@@ -97,6 +97,9 @@ export async function prepareDirectWithdrawal(input: {
     readSolBalance(input.owner, input),
   ]);
   const transaction = new Transaction({ feePayer: owner, recentBlockhash: blockhash });
+  let amountBaseUnits = input.amountBaseUnits === 'max'
+    ? solBalance
+    : input.amountBaseUnits;
   let destinationTokenAccount: string | null = null;
   let rentLamports = 0n;
   let sourceTokenAccount: string | null = null;
@@ -109,7 +112,7 @@ export async function prepareDirectWithdrawal(input: {
     }
     transaction.add(SystemProgram.transfer({
       fromPubkey: owner,
-      lamports: input.amountBaseUnits,
+      lamports: amountBaseUnits,
       toPubkey: destination,
     }));
   } else {
@@ -147,7 +150,12 @@ export async function prepareDirectWithdrawal(input: {
       throw new DirectWithdrawalError('The destination token account is invalid.', 'destination_invalid');
     }
     const sourceBalance = await readTokenBalance(source.toBase58(), input);
-    if (sourceBalance.amount < input.amountBaseUnits || sourceBalance.decimals !== input.decimals) {
+    if (input.amountBaseUnits === 'max') amountBaseUnits = sourceBalance.amount;
+    if (
+      amountBaseUnits <= 0n ||
+      sourceBalance.amount < amountBaseUnits ||
+      sourceBalance.decimals !== input.decimals
+    ) {
       throw new DirectWithdrawalError(
         `Private wallet T does not hold enough ${input.symbol}.`,
         'insufficient_token',
@@ -171,7 +179,7 @@ export async function prepareDirectWithdrawal(input: {
         mint,
         destinationAccount,
         owner,
-        input.amountBaseUnits,
+        amountBaseUnits,
         input.decimals,
         [],
         programId,
@@ -180,8 +188,22 @@ export async function prepareDirectWithdrawal(input: {
   }
 
   const feeLamports = await transactionFee(transaction, input);
+  if (input.kind === 'native' && input.amountBaseUnits === 'max') {
+    if (solBalance <= feeLamports) {
+      throw new DirectWithdrawalError(
+        'Private wallet T does not have enough SOL to cover the network fee.',
+        'insufficient_sol',
+      );
+    }
+    amountBaseUnits = solBalance - feeLamports;
+    transaction.instructions[0] = SystemProgram.transfer({
+      fromPubkey: owner,
+      lamports: amountBaseUnits,
+      toPubkey: destination,
+    });
+  }
   const requiredSolLamports = feeLamports + rentLamports +
-    (input.kind === 'native' ? input.amountBaseUnits : 0n);
+    (input.kind === 'native' ? amountBaseUnits : 0n);
   if (solBalance < requiredSolLamports) {
     throw new DirectWithdrawalError(
       input.kind === 'native'
@@ -193,7 +215,7 @@ export async function prepareDirectWithdrawal(input: {
 
   await simulate(transaction, input);
   return {
-    amountBaseUnits: input.amountBaseUnits,
+    amountBaseUnits,
     destinationAddress: destination.toBase58(),
     destinationTokenAccount,
     decimals: input.decimals,
@@ -249,6 +271,7 @@ export async function submitDirectWithdrawal(input: {
       'balance_changed',
     );
   }
+  await simulate(Transaction.from(input.plan.unsignedTransaction), input);
 
   try {
     const result = await signAndSubmitLegacyTransaction({

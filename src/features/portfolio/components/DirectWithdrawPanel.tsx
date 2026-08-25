@@ -27,7 +27,7 @@ import { showAppToast } from '@/storage/appToast';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
-type Phase = 'idle' | 'preparing' | 'reviewing' | 'submitting' | 'pending';
+type Phase = 'idle' | 'quoting' | 'preparing' | 'reviewing' | 'submitting' | 'pending';
 
 export function DirectWithdrawPanel({
   balances,
@@ -45,6 +45,7 @@ export function DirectWithdrawPanel({
   const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>('privy');
   const [externalAddress, setExternalAddress] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
+  const [withdrawMaximum, setWithdrawMaximum] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const tokens = useMemo(() => directTokens(balances), [balances]);
   const selected = tokens.find((token) => token.id === chosenId) ?? tokens[0] ?? null;
@@ -97,7 +98,10 @@ export function DirectWithdrawPanel({
     return () => abort.abort();
   }, [config, onBalancesChanged, session.address, session.signer]);
 
-  const prepare = async () => {
+  const prepare = async (
+    quoteOnly = false,
+    maximum = withdrawMaximum,
+  ) => {
     if (
       !config.ok ||
       session.status !== 'ready' ||
@@ -113,14 +117,16 @@ export function DirectWithdrawPanel({
       return;
     }
 
-    let amountBaseUnits: bigint;
+    let amountBaseUnits: bigint | 'max';
     let destinationAddress: string;
     try {
-      amountBaseUnits = parseTokenAmount(amount, asset.decimals);
+      amountBaseUnits = maximum ? 'max' : parseTokenAmount(amount, asset.decimals);
       destinationAddress = new PublicKey(
         destinationMode === 'privy' ? mainWalletAddress ?? '' : externalAddress.trim(),
       ).toBase58();
-      if (amountBaseUnits <= 0n || amountBaseUnits > availableBaseUnits) {
+      if (amountBaseUnits !== 'max' && (
+        amountBaseUnits <= 0n || amountBaseUnits > availableBaseUnits
+      )) {
         throw new Error('invalid amount');
       }
     } catch {
@@ -134,7 +140,7 @@ export function DirectWithdrawPanel({
     controller.current?.abort();
     const abort = new AbortController();
     controller.current = abort;
-    setPhase('preparing');
+    setPhase(quoteOnly ? 'quoting' : 'preparing');
     try {
       const pending = await reconcilePendingTradeAction({
         owner: session.address,
@@ -173,7 +179,19 @@ export function DirectWithdrawPanel({
         signer: session.signer,
         symbol: asset.symbol,
       });
-      if (!abort.signal.aborted) review(plan);
+      if (abort.signal.aborted) return;
+      if (quoteOnly) {
+        setAmount(formatTokenAmount(plan.amountBaseUnits, plan.decimals));
+        setWithdrawMaximum(true);
+        setPhase('idle');
+        showAppToast({
+          outcome: 'info',
+          title: 'Maximum calculated',
+          message: maxCostMessage(plan),
+        });
+        return;
+      }
+      review(plan);
     } catch (cause) {
       if (!abort.signal.aborted) {
         setPhase('idle');
@@ -214,6 +232,7 @@ export function DirectWithdrawPanel({
       onBalancesChanged();
       if (result.status === 'confirmed') {
         setAmount('');
+        setWithdrawMaximum(false);
         setPhase('idle');
         publishInAppNotification({
           kind: 'withdrawal', outcome: 'success', title: 'Direct withdrawal confirmed',
@@ -263,7 +282,10 @@ export function DirectWithdrawPanel({
           accessibilityLabel={`${asset?.symbol ?? 'Token'} withdrawal amount`}
           editable={!running}
           inputMode="decimal"
-          onChangeText={setAmount}
+          onChangeText={(value) => {
+            setAmount(value);
+            setWithdrawMaximum(false);
+          }}
           placeholder="0.00"
           placeholderTextColor={colors.textMuted}
           style={[styles.input, styles.amountInput]}
@@ -274,10 +296,21 @@ export function DirectWithdrawPanel({
           onSelect={(id) => {
             setChosenId(id);
             setAmount('');
+            setWithdrawMaximum(false);
           }}
           selectedMint={selected?.id ?? ''}
           symbol={asset?.symbol ?? 'Token'}
           tokens={tokens}
+        />
+        <ActionButton
+          disabled={running || asset === null || (
+            destinationMode === 'privy' && mainWalletAddress === null
+          )}
+          label="Max"
+          loading={phase === 'quoting'}
+          onPress={() => void prepare(true, true)}
+          style={styles.max}
+          tone="neutral"
         />
       </View>
       {destinationMode === 'external' ? (
@@ -298,6 +331,8 @@ export function DirectWithdrawPanel({
         )}
         label={phase === 'pending'
           ? 'Withdrawal confirming'
+          : phase === 'quoting'
+            ? 'Calculating max'
           : phase === 'preparing'
             ? 'Checking fees'
             : phase === 'submitting'
@@ -361,6 +396,14 @@ function sol(lamports: bigint): string {
   return `${formatTokenAmount(lamports, 9)} SOL`;
 }
 
+function maxCostMessage(plan: DirectWithdrawalPlan): string {
+  const rent = plan.rentLamports > 0n
+    ? ` Recipient token-account rent: ${sol(plan.rentLamports)}.`
+    : '';
+  return `Max: ${formatTokenAmount(plan.amountBaseUnits, plan.decimals)} ${plan.symbol}. ` +
+    `Network fee: ${sol(plan.feeLamports)}.${rent} Costs are checked again before signing.`;
+}
+
 function short(address: string): string {
   return `${address.slice(0, 5)}…${address.slice(-5)}`;
 }
@@ -383,4 +426,5 @@ const styles = StyleSheet.create({
     ...typography.bodyCompact,
   },
   amountInput: { flex: 1, minWidth: 0 },
+  max: { minWidth: 64 },
 });
