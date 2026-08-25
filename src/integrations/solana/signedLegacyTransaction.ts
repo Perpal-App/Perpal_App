@@ -76,6 +76,7 @@ export async function signAndSubmitLegacyTransaction(input: {
     signature: string,
     signedTransactionBase64: string,
   ) => Promise<void>;
+  readonly onSubmissionRejected?: () => Promise<void>;
   readonly signal?: AbortSignal;
   readonly tradeTiming?: TradeTimingContext;
 }): Promise<SubmittedTransactionResult> {
@@ -191,6 +192,13 @@ export async function signAndSubmitLegacyTransaction(input: {
     }
   } catch (cause) {
     if (cause instanceof SolanaRpcError) {
+      if (cause.code.startsWith('rpc_-')) {
+        await input.onSubmissionRejected?.();
+        throw new TransactionSigningError(
+          'Solana rejected the signed transaction before submission.',
+          'submission_rejected',
+        );
+      }
       if (input.tradeTiming !== undefined) {
         logTradeTiming(
           input.tradeTiming,

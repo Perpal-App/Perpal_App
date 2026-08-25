@@ -1,4 +1,5 @@
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
+import { SolanaRpcError } from '@/integrations/api/signedSolanaRpc';
 import {
   readPendingTradeAction,
   removePendingTradeAction,
@@ -66,28 +67,39 @@ export async function reconcilePendingTradeAction(input: {
       await removePendingTradeAction(input.owner, input.provider);
       return 'expired';
     }
-    const result = versioned
-      ? await submitSignedVersionedTransaction({
-          expectedSignature: record.signature,
-          idempotencyKey: record.idempotencyKey,
-          owner: record.owner,
-          rpcUrl: input.rpcUrl,
-          signedTransactionBase64: record.signedTransactionBase64,
-          signer: input.signer,
-        })
-      : await submitSignedLegacyTransaction({
-          expectedSignature: record.signature,
-          idempotencyKey: record.idempotencyKey,
-          owner: record.owner,
-          rpcUrl: input.rpcUrl,
-          signedTransactionBase64: record.signedTransactionBase64,
-          signer: input.signer,
-        });
-    if (result.status === 'confirmed') {
-      await removePendingTradeAction(input.owner, input.provider);
-      return 'confirmed';
+    try {
+      const result = versioned
+        ? await submitSignedVersionedTransaction({
+            expectedSignature: record.signature,
+            idempotencyKey: record.idempotencyKey,
+            owner: record.owner,
+            rpcUrl: input.rpcUrl,
+            signedTransactionBase64: record.signedTransactionBase64,
+            signer: input.signer,
+          })
+        : await submitSignedLegacyTransaction({
+            expectedSignature: record.signature,
+            idempotencyKey: record.idempotencyKey,
+            owner: record.owner,
+            rpcUrl: input.rpcUrl,
+            signedTransactionBase64: record.signedTransactionBase64,
+            signer: input.signer,
+          });
+      if (result.status === 'confirmed') {
+        await removePendingTradeAction(input.owner, input.provider);
+        return 'confirmed';
+      }
+      return 'pending';
+    } catch (cause) {
+      if (cause instanceof SolanaRpcError && cause.code.startsWith('rpc_-')) {
+        await removePendingTradeAction(input.owner, input.provider);
+        throw new TransactionSigningError(
+          'The stored transaction was rejected before submission.',
+          'submission_rejected',
+        );
+      }
+      throw cause;
     }
-    return 'pending';
   }
   if (Date.now() >= record.expiresAtMs) {
     await removePendingTradeAction(input.owner, input.provider);

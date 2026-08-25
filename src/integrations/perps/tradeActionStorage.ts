@@ -5,7 +5,7 @@ import type { PerpsProviderId } from '@/config/appConfig';
 
 const PREFIX = 'perpal.trade-action.v1.';
 
-export type TradeActionScope = PerpsProviderId | 'wallet';
+export type TradeActionScope = PerpsProviderId | 'wallet' | 'wallet-withdrawal';
 
 export type PendingTradeAction = {
   readonly amountBaseUnits: string;

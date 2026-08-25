@@ -143,6 +143,7 @@ export async function submitPacificaDeposit(input: {
   readonly signer: GatewayRequestSigner;
   readonly signal?: AbortSignal;
   readonly onSigned?: (signature: string, signedTransactionBase64: string) => Promise<void>;
+  readonly onSubmissionRejected?: () => Promise<void>;
 }): Promise<SubmittedTransactionResult> {
   if (Date.now() >= input.plan.expiresAtMs || input.plan.simulation !== 'passed') {
     throw new Error('Pacifica deposit preview expired or is not fundable.');
@@ -154,6 +155,9 @@ export async function submitPacificaDeposit(input: {
     signer: input.signer,
     unsignedTransaction: input.plan.unsignedTransaction,
     ...(input.onSigned === undefined ? {} : { onSigned: input.onSigned }),
+    ...(input.onSubmissionRejected === undefined
+      ? {}
+      : { onSubmissionRejected: input.onSubmissionRejected }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 }

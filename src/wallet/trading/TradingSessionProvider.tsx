@@ -48,6 +48,7 @@ export type TradingSessionStatus =
 
 type TradingSession = {
   readonly status: TradingSessionStatus;
+  readonly mainWalletAddress: string | null;
   readonly address: string | null;
   readonly signer: GatewayRequestSigner | null;
   readonly generation: number;
@@ -389,13 +390,14 @@ export function TradingSessionProvider({
       address,
       error,
       generation,
+      mainWalletAddress,
       recovery,
       rotate,
       retryRestore,
       signer,
       status,
     }),
-    [activate, address, error, generation, recovery, retryRestore, rotate, signer, status],
+    [activate, address, error, generation, mainWalletAddress, recovery, retryRestore, rotate, signer, status],
   );
 
   return (

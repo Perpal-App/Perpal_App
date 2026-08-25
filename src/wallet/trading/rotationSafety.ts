@@ -164,9 +164,10 @@ export async function submitTradingWalletRotation(
 }
 
 async function assertNoPendingActivity(input: RotationInput): Promise<void> {
-  const [funding, exit, pacificaWithdrawal, pacifica, pacificaAction] = await Promise.all([
+  const [funding, exit, directExit, pacificaWithdrawal, pacifica, pacificaAction] = await Promise.all([
     readPrivateFundingRecord(input.mainWalletAddress),
     readPrivateExitRecord(input.tradingWalletAddress),
+    readPendingTradeAction(input.tradingWalletAddress, 'wallet-withdrawal'),
     hasPendingPacificaWithdrawal(input.tradingWalletAddress),
     fetchPacificaPortfolio(input.config.perps.pacificaApiOrigin, input.tradingWalletAddress),
     readPendingTradeAction(input.tradingWalletAddress, 'pacifica'),
@@ -177,6 +178,9 @@ async function assertNoPendingActivity(input: RotationInput): Promise<void> {
   }
   if (exit !== null && exit.phase !== 'complete') {
     throw new TradingWalletRotationError('A private withdrawal is still pending.');
+  }
+  if (directExit !== null) {
+    throw new TradingWalletRotationError('A direct withdrawal is still pending confirmation.');
   }
   if (pacificaWithdrawal) {
     throw new TradingWalletRotationError('A Pacifica withdrawal is still pending.');

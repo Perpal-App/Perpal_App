@@ -35,9 +35,10 @@ import { showAppToast } from '@/storage/appToast';
  * zero means the token is not offered, and treating "not known yet" as zero would tell a reader they
  * hold nothing a moment before the figures arrive.
  */
-type WithdrawableToken = {
+export type WithdrawableToken = {
   readonly asset: PrivateExitAsset;
   readonly baseUnits: bigint | null;
+  readonly id?: string;
 };
 
 export function PrivateWithdrawPanel({
@@ -108,6 +109,7 @@ export function PrivateWithdrawPanel({
           nativeSol
             ? 'Umbra wraps SOL inside the pool and delivers native SOL after the relayed claim.'
             : 'Umbra relayer fees are deducted from the private transfer.',
+          'First use may create Umbra registration accounts and spend SOL on rent and network fees. If a claim is interrupted after deposit, resume it to recover the Umbra note.',
         ].filter((line): line is string => line !== null).join(' '),
         [
           { text: 'Cancel', style: 'cancel' },
@@ -240,7 +242,7 @@ export function PrivateWithdrawPanel({
  * of the record being recovered and changing it mid-run would describe a different operation than the
  * one that is running.
  */
-function TokenSelector({
+export function TokenSelector({
   disabled,
   onSelect,
   selectedMint,
@@ -262,7 +264,7 @@ function TokenSelector({
   // here: without it the reader picks a symbol and then finds out from an error whether they had any.
   const menuOptions = useMemo<readonly MenuOption<string>[]>(
     () => tokens.map((token) => ({
-      id: token.asset.mint,
+      id: token.id ?? token.asset.mint,
       label: token.asset.symbol,
       ...(token.baseUnits === null
         ? {}
@@ -414,7 +416,7 @@ function feeLabel(): string {
   return `${formatAmount(amountFromBaseUnits(units, 6))} USDC`;
 }
 
-function parseTokenAmount(value: string, decimals: number): bigint {
+export function parseTokenAmount(value: string, decimals: number): bigint {
   const trimmed = value.trim();
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) throw new Error('invalid');
   const parts = trimmed.split('.');
@@ -426,7 +428,7 @@ function parseTokenAmount(value: string, decimals: number): bigint {
   return BigInt(`${whole}${fraction.padEnd(decimals, '0')}`);
 }
 
-function formatTokenAmount(value: bigint, decimals: number): string {
+export function formatTokenAmount(value: bigint, decimals: number): string {
   if (value < 0n || !Number.isInteger(decimals) || decimals < 0 || decimals > 255) return '--';
   if (decimals === 0) return value.toString();
   const digits = value.toString().padStart(decimals + 1, '0');

@@ -139,6 +139,10 @@ export async function submitTradeCollateralStep(input: {
         signer: input.signer,
         signal: input.signal,
         onSigned: checkpoint,
+        onSubmissionRejected: () => removePendingTradeAction(
+          input.owner,
+          input.step.provider,
+        ),
       });
   if (result.status === 'confirmed') await removePendingTradeAction(input.owner, input.step.provider);
   return result;

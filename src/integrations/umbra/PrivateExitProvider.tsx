@@ -1,4 +1,3 @@
-import { isConnected, useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { NATIVE_MINT } from '@solana/spl-token';
 import {
   createContext,
@@ -53,11 +52,8 @@ export type PrivateExitAsset = {
 const Context = createContext<State | null>(null);
 
 export function PrivateExitProvider({ children }: { readonly children: ReactNode }) {
-  const wallet = useEmbeddedSolanaWallet();
   const session = useTradingSession();
-  const mainWalletAddress = isConnected(wallet)
-    ? (wallet.wallets[0]?.address ?? null)
-    : null;
+  const mainWalletAddress = session.mainWalletAddress;
   const [record, setRecord] = useState<PrivateExitRecord | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -23,9 +23,9 @@ import { AppToastHost } from '@/components/feedback/AppToastHost';
 import { PressableScale } from '@/components/ui/PressableScale';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
-import { PrivateWithdrawPanel } from '@/features/portfolio/components/PrivateWithdrawPanel';
 import { PrivateSwapPanel } from '@/features/portfolio/components/PrivateSwapPanel';
 import { ProviderFundsPanel } from '@/features/portfolio/components/ProviderFundsPanel';
+import { WithdrawPanel } from '@/features/portfolio/components/WithdrawPanel';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import type { VelocityAccountSnapshot } from '@/integrations/perps/velocity/velocityAccount';
 import { colors, layout, motion, radii, spacing } from '@/theme/tokens';
@@ -267,7 +267,11 @@ export function FundsSheet({
                     <PrivateFundingPanel balances={balances} tradingReady />
                   ) : null}
                   {mode === 'withdraw' ? (
-                    <PrivateWithdrawPanel balances={balances} snapshot={snapshot} />
+                    <WithdrawPanel
+                      balances={balances}
+                      onBalancesChanged={onBalancesChanged}
+                      snapshot={snapshot}
+                    />
                   ) : null}
                   {mode === 'swap' ? (
                     <PrivateSwapPanel
