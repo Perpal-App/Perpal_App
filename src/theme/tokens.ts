@@ -11,19 +11,6 @@ export const colors = {
   surface: '#101116',
   surfaceElevated: '#171820',
 
-  /**
-   * Page and card for a screen that carries the ambient violet — the profile, today.
-   *
-   * The app's near-black `background` is deliberately almost hueless, which is right under a table of
-   * prices and wrong under a violet header: the band met the page at a hard line where the colour
-   * simply stopped. These two carry a little of that violet into the page instead, so the header
-   * resolves into the screen rather than ending on it.
-   *
-   * They come as a pair because one without the other does not work. `backgroundTinted` sits a step
-   * under the neutral `surface`, so a card in the old grey would still be visible on it — but visibly
-   * cooler than the page it sits on, which reads as a mismatch rather than as depth.
-   * `surfaceTinted` is the same card one step up in the same hue.
-   */
   backgroundTinted: '#0C0916',
   surfaceTinted: '#15121D',
   border: '#292A35',
@@ -99,35 +86,7 @@ export const colors = {
    */
   glassEdge: 'rgba(196, 181, 253, 0.32)',
 
-  /**
-   * Floating tab bar. The blur behind it supplies the depth; these only tint it:
-   * `glassTint` darkens the capsule so light content scrolling underneath cannot
-   * wash out the icons, `glassRim` is the faint edge that keeps the capsule's
-   * shape legible against a dark page, and `glassHighlight` is the sliding pill
-   * behind the selected tab.
-   *
-   * The rim and the pill are drawn in the violet ramp rather than in plain white, the
-   * same reasoning as `glassEdge`: a neutral white edge on a violet-cast surface reads
-   * as a hard outline laid over the app, while the ramp defines the same shape as part
-   * of it. The rim carries slightly more alpha than the white it replaced, because a
-   * tinted film reads dimmer than a neutral one at equal opacity.
-   *
-   * `glassHighlight` takes the ramp's deep end and `glassSelected` its bright end, and the
-   * distance between them is the point: the pill has to fall away for the glyph to come
-   * forward, so the two can never sit at the same value.
-   *
-   * `glassSelected` is a violet, not an off-white. It went through near-white — `#DDCEFF`, then
-   * `#EFE6FF` — chasing luminance, and both landed on the same problem: at that lightness the
-   * hue is gone, so the selected tab was carried by the pill's shade rather than by the glyph,
-   * and the glyph itself read as plain white. Selection is a statement about colour here, and
-   * this is the palette's pastel violet, held deliberately at the same value as `accentSoft` so
-   * an active tab and an active filter tab agree on what "chosen" looks like. It stays well
-   * clear of the pill beneath it without giving up its hue to do so.
-   *
-   * `glassHighlight` stays translucent. An opaque pill was tried and reverted: it turned
-   * selection into a block of colour competing with the glyph sitting on it, and put a solid
-   * patch in the middle of a bar whose whole purpose is that content reads through it.
-   */
+  /** Floating tab-bar tint, rim, selected pill, and selected glyph. */
   glassTint: 'rgba(10, 10, 12, 0.55)',
   glassRim: 'rgba(196, 181, 253, 0.14)',
   glassHighlight: 'rgba(75, 47, 168, 0.34)',
@@ -449,24 +408,6 @@ export const motion = {
     fillInMs: 140,
     fillOutMs: 190,
   },
-  /**
-   * Layout morph: a block changing size, and the page below it travelling to follow.
-   *
-   * A spring rather than a duration, because this is the one animation in the app the user did
-   * not ask for — it is a correction for content changing underneath them, and a spring is what
-   * makes that read as a physical settle instead of as a scripted transition. Damping ratio works
-   * out just under 1 (about 0.87), so there is a whisper of settle at the end and no visible
-   * bounce; a block of text arriving with a bounce reads as a toy.
-   *
-   * The important part is that one set of physics is shared by every view that participates.
-   * Reanimated's `layout` animates a view's own frame and nothing else — siblings below it are
-   * placed at their final positions on the very next frame — so a smooth vertical reflow needs
-   * every box in the column animating on identical physics. Mixed timings would have each section
-   * arrive at a different moment, which looks worse than no animation at all.
-   *
-   * Layout animations default to `ReduceMotion.System`, so this is already suppressed for anyone
-   * who has asked for less motion and needs no manual guard.
-   */
   layoutMorph: {
     damping: 22,
     stiffness: 190,
@@ -527,23 +468,6 @@ export const motion = {
   shimmer: {
     duration: 1_150,
   },
-  /**
-   * Tab-to-tab morph: the arriving screen settles the last couple of percent into its
-   * resting size, so a switch reads as the destination arriving rather than sliding in.
-   * `scale` is deliberately tiny — at full-screen size even two percent reads clearly,
-   * while anything larger turns a settle into a zoom.
-   *
-   * Shorter than the app's other reveals on purpose. A tab is a lateral move between
-   * peers, not an arrival somewhere new, and the settle has to be finished before the
-   * user's attention reaches the content — held any longer it stops reading as motion
-   * and starts reading as the screen being slow to respond.
-   *
-   * Above 1 rather than below. A screen scaled under its container shrinks away from
-   * the edges and exposes a band of bare shell, which the tab pill's blur then samples
-   * along the bottom — the switch would flash in the bar. Scaled over its container it
-   * always covers, at the cost of a few composited pixels of overshoot that stay well
-   * inside the safe area at this size.
-   */
   tabSwitch: {
     duration: 200,
     scale: 1.02,

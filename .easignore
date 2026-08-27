@@ -55,14 +55,3 @@ yarn-debug.*
 yarn-error.*
 .metro-health-check*
 .DS_Store
-
-# Assets not referenced by app.config.ts or the mobile module graph.
-/assets/AppIcon/
-/assets/fonts/Manrope-VariableFont_wght.ttf
-/assets/fonts/Lexend*
-/assets/fonts/Prata-Regular.ttf
-/assets/fonts/poppins/*
-!/assets/fonts/poppins/Poppins-Regular.ttf
-!/assets/fonts/poppins/Poppins-Medium.ttf
-!/assets/fonts/poppins/Poppins-SemiBold.ttf
-!/assets/fonts/poppins/Poppins-Bold.ttf

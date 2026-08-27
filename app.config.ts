@@ -31,7 +31,7 @@ const LAUNCH_BACKGROUND = '#07060B';
 /**
  * Every font the app is allowed to render, embedded natively at build time so
  * the faces are available synchronously on the first frame with no runtime
- * loading. Only these files ship; the rest of `assets/fonts` is unused.
+ * loading.
  *
  * Each face is registered under its own PostScript name rather than as weights
  * of a single "Poppins" family. That is what makes `fontFamily: 'Poppins-SemiBold'`

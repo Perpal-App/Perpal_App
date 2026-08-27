@@ -40,13 +40,11 @@
   },
   "dependencies": {
     "@ethersproject/shims": "^5.8.0",
-    "@expo/vector-icons": "^15.0.2",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
     "@privy-io/expo": "0.70.6",
     "@privy-io/expo-native-extensions": "0.0.12",
     "@scure/base": "^2.2.0",
-    "@scure/bip39": "^2.2.0",
     "@solana/kit": "2.3.0",
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "1.98.0",

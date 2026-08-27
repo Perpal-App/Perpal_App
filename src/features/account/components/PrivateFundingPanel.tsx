@@ -2,7 +2,6 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
-
 import { ActionButton } from '@/components/ui/ActionButton';
 import {
   AnchoredMenu,
@@ -33,44 +32,16 @@ import {
 import { usePrivateFunding } from '@/integrations/umbra/PrivateFundingProvider';
 import { PrivateFundingError } from '@/integrations/umbra/privateFundingErrors';
 import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
-
 type CollateralSymbol = ProviderCollateral['symbol'];
-
-/** SOL's decimals. The fee reserve is denominated in lamports, not in collateral base units. */
 const SOL_DECIMALS = 9;
-
-/** Shared height for a field row, so an input and the token control beside it cannot disagree. */
 const FIELD_MIN_HEIGHT = layout.minTouchTarget;
-
-/** Floor for the token menu: enough for a symbol, its balance, and the tick beside them. */
 const MIN_MENU_WIDTH = 196;
 
-/**
- * One collateral token the public wallet can fund from, and how much of it there is.
- *
- * `baseUnits` is null while balances are still loading — different from zero, and it has to be: zero
- * means the token is not offered, and treating "not known yet" as zero would tell a reader they hold
- * nothing a moment before the figures arrive.
- */
 type FundableToken = {
   readonly collateral: ProviderCollateral;
   readonly baseUnits: bigint | null;
 };
 
-/**
- * Adding funds: collateral and a SOL fee reserve, both moving privately into wallet T.
- *
- * Rebuilt on the withdraw panel's layout so the two halves of the same sheet stop looking like two
- * different apps — an amount field paired with a token control, the app's action materials, and the
- * balances shown where the choice is made. What it replaced used a taller bespoke select with a
- * two-line body, inputs a step larger than every other field, and no indication of what was available
- * until a preflight came back and said there was not enough.
- *
- * Both legs are still here because both are required. Collateral is what trades; the SOL reserve is
- * what lets T pay for its own transactions, and a deposit without one would arrive unable to move. It
- * is a fixed second field rather than a third option in the token menu, because it is not an
- * alternative to collateral — every deposit carries both.
- */
 export function PrivateFundingPanel({
   balances,
   tradingReady,
@@ -94,9 +65,6 @@ export function PrivateFundingPanel({
   }, []);
   const fundable = useMemo(() => readFundable(supported, balances), [balances, supported]);
 
-  // Derived, not corrected in an effect. A balance can drop to zero while the panel is open, and the
-  // selection has to fall back within the same render — otherwise the amount field would keep
-  // describing a token that is no longer on the list.
   const symbol = fundable.some((entry) => entry.collateral.symbol === chosen)
     ? chosen
     : fundable[0]?.collateral.symbol ?? chosen;
@@ -239,10 +207,6 @@ export function PrivateFundingPanel({
 
   return (
     <View style={styles.panel}>
-      {/* No standing explanation under the heading. "Funds move privately from your public wallet into
-          private wallet T" described the whole feature to someone who had already chosen it, on a panel
-          whose two fields and their balances say what to do. The confirmation before signing still
-          states the route, the fees, and what the reserve is for — which is where it matters. */}
       <Text accessibilityRole="header" style={styles.title}>Add funds</Text>
       {funding.record ? (
         <Text accessibilityLiveRegion="polite" style={styles.status}>
@@ -282,9 +246,6 @@ export function PrivateFundingPanel({
 
       {pending === null || funding.record?.feeFundingLamports === null ? (
         <View style={styles.field}>
-          {/* A fixed second field, not a third token in the menu: the reserve is what lets wallet T pay
-              for its own transactions, so every deposit carries one and it is never an alternative to
-              the collateral above. */}
           <FieldHead
             available={solLamports === null
               ? null
@@ -348,12 +309,6 @@ export function PrivateFundingPanel({
   );
 }
 
-/**
- * A field's name and what is available to put in it, on one line.
- *
- * The balance rides the label rather than sitting under the input, which keeps the answer to "how much
- * can I add" above the box being typed into instead of below it — and costs a line rather than two.
- */
 function FieldHead({
   available,
   label,
@@ -371,7 +326,6 @@ function FieldHead({
   );
 }
 
-/** Which collateral is being deposited, with each option's balance beside it. */
 function TokenSelector({
   disabled,
   onSelect,
@@ -383,8 +337,6 @@ function TokenSelector({
   readonly symbol: CollateralSymbol;
   readonly tokens: readonly FundableToken[];
 }) {
-  // A plain View, because the measurement has to come from a host view: `PressableScale` is an
-  // animated component and its ref is not guaranteed to expose the native measure methods.
   const anchorRef = useRef<View>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const [open, setOpen] = useState(false);
@@ -399,8 +351,6 @@ function TokenSelector({
     [tokens],
   );
 
-  // Above the control, because this sits partway up a docked sheet with a second field and a button
-  // below it — a menu hanging down would cover the very fields the choice applies to.
   const openMenu = () => {
     anchorRef.current?.measureInWindow((x, y, width) => {
       setAnchor(anchorAbove(x, y, width, Math.max(width, MIN_MENU_WIDTH)));
@@ -442,12 +392,6 @@ function TokenSelector({
   );
 }
 
-/**
- * The same control with nothing to choose.
- *
- * It shares the selector's material rather than being plain text, so the two field rows read as the
- * same shape — and it carries no chevron, which is what says this one is fixed.
- */
 function TokenTag({ label }: { readonly label: string }) {
   return (
     <View accessibilityElementsHidden style={styles.token}>
@@ -487,13 +431,6 @@ function ChevronDown() {
   );
 }
 
-/**
- * Which supported tokens the public wallet actually holds.
- *
- * The public wallet, not the private one: this panel moves funds *out* of it. Before balances arrive
- * every supported token is listed with an unknown amount rather than filtered out, because filtering
- * on absent data would empty the menu on open and refill it a moment later.
- */
 function readFundable(
   supported: readonly ProviderCollateral[],
   balances: WalletBalances | null,
@@ -530,8 +467,6 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   row: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs },
-  // A hairline rim rather than a full point: an input is a recess, and a full-point edge belongs to a
-  // raised surface. Matched to the withdraw panel so the sheet's two halves agree.
   input: {
     minHeight: FIELD_MIN_HEIGHT,
     paddingHorizontal: spacing.md,
@@ -543,8 +478,6 @@ const styles = StyleSheet.create({
     ...typography.bodyCompact,
   },
   amountInput: { flex: 1, minWidth: 0 },
-  // The raised material, because this is a control rather than a field — the same neutral ramp the
-  // withdraw panel's token control carries.
   token: {
     minHeight: FIELD_MIN_HEIGHT,
     flexShrink: 0,

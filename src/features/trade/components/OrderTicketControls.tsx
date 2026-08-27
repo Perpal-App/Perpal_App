@@ -11,43 +11,16 @@ import Animated, {
 
 import { colors, motion, radii, spacing, typography } from '@/theme/tokens';
 
-/** Collateral shortcuts, as fractions of what the account can spend. */
 const PRESETS = [25, 50, 75, 100] as const;
-
-/** Step the screen reader's increment and decrement actions move the slider. */
 const ADJUST_STEP = 25;
-
-/**
- * Diameter of the slider's handle. The rail reserves half of it at each end so the handle
- * at 0% and at 100% is drawn inside the panel instead of being clipped by its edge, which
- * is what used to happen to it at rest.
- */
 const THUMB = 18;
-
-/** Height of the slider's touch area. The visible bar is 3pt; a finger needs this. */
 const RAIL_TOUCH = 40;
 
-/**
- * Gesture tolerances.
- *
- * The pan waits for horizontal intent because this rail sits inside a vertically
- * scrolling screen: a drag that starts on the handle but travels down the page belongs to
- * the scroll view, and a slider that swallows it makes the screen feel stuck. Past
- * `PAN_ACTIVATE_X` the finger has committed sideways and the pan takes the touch.
- */
 const PAN_ACTIVATE_X = 4;
 const PAN_FAIL_Y = 12;
 const TAP_MAX_DISTANCE = 12;
 const TAP_MAX_DURATION = 600;
 
-/**
- * The order ticket's controls.
- *
- * They live apart from the ticket because the ticket is a state machine — quote, plan,
- * signature, submission — and these are the surfaces it drives. Each one is sized for the
- * half-width column the ticket occupies beside the order book: single-line labels, a
- * caption-scale figure row, and nothing that assumes it has the whole screen.
- */
 export function Choice(props: {
   readonly accessibilityLabel?: string;
   readonly disabled?: boolean;
@@ -85,16 +58,6 @@ export function Choice(props: {
   );
 }
 
-/**
- * A number and the unit it is in.
- *
- * `align` decides where the number sits, and it is a legibility choice rather than a
- * cosmetic one. A field holding an amount with a word for a unit — `Collateral … USDC` —
- * reads left to right like the label it is. A bare multiplier does not: left-aligned, the
- * `3` sat at one end of the box and the `×` at the other, far enough apart that the unit
- * read as a stray character dropped into the corner instead of as part of the value.
- * Right-aligned they touch, and `3×` reads as one figure.
- */
 export function Field(props: {
   readonly accessibilityLabel: string;
   readonly align?: 'left' | 'right' | 'center';
@@ -108,10 +71,6 @@ export function Field(props: {
   const tight = centred || props.align === 'right';
 
   return (
-    // The box focuses the input, not just the glyphs inside it. Centred, the input is only
-    // as wide as the digits it holds, so without this most of the control would be dead to
-    // a finger. `accessible={false}` keeps it out of the accessibility tree — the input is
-    // the thing being reached, and a wrapper announcing itself in front of it is noise.
     <Pressable
       accessible={false}
       onPress={() => input.current?.focus()}
@@ -134,14 +93,6 @@ export function Field(props: {
   );
 }
 
-/**
- * A setting the ticket states rather than asks about.
- *
- * Same footprint as the controls beside it so a row of settings reads as one row, and a
- * quieter border and label than a `Choice` so it does not invite a tap it has nothing to do
- * with. Margin mode is the case it exists for: cross wherever the venue allows it, isolated
- * on the markets that only offer that, and never a decision the ticket can make.
- */
 export function StaticControl({
   accessibilityLabel,
   label,
@@ -177,27 +128,6 @@ export function Toggle(props: {
   );
 }
 
-/**
- * How much of the available balance to commit, as a handle you can drag.
- *
- * The handle follows the finger on the UI thread — one shared value drives the fill and
- * the handle's `translateX`, and nothing about the motion waits on React. It used to be a
- * `Pressable` that read `locationX` on release, so the only way to reach 40% was to guess
- * where 40% was and tap it; the handle never moved under the finger at all.
- *
- * JavaScript hears from it once per whole percent instead of once per frame. That is what
- * the collateral field needs, and it keeps `parseAmount` and the balance arithmetic off the
- * path the drag is drawn on: if the JS thread stalls, the handle keeps tracking and only
- * the figure lags.
- *
- * The position is the slider's own, not a prop mirrored back from the ticket. The percent
- * buttons beside it are a separate way to reach the same number, and dragging one control
- * to a value the other happens to offer does not make them one control: tapping 50% no
- * longer throws the handle across the rail, and parking the handle on 50% no longer lights
- * that button up. `resetSignal` is the one thing that moves the handle from outside, for
- * the cases where the slider's claim is void — a new market, a new session, or a collateral
- * amount typed in by hand.
- */
 export function CollateralSlider({
   onChange,
   resetSignal,
@@ -206,8 +136,6 @@ export function CollateralSlider({
   readonly resetSignal: number;
 }) {
   const reduceMotion = useReducedMotion();
-  // Travel available to the handle's centre: the rail's width less the half-handle
-  // reserved at each end, measured from the track itself rather than assumed.
   const travel = useSharedValue(0);
   const progress = useSharedValue(0);
   const dragging = useSharedValue(false);
@@ -215,9 +143,6 @@ export function CollateralSlider({
   const held = useSharedValue(0);
   const [percent, setPercent] = useState(0);
 
-  // The ticket rebuilds its handler on every render, and a drag renders it once per whole
-  // percent. Routing through a ref keeps the gesture itself built once, so a live drag is
-  // never reconfigured underneath the finger that is driving it.
   const latest = useRef(onChange);
   useEffect(() => { latest.current = onChange; }, [onChange]);
   const dispatch = useCallback((next: number) => {
@@ -233,9 +158,6 @@ export function CollateralSlider({
     return clamped;
   }, [progress, reduceMotion, reported]);
 
-  // Return to rest, and only that. Guarded on the current value because a typed collateral
-  // amount signals on every keystroke, and a spring restarted at its own resting point on
-  // each character is work nobody can see.
   useEffect(() => {
     if (reported.value === 0 || dragging.value) return;
     settleAt(0);
@@ -272,18 +194,12 @@ export function CollateralSlider({
       })
       .onFinalize(() => {
         held.set(withSpring(0, motion.spring));
-        // Also fires when the pan never activated because the touch was a tap, which the
-        // tap gesture owns. Only settle a drag that actually ran.
         if (!dragging.value) return;
-        // Land on the whole percent that was reported, so the handle and the figure beside
-        // it agree once the finger leaves.
         const settled = reported.value / 100;
         progress.set(reduceMotion ? settled : withSpring(settled, motion.spring));
         dragging.set(false);
       });
 
-    // Tapping the rail still jumps to that point, which is how the control worked before
-    // and is faster than dragging when the target is a long way off.
     const tap = Gesture.Tap()
       .maxDistance(TAP_MAX_DISTANCE)
       .maxDuration(TAP_MAX_DURATION)
@@ -296,8 +212,6 @@ export function CollateralSlider({
     return Gesture.Race(pan, tap);
   }, [dispatch, dragging, held, progress, reduceMotion, reported, travel]);
 
-  // Composited: the fill is a full-width bar sliding inside a clip, so its length changes
-  // without a layout pass, and the handle only ever translates and scales.
   const fillStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: -(1 - progress.value) * travel.value }],
   }));
@@ -339,14 +253,6 @@ export function CollateralSlider({
   );
 }
 
-/**
- * Fixed fractions of the available balance, one tap each.
- *
- * `selected` is the button that was last tapped, not whatever the collateral currently
- * works out to. The slider is a separate control and its position does not choose a button
- * here — a handle resting on half the rail is not the same statement as having asked for
- * half — so `null` is the normal state once anything else has set the amount.
- */
 export function PercentPresets({
   onSelect,
   selected,
@@ -372,15 +278,6 @@ export function PercentPresets({
   );
 }
 
-/**
- * A label and a figure on one line, at caption scale.
- *
- * The ticket's own row rather than the shared `StatusRow` because that row is built for a
- * full-width screen: at body scale with a 16pt gutter, `Liquidation price` and a
- * six-figure price do not fit in half a phone together, and the value wrapped onto a
- * second line mid-number. Here the label is abbreviated to what a ticket can say in one
- * word and spells itself out to a screen reader instead.
- */
 export function TicketRow({
   label,
   screenReaderLabel,
@@ -433,8 +330,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   fieldCentred: { justifyContent: 'center' },
-  // A stated setting, not a choice: the same box as its neighbours, on the quieter of the two
-  // border tokens and with the label a step back from theirs.
   staticControl: {
     flex: 1,
     minWidth: 0,
@@ -457,20 +352,11 @@ const styles = StyleSheet.create({
     ...typography.bodyCompact,
   },
   inputRight: { paddingRight: 2, textAlign: 'right' },
-  // Centred, the input sizes to its own digits instead of filling the box, so the number and
-  // its unit sit together in the middle as one figure — `5×` reading the way `50x` does in
-  // the reference, rather than a digit at one edge and a mark at the other. `flexBasis` has
-  // to come back to `auto` because `flex: 1` on the base style pinned it to zero.
   inputCentred: { flexGrow: 0, flexBasis: 'auto', minWidth: 24, paddingHorizontal: 0 },
   suffix: { ...typography.caption, paddingRight: spacing.xs, color: colors.textMuted },
-  // Same size as the value it belongs to, so `3×` reads as one figure rather than a number
-  // with a smaller mark parked next to it.
   suffixTight: { ...typography.bodyCompact, color: colors.textSecondary },
   suffixCentred: { paddingRight: 0, paddingLeft: 1 },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  // The touch area, which is deliberately much bigger than the bar it draws. The
-  // half-handle of horizontal padding is what keeps the handle inside the panel at both
-  // ends, and it also makes the track's own width the exact travel of the handle's centre.
   rail: {
     flex: 1,
     minWidth: 0,
