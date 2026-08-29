@@ -29,6 +29,7 @@ export type VelocityHistoryState = {
 const DISPLAY_REFRESH_MS = 2_000;
 
 export function useVelocityAccount(input: {
+  readonly enabled?: boolean;
   readonly historyRpcUrl?: string | undefined;
   readonly historySigner?: GatewayRequestSigner | null;
   readonly owner: string | null;
@@ -43,8 +44,11 @@ export function useVelocityAccount(input: {
   const [history, setHistory] = useState<VelocityHistoryState>({ data: null, status: 'idle' });
   const [refreshKey, setRefreshKey] = useState(0);
   const lastSnapshot = useRef<VelocityAccountSnapshot | null>(null);
+  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
 
   useFocusEffect(useCallback(() => {
+    if (input.enabled === false) return undefined;
+
     if (input.owner === null || input.publicRpcUrl.length === 0 || input.programId.length === 0) {
       setAccount({ snapshot: null, status: 'loading' });
       setHistory({ data: null, status: 'idle' });
@@ -142,6 +146,7 @@ export function useVelocityAccount(input: {
       if (client !== null) void client.unsubscribe();
     };
   }, [
+    input.enabled,
     input.historyRpcUrl,
     input.historySigner,
     input.owner,
@@ -154,7 +159,7 @@ export function useVelocityAccount(input: {
   return {
     account,
     history,
-    refresh: () => setRefreshKey((value) => value + 1),
+    refresh,
   };
 }
 

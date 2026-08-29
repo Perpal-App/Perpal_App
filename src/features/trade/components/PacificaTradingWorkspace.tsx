@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
@@ -13,9 +13,9 @@ import { PacificaLiquidationsPanel } from '@/features/trade/components/PacificaL
 import { PacificaOrderTicket } from '@/features/trade/components/PacificaOrderTicket';
 import { PacificaTradeAccountPanel } from '@/features/trade/components/PacificaTradeAccountPanel';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
-import type { MarketHistoryStatus } from '@/features/trade/hooks/usePacificaMarketHistory';
+import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
-import type { MarketCandle, MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
+import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
 import { colors, radii, spacing } from '@/theme/tokens';
 
 type WorkspaceView = 'trade' | 'chart';
@@ -34,27 +34,35 @@ const PANELS: readonly UnderlineTabOption<MarketPanel>[] = [
 ];
 
 export function PacificaTradingWorkspace(props: {
-  readonly candles: readonly MarketCandle[];
   readonly config: AppConfig;
-  readonly historyStatus: MarketHistoryStatus;
   readonly market: PacificaMarket;
   readonly onExpandChart: () => void;
-  readonly onTimeframeChange: (timeframe: MarketTimeframe) => void;
   readonly snapshot: PacificaMarketSnapshot | null;
-  readonly timeframe: MarketTimeframe;
 }) {
   const [view, setView] = useState<WorkspaceView>('trade');
   const [panel, setPanel] = useState<MarketPanel>('orderbook');
+  const [chartMounted, setChartMounted] = useState(false);
+  const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
   // React Native reports logical points, not screenshot pixels. A phone that is
   // 700+ physical pixels wide is normally 360-430 points, so 700 could never
   // activate the requested split layout in portrait.
   const wide = useWindowDimensions().width >= 340;
   const apiOrigin = props.config.perps.pacificaApiOrigin;
   const wsOrigin = props.config.perps.pacificaWsOrigin;
+  const history = usePacificaMarketHistory(
+    apiOrigin,
+    props.market.venueRef,
+    timeframe,
+    chartMounted,
+  );
+  const selectView = useCallback((next: WorkspaceView) => {
+    if (next === 'chart') setChartMounted(true);
+    setView(next);
+  }, []);
 
   return (
     <View style={styles.workspace}>
-      <UnderlineTabs onSelect={setView} options={VIEWS} selectedId={view} />
+      <UnderlineTabs onSelect={selectView} options={VIEWS} selectedId={view} />
 
       {view === 'trade' ? (
         <FadeInView style={styles.tradeView}>
@@ -99,16 +107,18 @@ export function PacificaTradingWorkspace(props: {
         </FadeInView>
       ) : null}
 
-      <View style={view === 'chart' ? styles.chartVisible : styles.chartHidden}>
-        <TradingViewMarketChart
-          candles={props.candles}
-          onExpand={props.onExpandChart}
-          onTimeframeChange={props.onTimeframeChange}
-          status={props.historyStatus}
-          symbol={`${props.market.baseAsset}/USD`}
-          timeframe={props.timeframe}
-        />
-      </View>
+      {chartMounted ? (
+        <View style={view === 'chart' ? styles.chartVisible : styles.chartHidden}>
+          <TradingViewMarketChart
+            candles={history.candles}
+            onExpand={props.onExpandChart}
+            onTimeframeChange={setTimeframe}
+            status={history.status}
+            symbol={`${props.market.baseAsset}/USD`}
+            timeframe={timeframe}
+          />
+        </View>
+      ) : null}
 
       {view === 'chart' ? (
         <>

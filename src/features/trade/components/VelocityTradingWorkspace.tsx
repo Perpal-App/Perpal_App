@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
@@ -56,6 +56,7 @@ export function VelocityTradingWorkspace({
   const [panel, setPanel] = useState<MarketPanel>('orderbook');
   const [aggregation, setAggregation] = useState<VelocityBookAggregation>(1);
   const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
+  const [chartMounted, setChartMounted] = useState(false);
   const wide = useWindowDimensions().width >= 340;
   const publicMarket = useVelocityPublicMarket({
     aggregation,
@@ -72,16 +73,21 @@ export function VelocityTradingWorkspace({
     view === 'chart',
   );
   const velocity = useVelocityAccount({
+    enabled: view === 'trade',
     historyRpcUrl: config.api.rpcUrl,
     historySigner: session.status === 'ready' ? session.signer : null,
     owner: session.status === 'ready' ? session.address : null,
     programId: config.perps.velocityProgramId,
     publicRpcUrl: config.api.publicRpcUrl,
   });
+  const selectView = useCallback((next: WorkspaceView) => {
+    if (next === 'chart') setChartMounted(true);
+    setView(next);
+  }, []);
 
   return (
     <View style={styles.workspace}>
-      <UnderlineTabs onSelect={setView} options={VIEWS} selectedId={view} />
+      <UnderlineTabs onSelect={selectView} options={VIEWS} selectedId={view} />
 
       {view === 'trade' ? (
         <FadeInView style={styles.tradeView}>
@@ -126,15 +132,17 @@ export function VelocityTradingWorkspace({
         </FadeInView>
       ) : null}
 
-      <View style={view === 'chart' ? styles.chartVisible : styles.chartHidden}>
-        <TradingViewMarketChart
-          candles={history.candles}
-          onTimeframeChange={setTimeframe}
-          status={history.status}
-          symbol={`${market.baseAsset}/USD · ${history.source === 'pyth' ? 'Pyth' : 'Pacifica'}`}
-          timeframe={timeframe}
-        />
-      </View>
+      {chartMounted ? (
+        <View style={view === 'chart' ? styles.chartVisible : styles.chartHidden}>
+          <TradingViewMarketChart
+            candles={history.candles}
+            onTimeframeChange={setTimeframe}
+            status={history.status}
+            symbol={`${market.baseAsset}/USD · ${history.source === 'pyth' ? 'Pyth' : 'Pacifica'}`}
+            timeframe={timeframe}
+          />
+        </View>
+      ) : null}
 
       {view === 'chart' ? (
         <>

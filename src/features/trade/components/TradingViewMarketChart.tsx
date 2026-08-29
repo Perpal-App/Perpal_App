@@ -1,5 +1,5 @@
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 
 import {
@@ -21,8 +21,10 @@ import {
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 type ChartStyle = 'candles' | 'line';
+const CHART_SOURCE = { html: TRADING_VIEW_CHART_HTML };
+const CHART_ORIGIN_WHITELIST = ['*'];
 
-export function TradingViewMarketChart({
+function TradingViewMarketChartComponent({
   candles,
   fill = false,
   onExpand,
@@ -240,11 +242,11 @@ export function TradingViewMarketChart({
               onHttpError={() => setFailed(true)}
               onMessage={handleMessage}
               onShouldStartLoadWithRequest={allowNavigation}
-              originWhitelist={['*']}
+              originWhitelist={CHART_ORIGIN_WHITELIST}
               ref={webView}
               scrollEnabled={false}
               setSupportMultipleWindows={false}
-              source={{ html: TRADING_VIEW_CHART_HTML }}
+              source={CHART_SOURCE}
               style={styles.webView}
             />
           ) : (
@@ -275,6 +277,8 @@ export function TradingViewMarketChart({
     </View>
   );
 }
+
+export const TradingViewMarketChart = memo(TradingViewMarketChartComponent);
 
 function ToolButton({
   label,

@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { EmptyState } from '@/components/feedback/EmptyState';
@@ -16,10 +16,8 @@ import {
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
 import { PacificaTradingWorkspace } from '@/features/trade/components/PacificaTradingWorkspace';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
-import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
 import { VelocityMarketDetailScreen } from '@/features/trade/screens/VelocityMarketDetailScreen';
 import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
-import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
 import { colors, fonts, layout, motion, radii, spacing, typography } from '@/theme/tokens';
 
 /** Placeholder shape shared with the markets table and the order ticket. */
@@ -60,14 +58,13 @@ function PacificaMarketDetailScreen({ venueRef }: { readonly venueRef: string })
     () => venue.markets.find((candidate) => candidate.venueRef === venueRef),
     [venue.markets, venueRef],
   );
-  const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
-
-  const history = usePacificaMarketHistory(
-    perps?.pacificaApiOrigin ?? '',
-    market?.venueRef ?? '',
-    timeframe,
-  );
-
+  const expandChart = useCallback(() => {
+    if (market === undefined) return;
+    router.push({
+      pathname: '/market-chart/[venueRef]',
+      params: { venueRef: market.venueRef },
+    });
+  }, [market, router]);
   // An empty catalog is not a missing market. Until the venue has answered we do
   // not know whether this instrument exists, so the screen waits instead of
   // claiming it is unavailable — that claim flashing up on every tap was the whole
@@ -184,17 +181,10 @@ function PacificaMarketDetailScreen({ venueRef }: { readonly venueRef: string })
 
       <RiseInView delay={motion.rise.stagger * 2}>
         <PacificaTradingWorkspace
-          candles={history.candles}
           config={config.value}
-          historyStatus={history.status}
           market={market}
-          onExpandChart={() => router.push({
-            pathname: '/market-chart/[venueRef]',
-            params: { venueRef: market.venueRef },
-          })}
-          onTimeframeChange={setTimeframe}
+          onExpandChart={expandChart}
           snapshot={snapshot}
-          timeframe={timeframe}
         />
       </RiseInView>
     </AppScreen>

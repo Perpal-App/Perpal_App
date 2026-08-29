@@ -11,6 +11,7 @@ import {
 
 const MAX_RECONNECT_MS = 15_000;
 const MAX_TRADES = 80;
+const PUBLISH_INTERVAL_MS = 250;
 
 export type VelocityPublicMarketStatus = 'loading' | 'live' | 'reconnecting' | 'error';
 
@@ -47,6 +48,9 @@ export function useVelocityPublicMarket(input: {
     let controller: AbortController | null = null;
     let socket: WebSocket | null = null;
     let reconnect: ReturnType<typeof setTimeout> | undefined;
+    let publishTimer: ReturnType<typeof setTimeout> | undefined;
+    let pendingBook: VelocityOrderBook | null = null;
+    let pendingTrades: VelocityPublicTrade[] = [];
     let loggedError: string | null = null;
 
     const logOnce = (cause: unknown) => {
@@ -68,6 +72,34 @@ export function useVelocityPublicMarket(input: {
         socket.close();
       }
       socket = null;
+      if (publishTimer !== undefined) clearTimeout(publishTimer);
+      publishTimer = undefined;
+      pendingBook = null;
+      pendingTrades = [];
+    };
+
+    const flush = () => {
+      publishTimer = undefined;
+      const book = pendingBook;
+      const trades = pendingTrades;
+      pendingBook = null;
+      pendingTrades = [];
+      if (!active || (book === null && trades.length === 0)) return;
+      setState((current) => {
+        const nextBook = book === null || (current.book !== null && current.book.slot > book.slot)
+          ? current.book
+          : book;
+        const nextTrades = trades.length === 0
+          ? current.trades
+          : mergeTrades(current.trades, trades);
+        return nextBook === current.book && nextTrades === current.trades
+          ? current
+          : { ...current, book: nextBook, trades: nextTrades };
+      });
+    };
+
+    const schedulePublish = () => {
+      publishTimer ??= setTimeout(flush, PUBLISH_INTERVAL_MS);
     };
 
     const scheduleReconnect = () => {
@@ -81,18 +113,21 @@ export function useVelocityPublicMarket(input: {
       }, base + Math.floor(Math.random() * 500));
     };
 
-    const applyBook = (book: VelocityOrderBook) => {
-      setState((current) => current.book !== null && current.book.slot > book.slot
-        ? current
-        : { ...current, book });
+    const applyBook = (book: VelocityOrderBook, immediate = false) => {
+      if (immediate) {
+        setState((current) => current.book !== null && current.book.slot > book.slot
+          ? current
+          : { ...current, book });
+        return;
+      }
+      if (pendingBook === null || pendingBook.slot <= book.slot) pendingBook = book;
+      schedulePublish();
     };
 
     const applyTrades = (trades: readonly VelocityPublicTrade[]) => {
       if (trades.length === 0) return;
-      setState((current) => ({
-        ...current,
-        trades: mergeTrades(current.trades, trades),
-      }));
+      pendingTrades.push(...trades);
+      schedulePublish();
     };
 
     const connect = () => {
@@ -105,7 +140,7 @@ export function useVelocityPublicMarket(input: {
         marketName: input.marketName,
         signal: requestController.signal,
       }).then((book) => {
-        if (active && !requestController.signal.aborted) applyBook(book);
+        if (active && !requestController.signal.aborted) applyBook(book, true);
       }).catch((cause) => {
         if (active && !requestController.signal.aborted) logOnce(cause);
       });

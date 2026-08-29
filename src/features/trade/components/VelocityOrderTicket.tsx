@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
@@ -41,7 +41,7 @@ import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Phase = 'idle' | 'preparing' | 'submitting' | 'pending';
 
-export function VelocityOrderTicket({
+function VelocityOrderTicketComponent({
   account,
   config,
   market,
@@ -344,6 +344,8 @@ export function VelocityOrderTicket({
     </View>
   );
 }
+
+export const VelocityOrderTicket = memo(VelocityOrderTicketComponent);
 
 function PreparationRows({ preparation }: { readonly preparation: VelocityTradePreparation }) {
   if (preparation.kind === 'conversion') {

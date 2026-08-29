@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
@@ -34,7 +34,7 @@ const TABS: readonly UnderlineTabOption<AccountTab>[] = [
   { id: 'history', label: 'Trade history' },
 ];
 
-export function VelocityTradeAccountPanel({
+function VelocityTradeAccountPanelComponent({
   account,
   config,
   history,
@@ -179,6 +179,8 @@ export function VelocityTradeAccountPanel({
     </View>
   );
 }
+
+export const VelocityTradeAccountPanel = memo(VelocityTradeAccountPanelComponent);
 
 function Positions(props: {
   readonly busyMarket: number | null;

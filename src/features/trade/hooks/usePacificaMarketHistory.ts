@@ -14,12 +14,14 @@ export function usePacificaMarketHistory(
   apiOrigin: string,
   symbol: string,
   timeframe: MarketTimeframe,
+  enabled = true,
 ) {
   const [candles, setCandles] = useState<readonly MarketCandle[]>([]);
   const [status, setStatus] = useState<MarketHistoryStatus>('loading');
   const hasData = useRef(false);
 
   useFocusEffect(useCallback(() => {
+    if (!enabled) return undefined;
     hasData.current = false;
     setCandles([]);
     setStatus('loading');
@@ -48,7 +50,7 @@ export function usePacificaMarketHistory(
       controller?.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [apiOrigin, symbol, timeframe]));
+  }, [apiOrigin, enabled, symbol, timeframe]));
 
   return { candles, status };
 }
