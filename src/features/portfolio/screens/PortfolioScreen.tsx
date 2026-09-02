@@ -52,9 +52,18 @@ export function PortfolioScreen() {
     );
   }
 
+  if (session.status === 'inactive') {
+    return (
+      <PortfolioState
+        action={{ label: 'Activate private trading', onPress: () => void session.activate() }}
+        message="Activate private trading to view private funds, positions, and activity."
+        title="Activate private trading"
+      />
+    );
+  }
+
   if (
     session.status === 'restoring' ||
-    session.status === 'inactive' ||
     session.status === 'activating' ||
     session.status === 'rotating'
   ) {
@@ -70,8 +79,8 @@ export function PortfolioScreen() {
           : { label: 'Retry private trading', onPress: session.retryRestore }}
         message={recoveryRequired
           ? 'The derived trading wallet does not match the recorded identity. No new identity was adopted.'
-          : 'Restore private wallet T to view funds, positions, and activity.'}
-        title={recoveryRequired ? 'Trading wallet recovery required' : 'Private trading setup paused'}
+          : 'Restore private trading to view funds, positions, and activity.'}
+        title={recoveryRequired ? 'Private trading recovery required' : 'Private trading setup paused'}
       />
     );
   }

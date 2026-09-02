@@ -282,6 +282,11 @@ function TradeHistory({
   const items = history.data.trades.slice(0, 20).map(velocityTradeActivityItem);
   return (
     <View style={styles.list}>
+      {history.status === 'stale' ? (
+        <Text accessibilityRole="alert" style={styles.stale}>
+          Showing confirmed history while the latest refresh retries.
+        </Text>
+      ) : null}
       {items.map((item, index) => (
         <ActivityRow item={item} key={item.id} last={index === items.length - 1} />
       ))}

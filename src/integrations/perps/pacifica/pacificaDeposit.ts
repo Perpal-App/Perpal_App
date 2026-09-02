@@ -59,7 +59,7 @@ export async function preparePacificaDeposit(input: {
   const owner = new PublicKey(input.owner);
   const programId = new PublicKey(input.programId);
   if (!owner.equals(new PublicKey(input.signer.publicKey))) {
-    throw new Error('Private wallet T does not match the Pacifica deposit signer.');
+    throw new Error('The private trading identity does not match the Pacifica deposit signer.');
   }
 
   const [blockhash, tokenBalanceBaseUnits, solBalance] = await Promise.all([
@@ -86,7 +86,7 @@ export async function preparePacificaDeposit(input: {
     }),
   ]);
   if (!Number.isSafeInteger(solBalance.value) || solBalance.value < 0) {
-    throw new Error('Private wallet T returned an invalid SOL balance.');
+    throw new Error('Private trading returned an invalid SOL balance.');
   }
 
   const transaction = new Transaction({

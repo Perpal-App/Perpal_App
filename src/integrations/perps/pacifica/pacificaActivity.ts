@@ -1,6 +1,7 @@
 import {
   PacificaApiError,
-  pacificaGet,
+  pacificaGetPage,
+  type PacificaPage,
 } from '@/integrations/perps/pacifica/pacificaApi';
 
 export type PacificaTradeActivity = {
@@ -24,45 +25,148 @@ export type PacificaBalanceActivity = {
 
 export type PacificaActivity = {
   readonly balances: readonly PacificaBalanceActivity[];
+  readonly incomplete: boolean;
   readonly trades: readonly PacificaTradeActivity[];
+  readonly truncated: boolean;
 };
 
-const HISTORY_LIMIT = '50';
+const HISTORY_LIMIT = '100';
+const MAX_HISTORY_PAGES = 10;
+const MAX_HISTORY_ITEMS = 1_000;
+
+type HistoryResult<T> = {
+  readonly items: readonly T[];
+  readonly truncated: boolean;
+};
+
+type Settled<T> = {
+  readonly data: T | null;
+  readonly error: unknown;
+};
 
 export async function fetchPacificaActivity(
   apiOrigin: string,
   account: string,
   signal?: AbortSignal,
+  mode: 'backfill' | 'latest' = 'latest',
 ): Promise<PacificaActivity> {
-  try {
-    const [trades, balances] = await Promise.all([
-      pacificaGet<unknown>({
-        apiOrigin,
-        path: '/trades/history',
-        query: { account, limit: HISTORY_LIMIT },
-        signal,
-      }),
-      pacificaGet<unknown>({
-        apiOrigin,
-        path: '/account/balance/history',
-        query: { account, limit: HISTORY_LIMIT },
-        signal,
-      }),
-    ]);
+  const maxPages = mode === 'backfill' ? MAX_HISTORY_PAGES : 1;
+  const [trades, balances] = await Promise.all([
+    settle(fetchHistory({
+      account,
+      apiOrigin,
+      maxPages,
+      parse: parsePacificaTradeActivity,
+      path: '/trades/history',
+      ...(signal === undefined ? {} : { signal }),
+    })),
+    settle(fetchHistory({
+      account,
+      apiOrigin,
+      maxPages,
+      parse: parsePacificaBalanceActivity,
+      path: '/account/balance/history',
+      ...(signal === undefined ? {} : { signal }),
+    })),
+  ]);
 
-    return {
-      balances: parsePacificaBalanceActivity(balances),
-      trades: parsePacificaTradeActivity(trades),
-    };
+  if (trades.data === null && balances.data === null) throw trades.error ?? balances.error;
+
+  return {
+    balances: balances.data?.items ?? [],
+    incomplete: trades.data === null || balances.data === null,
+    trades: trades.data?.items ?? [],
+    truncated: mode === 'backfill'
+      && (trades.data?.truncated === true || balances.data?.truncated === true),
+  };
+}
+
+export function mergePacificaActivity(
+  previous: PacificaActivity,
+  latest: PacificaActivity,
+): PacificaActivity {
+  const trades = unique(
+    previous.trades,
+    latest.trades,
+    (trade) => String(trade.historyId),
+  );
+  const balances = unique(
+    previous.balances,
+    latest.balances,
+    balanceKey,
+  );
+
+  return {
+    balances,
+    incomplete: latest.incomplete,
+    trades,
+    truncated: previous.truncated || latest.truncated,
+  };
+}
+
+async function fetchHistory<T>(input: {
+  readonly account: string;
+  readonly apiOrigin: string;
+  readonly maxPages: number;
+  readonly parse: (value: unknown) => readonly T[];
+  readonly path: string;
+  readonly signal?: AbortSignal;
+}): Promise<HistoryResult<T>> {
+  const items: T[] = [];
+  let cursor: string | null = null;
+
+  try {
+    for (let pageNumber = 0; pageNumber < input.maxPages; pageNumber += 1) {
+      const page: PacificaPage<unknown> = await pacificaGetPage<unknown>({
+        apiOrigin: input.apiOrigin,
+        path: input.path,
+        query: {
+          account: input.account,
+          limit: HISTORY_LIMIT,
+          ...(cursor === null ? {} : { cursor }),
+        },
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+      items.push(...input.parse(page.data));
+      if (!page.hasMore) return { items, truncated: false };
+      if (page.nextCursor === cursor) throw invalid('history pagination');
+      cursor = page.nextCursor;
+    }
+
+    return { items, truncated: true };
   } catch (cause) {
     if (
       cause instanceof PacificaApiError &&
       (cause.status === 404 || /account not found/iu.test(cause.message))
     ) {
-      return { balances: [], trades: [] };
+      return { items: [], truncated: false };
     }
     throw cause;
   }
+}
+
+async function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
+  try {
+    return { data: await promise, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
+}
+
+function unique<T extends { readonly createdAtMs: number }>(
+  previous: readonly T[],
+  latest: readonly T[],
+  key: (item: T) => string,
+): readonly T[] {
+  const values = new Map(previous.map((item) => [key(item), item]));
+  for (const item of latest) values.set(key(item), item);
+  return [...values.values()]
+    .sort((left, right) => right.createdAtMs - left.createdAtMs)
+    .slice(0, MAX_HISTORY_ITEMS);
+}
+
+function balanceKey(item: PacificaBalanceActivity): string {
+  return `${item.createdAtMs}:${item.eventType}:${item.amount}:${item.balance}`;
 }
 
 export function parsePacificaTradeActivity(value: unknown): readonly PacificaTradeActivity[] {

@@ -91,7 +91,7 @@ export function ProviderFundsPanel(props: {
       props.onPacificaRefresh();
       publishInAppNotification({
         kind: 'withdrawal', outcome: 'success', title: 'Pacifica funds moved',
-        message: `${stable(moved)} USDC is available in private wallet T.`,
+        message: `${stable(moved)} USDC returned to your private balance.`,
       });
     } catch (cause) {
       if (!abort.signal.aborted) {
@@ -156,7 +156,7 @@ export function ProviderFundsPanel(props: {
       return;
     }
     Alert.alert(
-      'Move Velocity funds to T?',
+      'Return Velocity funds?',
       `Amount: ${stable(preparation.plan.amountBaseUnits)} USDT\n` +
         `Network fee: ${sol(preparation.plan.feeLamports)} SOL\n` +
         'Open positions remain untouched. Velocity limits the withdrawal to free collateral.',
@@ -171,7 +171,7 @@ export function ProviderFundsPanel(props: {
   const submitVelocity = async (preparation: VelocityTradePreparation) => {
     if (!config.ok || session.address === null || session.signer === null) {
       setBusy(null);
-      publishFailure('Velocity', new Error('Private wallet T changed. Review the withdrawal again.'));
+      publishFailure('Velocity', new Error('Private trading changed. Review the withdrawal again.'));
       return;
     }
     try {
@@ -186,7 +186,7 @@ export function ProviderFundsPanel(props: {
         outcome: result.status === 'confirmed' ? 'success' : 'info',
         title: result.status === 'confirmed' ? 'Velocity funds moved' : 'Withdrawal submitted',
         message: result.status === 'confirmed'
-          ? `${stable(preparation.plan.amountBaseUnits)} USDT is available in private wallet T.`
+          ? `${stable(preparation.plan.amountBaseUnits)} USDT returned to your private balance.`
           : 'Velocity is confirming the withdrawal. It will resume safely.',
       });
       props.onBalancesChanged();
@@ -200,16 +200,16 @@ export function ProviderFundsPanel(props: {
 
   return (
     <View style={styles.panel}>
-      <Text accessibilityRole="header" style={styles.title}>Move to private wallet T</Text>
+      <Text accessibilityRole="header" style={styles.title}>Return provider funds</Text>
       <View style={styles.provider}>
         <StatusRow label="Pacifica USDC" value={token(pacificaAvailable, 'USDC')} />
         <ActionButton
           disabled={!ready || (!pacificaPending &&
             (pacificaAvailable === null || pacificaAvailable <= 0n))}
-          label={pacificaPending ? 'Resume Pacifica move' : 'Move from Pacifica'}
+          label={pacificaPending ? 'Resume Pacifica return' : 'Return from Pacifica'}
           loading={busy === 'pacifica'}
           onPress={() => Alert.alert(
-            'Move Pacifica funds to T?',
+            'Return Pacifica funds?',
             pacificaPending
               ? 'Resume the existing withdrawal without submitting another request.'
               : `${token(pacificaAvailable, 'USDC')} will be moved after the configured venue fee.`,
@@ -224,7 +224,7 @@ export function ProviderFundsPanel(props: {
         <StatusRow label="Velocity USDT" value={token(velocityAvailable, 'USDT')} />
         <ActionButton
           disabled={!ready || velocityAvailable === null || velocityAvailable <= 0n}
-          label="Move from Velocity"
+          label="Return from Velocity"
           loading={busy === 'velocity'}
           onPress={() => void prepareVelocity()}
           tone="neutral"

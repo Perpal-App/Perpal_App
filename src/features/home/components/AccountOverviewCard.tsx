@@ -67,10 +67,10 @@ export function AccountOverviewCard({
       <View style={styles.activation}>
         <Text style={styles.activationTitle}>Activate private trading</Text>
         <Text style={styles.activationMessage}>
-          Create or restore private wallet T to hold private funds and sign trades on this device.
+          Create or restore private trading to hold private funds and sign on this device.
         </Text>
         <PressableScale
-          accessibilityHint="Creates or restores private wallet T"
+          accessibilityHint="Creates or restores private trading"
           accessibilityLabel="Activate private trading"
           accessibilityRole="button"
           onPress={onActivate}

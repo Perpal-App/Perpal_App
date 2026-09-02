@@ -83,7 +83,7 @@ export function DirectWithdrawPanel({
         setPhase('idle');
         showAppToast({
           outcome: 'info', title: 'Withdrawal not confirmed',
-          message: 'The signed transfer expired. The amount remains available in private wallet T.',
+          message: 'The signed transfer expired. The amount remains in your private balance.',
         });
       }
     }).catch((cause) => {
@@ -211,7 +211,7 @@ export function DirectWithdrawPanel({
       `Amount: ${formatTokenAmount(plan.amountBaseUnits, plan.decimals)} ${plan.symbol}\n` +
       `Destination: ${short(plan.destinationAddress)}\n` +
       `Network fee: ${sol(plan.feeLamports)}${rent}\n` +
-      'This public route is visible on Solana and does not use Umbra or charge an Umbra registration fee. The transfer is atomic: if it fails, the amount remains in T.',
+      'This public route is visible on Solana and does not use Umbra or charge an Umbra registration fee. The transfer is atomic: if it fails, the amount remains available.',
       [
         { text: 'Cancel', style: 'cancel', onPress: () => setPhase('idle') },
         { text: 'Confirm and sign', onPress: () => void submit(plan) },
@@ -259,7 +259,7 @@ export function DirectWithdrawPanel({
     <View style={styles.panel}>
       <Text accessibilityRole="header" style={styles.title}>Direct withdrawal</Text>
       <Text style={styles.note}>
-        Sends from T without Umbra. Move provider collateral to T first. Failed transfers leave the amount in T; Solana may still charge a network fee.
+        Sends directly from your private balance. Return provider funds first. Failed transfers keep the amount available; Solana may still charge a network fee.
       </Text>
       <View style={styles.buttons}>
         <ActionButton
@@ -381,10 +381,10 @@ function directErrorMessage(cause: unknown): string {
   if (cause instanceof DirectWithdrawalError) return cause.message;
   if (cause instanceof TransactionSigningError) {
     if (cause.code === 'transaction_failed') {
-      return 'The transfer failed on-chain. The amount remains in T; Solana may still charge a network fee.';
+      return 'The transfer failed on-chain. The amount remains available; Solana may still charge a network fee.';
     }
     if (cause.code === 'submission_rejected') {
-      return 'Solana rejected the transfer before submission. The amount remains available in T.';
+      return 'Solana rejected the transfer before submission. The amount remains available.';
     }
     if (cause.code === 'blockhash_expired') return 'The withdrawal preview expired. Review it again.';
     if (cause.code.includes('signature')) return 'The withdrawal was not approved. No funds were moved.';

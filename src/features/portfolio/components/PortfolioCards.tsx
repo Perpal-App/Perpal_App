@@ -52,7 +52,7 @@ export function PositionCard({ position }: { readonly position: PacificaPosition
         </Text>
         {/* The margin mode rides the header rather than taking a figure cell of its own. It is a
             parameter of the position, not a number to scan against the others. */}
-        <Text numberOfLines={1} style={styles.mode}>{position.marginMode}</Text>
+        <Text numberOfLines={1} style={styles.mode}>Pacifica · {position.marginMode}</Text>
         <Text style={long ? styles.long : styles.short}>{long ? 'Long' : 'Short'}</Text>
       </View>
 
@@ -93,6 +93,7 @@ export function OrderCard({
         <Text accessibilityRole="header" numberOfLines={1} style={styles.symbol}>
           {order.symbol}
         </Text>
+        <Text numberOfLines={1} style={styles.mode}>Pacifica</Text>
         <Text style={bid ? styles.long : styles.short}>{bid ? 'Buy' : 'Sell'}</Text>
       </View>
 
@@ -126,7 +127,7 @@ export function VelocityPositionCard({
         <Text accessibilityRole="header" numberOfLines={1} style={styles.symbol}>
           {position.symbol}
         </Text>
-        <Text numberOfLines={1} style={styles.mode}>{position.marginMode}</Text>
+        <Text numberOfLines={1} style={styles.mode}>Velocity · {position.marginMode}</Text>
         <Text style={long ? styles.long : styles.short}>{long ? 'Long' : 'Short'}</Text>
       </View>
       <View style={styles.figures}>
@@ -161,6 +162,7 @@ export function VelocityOrderCard({ order }: { readonly order: VelocityOpenOrder
         <Text accessibilityRole="header" numberOfLines={1} style={styles.symbol}>
           {order.symbol}
         </Text>
+        <Text numberOfLines={1} style={styles.mode}>Velocity</Text>
         <Text style={long ? styles.long : styles.short}>{long ? 'Buy' : 'Sell'}</Text>
       </View>
       <View style={styles.figures}>

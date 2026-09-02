@@ -17,17 +17,46 @@ export class PacificaApiError extends Error {
   }
 }
 
-export async function pacificaGet<T>(input: {
+type PacificaGetInput = {
   readonly apiOrigin: string;
   readonly path: string;
   readonly query?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal | undefined;
-}): Promise<T> {
+};
+
+export type PacificaPage<T> = {
+  readonly data: T;
+  readonly hasMore: boolean;
+  readonly nextCursor: string | null;
+};
+
+export async function pacificaGet<T>(input: PacificaGetInput): Promise<T> {
+  const envelope = await getEnvelope(input);
+  return envelope.data as T;
+}
+
+export async function pacificaGetPage<T>(input: PacificaGetInput): Promise<PacificaPage<T>> {
+  const envelope = await getEnvelope(input);
+  const hasMore = envelope.has_more === true;
+  const nextCursor = typeof envelope.next_cursor === 'string' && envelope.next_cursor.length > 0
+    ? envelope.next_cursor
+    : null;
+  if (hasMore && nextCursor === null) {
+    throw new PacificaApiError(
+      'Pacifica returned invalid pagination data.',
+      'response_invalid',
+      0,
+    );
+  }
+  return { data: envelope.data as T, hasMore, nextCursor };
+}
+
+async function getEnvelope(input: PacificaGetInput): Promise<Record<string, unknown>> {
   const url = endpoint(input.apiOrigin, input.path);
   for (const [key, value] of Object.entries(input.query ?? {})) {
     url.searchParams.set(key, value);
   }
-  return request<T>(url, { method: 'GET' }, input.signal);
+  return requestEnvelope(url, { method: 'GET' }, input.signal);
 }
 
 export async function pacificaPostSigned<T>(input: {
@@ -43,7 +72,7 @@ export async function pacificaPostSigned<T>(input: {
     base58.encode(input.signer.publicKey) !== input.account
   ) {
     throw new PacificaApiError(
-      'Private wallet T does not match the Pacifica request signer.',
+      'The private trading identity does not match the Pacifica signer.',
       'signer_mismatch',
       0,
     );
@@ -63,7 +92,7 @@ export async function pacificaPostSigned<T>(input: {
     !ed25519.verify(signature, message, input.signer.publicKey)
   ) {
     throw new PacificaApiError(
-      'Private wallet T returned an invalid Pacifica signature.',
+      'Private trading returned an invalid Pacifica signature.',
       'signature_invalid',
       0,
     );
@@ -76,11 +105,12 @@ export async function pacificaPostSigned<T>(input: {
     expiry_window: EXPIRY_WINDOW_MS,
     ...input.payload,
   });
-  return request<T>(
+  const envelope = await requestEnvelope(
     endpoint(input.apiOrigin, `/${operationPath(input.operation)}`),
     { method: 'POST', body, headers: { 'content-type': 'application/json' } },
     input.signal,
   );
+  return envelope.data as T;
 }
 
 export type PacificaOperation =
@@ -96,11 +126,11 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortValue(value));
 }
 
-async function request<T>(
+async function requestEnvelope(
   url: URL,
   init: RequestInit,
   signal?: AbortSignal,
-): Promise<T> {
+): Promise<Record<string, unknown>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const abort = () => controller.abort();
@@ -126,7 +156,7 @@ async function request<T>(
         response.status,
       );
     }
-    return envelope.data as T;
+    return envelope;
   } catch (cause) {
     if (cause instanceof PacificaApiError) throw cause;
     if (cause instanceof SyntaxError) {

@@ -31,7 +31,7 @@ export function WithdrawPanel({
       </View>
       <View accessibilityRole="radiogroup" style={styles.routes}>
         <ActionButton
-          accessibilityHint="Sends directly from private wallet T without Umbra"
+          accessibilityHint="Sends directly from your private balance without Umbra"
           label="Direct"
           onPress={() => setRoute('direct')}
           selected={route === 'direct'}

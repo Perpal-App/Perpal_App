@@ -2,8 +2,6 @@ import { useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
-import { layoutMorph } from '@/components/motion/layoutMorph';
-import { RiseInView } from '@/components/motion/RiseInView';
 import { ActionButton } from '@/components/ui/ActionButton';
 import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
@@ -25,7 +23,7 @@ import type {
 import type { VelocityAccountSnapshot } from '@/integrations/perps/velocity/velocityAccount';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
-import { colors, layout, motion, spacing, typography } from '@/theme/tokens';
+import { colors, layout, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Props = {
@@ -38,19 +36,6 @@ type Props = {
   readonly velocityHistory: VelocityHistoryState;
 };
 
-/**
- * Portfolio: what the account is worth, what is open against it, and how funds move.
- *
- * Stripped of the copy that used to sit under every heading — "Your funds and active trades",
- * "Deposit privately from public wallet M or withdraw from your private balance", "Trades and fund
- * movements". Each restated the heading above it in a longer form, and on a screen whose whole
- * purpose is figures they were the only thing that could not be scanned. The two funding buttons and
- * the sheets they open say what they do.
- *
- * Sections appear only when they have something in them, so an account with no positions shows no
- * empty "Positions" heading, and the screen is short because there is nothing to report rather than
- * because something failed to load.
- */
 export function PacificaPortfolioContent({
   balances,
   onBalancesChanged,
@@ -66,6 +51,8 @@ export function PacificaPortfolioContent({
   const orders = snapshot?.orders ?? [];
   const velocityPositions = velocity?.positions ?? [];
   const velocityOrders = velocity?.orders ?? [];
+  const hasPositions = positions.length > 0 || velocityPositions.length > 0;
+  const hasOrders = orders.length > 0 || velocityOrders.length > 0;
 
   const cancel = (order: PacificaOpenOrder) => Alert.alert(
     `Cancel ${order.symbol} order?`,
@@ -84,6 +71,7 @@ export function PacificaPortfolioContent({
             signer: session.signer,
             symbol: order.symbol,
           }).then(() => {
+            onPacificaRefresh();
             publishInAppNotification({
               kind: 'trade',
               outcome: 'success',
@@ -105,62 +93,40 @@ export function PacificaPortfolioContent({
 
   return (
     <AppScreen contentContainerStyle={styles.container}>
-      {/* Every block carries the same layout spring, and it has to be every one of them: Reanimated
-          places a block further down at its final position on the frame after a change, so animating
-          only the one that resized leaves its neighbours snapping around it. That matters here more
-          than anywhere — positions and orders arrive and leave while the screen is open. */}
-      <RiseInView layout={layoutMorph()}>
-        <Text accessibilityRole="header" style={styles.title}>Portfolio</Text>
-      </RiseInView>
+      <Text accessibilityRole="header" style={styles.title}>Portfolio</Text>
 
-      <RiseInView delay={motion.rise.stagger} layout={layoutMorph()}>
-        <AccountOverviewCard
-          balances={balances}
-          portfolio={snapshot}
-          velocity={velocity}
-        />
-      </RiseInView>
+      <AccountOverviewCard balances={balances} portfolio={snapshot} velocity={velocity} />
 
-      {positions.length === 0 ? null : (
-        <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.section}>
-          <Text accessibilityRole="header" style={styles.heading}>Positions</Text>
+      {hasPositions ? (
+        <View style={styles.section}>
+          <Text accessibilityRole="header" style={styles.heading}>Open positions</Text>
           {positions.map((position) => (
-            <PositionCard key={`${position.symbol}:${position.side}`} position={position} />
+            <PositionCard key={`pacifica:${position.symbol}:${position.side}`} position={position} />
           ))}
-        </RiseInView>
-      )}
-
-      {velocityPositions.length === 0 ? null : (
-        <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.section}>
-          <Text accessibilityRole="header" style={styles.heading}>Velocity positions</Text>
           {velocityPositions.map((position) => (
-            <VelocityPositionCard key={position.marketIndex} position={position} />
+            <VelocityPositionCard key={`velocity:${position.marketIndex}`} position={position} />
           ))}
-        </RiseInView>
-      )}
+        </View>
+      ) : null}
 
-      {orders.length === 0 ? null : (
-        <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.section}>
-          <Text accessibilityRole="header" style={styles.heading}>Orders</Text>
+      {hasOrders ? (
+        <View style={styles.section}>
+          <Text accessibilityRole="header" style={styles.heading}>Open orders</Text>
           {orders.map((order) => (
-            <OrderCard key={order.orderId} onCancel={() => cancel(order)} order={order} />
+            <OrderCard
+              key={`pacifica:${order.orderId}`}
+              onCancel={() => cancel(order)}
+              order={order}
+            />
           ))}
-        </RiseInView>
-      )}
-
-      {velocityOrders.length === 0 ? null : (
-        <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.section}>
-          <Text accessibilityRole="header" style={styles.heading}>Velocity orders</Text>
           {velocityOrders.map((order) => (
-            <VelocityOrderCard key={order.orderId} order={order} />
+            <VelocityOrderCard key={`velocity:${order.orderId}`} order={order} />
           ))}
-        </RiseInView>
-      )}
+        </View>
+      ) : null}
 
-      <RiseInView delay={motion.rise.stagger * 3} layout={layoutMorph()} style={styles.section}>
+      <View style={styles.section}>
         <Text accessibilityRole="header" style={styles.heading}>Funds</Text>
-        {/* The screen already polls both of these for the overview card above, so they are handed down
-            rather than fetched again inside the sheet — one owner per refresh. */}
         <Funds
           balances={balances}
           onBalancesChanged={onBalancesChanged}
@@ -169,28 +135,18 @@ export function PacificaPortfolioContent({
           snapshot={snapshot}
           velocity={velocity}
         />
-      </RiseInView>
+      </View>
 
-      <RiseInView delay={motion.rise.stagger * 4} layout={layoutMorph()}>
-        <GlobalActivityTracker
-          account={session.address ?? ''}
-          apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
-          onVelocityRefresh={onVelocityRefresh}
-          velocityHistory={velocityHistory}
-        />
-      </RiseInView>
+      <GlobalActivityTracker
+        account={session.address ?? ''}
+        apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
+        onVelocityRefresh={onVelocityRefresh}
+        velocityHistory={velocityHistory}
+      />
     </AppScreen>
   );
 }
 
-/**
- * The two ways funds move, as one pair of actions.
- *
- * Deposit takes the accent material and withdraw the neutral one, which is the same primary and
- * secondary pairing the order bar uses for its two sides — one construction, different weight. The
- * sentence that used to sit above them explained which wallet each drew from; the sheet each one
- * opens states that at the point it matters.
- */
 function Funds({
   balances,
   onBalancesChanged,
@@ -218,15 +174,15 @@ function Funds({
           style={styles.action}
         />
         <ActionButton
-          accessibilityHint="Opens the private wallet swap panel"
+          accessibilityHint="Opens the private balance swap panel"
           label="Swap"
           onPress={() => setMode('swap')}
           style={styles.action}
           tone="neutral"
         />
         <ActionButton
-          accessibilityHint="Moves available provider collateral back to private wallet T"
-          label="Move to T"
+          accessibilityHint="Returns available provider collateral to your private balance"
+          label="Return"
           onPress={() => setMode('providers')}
           style={styles.action}
           tone="neutral"
@@ -261,14 +217,10 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.lg,
-    // The floating bar draws over this screen, so the last row buys its own room.
     paddingBottom: TAB_BAR_CLEARANCE,
     gap: spacing.lg,
   },
   title: { ...typography.title, color: colors.textPrimary },
-  // A section is its heading and its cards, separated from the block above by the screen's own gap
-  // rather than by a rule. The hairlines that used to top every section drew four lines across a
-  // screen that already had a card edge every few points.
   section: { gap: spacing.sm },
   heading: { ...typography.label, color: colors.textPrimary },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

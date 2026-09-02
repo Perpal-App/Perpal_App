@@ -5,6 +5,12 @@ import type { ActivityItem } from '@/features/portfolio/components/activityItems
 import { colors, spacing, typography } from '@/theme/tokens';
 
 const GLYPH_SIZE = 20;
+const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  month: 'short',
+});
 
 /**
  * One event in the history: what happened, what it was worth, and when.
@@ -108,12 +114,7 @@ function ActivityGlyph({ item }: { readonly item: ActivityItem }) {
 }
 
 function formatTime(timeMs: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    month: 'short',
-  }).format(new Date(timeMs));
+  return DATE_FORMATTER.format(new Date(timeMs));
 }
 
 const styles = StyleSheet.create({

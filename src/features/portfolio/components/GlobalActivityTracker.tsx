@@ -8,11 +8,9 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { EmptyHistoryMark } from '@/assets/svg/EmptyHistoryMark';
 import { SkeletonText } from '@/components/feedback/Skeleton';
-import { layoutMorph } from '@/components/motion/layoutMorph';
 import { PressableScale } from '@/components/ui/PressableScale';
 import {
   ActivityFilters,
@@ -26,6 +24,7 @@ import {
 } from '@/features/portfolio/components/activityItems';
 import {
   fetchPacificaActivity,
+  mergePacificaActivity,
   type PacificaActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
 import type { VelocityHistoryState } from '@/features/portfolio/hooks/useVelocityAccount';
@@ -35,7 +34,8 @@ import {
 } from '@/storage/inAppNotifications';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
-const REFRESH_INTERVAL_MS = 15_000;
+const REFRESH_INTERVAL_MS = 5_000;
+const VISIBLE_PAGE_SIZE = 40;
 
 type RemoteState = {
   readonly data: PacificaActivity | null;
@@ -73,6 +73,7 @@ export function GlobalActivityTracker({
   );
   const [filter, setFilter] = useState<ActivityFilter>('all');
   const [query, setQuery] = useState('');
+  const [visibleLimit, setVisibleLimit] = useState(VISIBLE_PAGE_SIZE);
 
   const items = useMemo(
     () => mergeActivity(remote.state.data, velocityHistory.data, local),
@@ -84,10 +85,12 @@ export function GlobalActivityTracker({
     )),
     [filter, items, query],
   );
+  const displayed = visible.slice(0, visibleLimit);
 
   const remoteUnavailable = remote.state.status === 'error'
     || remote.state.status === 'stale'
-    || velocityHistory.status === 'error';
+    || velocityHistory.status === 'error'
+    || velocityHistory.status === 'stale';
   const loading = (remote.state.status === 'loading'
     || velocityHistory.status === 'loading'
     || remoteUnavailable)
@@ -118,21 +121,24 @@ export function GlobalActivityTracker({
           could not see what the section is capable of until it already had contents. */}
       <ActivityFilters
         filter={filter}
-        onFilterChange={setFilter}
-        onQueryChange={setQuery}
+        onFilterChange={(next) => {
+          setFilter(next);
+          setVisibleLimit(VISIBLE_PAGE_SIZE);
+        }}
+        onQueryChange={(next) => {
+          setQuery(next);
+          setVisibleLimit(VISIBLE_PAGE_SIZE);
+        }}
         query={query}
       />
 
-      {velocityHistory.data?.truncated ? (
+      {remote.state.data?.truncated || velocityHistory.data?.truncated ? (
         <Text accessibilityRole="alert" selectable style={styles.error}>
-          Showing the latest 1,000 Velocity account transactions.
+          Showing the latest available provider history.
         </Text>
       ) : null}
 
-      {/* The list resizes on every filter press and every keystroke, so it carries the app's layout
-          spring — and so does the section, because a box that grows while its neighbours snap around
-          it is worse than no animation at all. */}
-      <Animated.View layout={layoutMorph()} style={styles.list}>
+      <View style={styles.list}>
         {loading ? (
           <View accessibilityLabel="Loading activity" accessibilityRole="progressbar" style={styles.loading}>
             <SkeletonText role="label" width="82%" />
@@ -148,11 +154,22 @@ export function GlobalActivityTracker({
               : 'No activity of this kind yet.'}
           </Text>
         ) : (
-          visible.map((item, index) => (
-            <ActivityRow item={item} key={item.id} last={index === visible.length - 1} />
+          displayed.map((item, index) => (
+            <ActivityRow item={item} key={item.id} last={index === displayed.length - 1} />
           ))
         )}
-      </Animated.View>
+      </View>
+
+      {displayed.length < visible.length ? (
+        <PressableScale
+          accessibilityLabel="Show older activity"
+          accessibilityRole="button"
+          onPress={() => setVisibleLimit((current) => current + VISIBLE_PAGE_SIZE)}
+          style={styles.more}
+        >
+          <Text style={styles.moreText}>Show older</Text>
+        </PressableScale>
+      ) : null}
 
       {/* Says what the list is showing without making the reader count rows, and names the filter —
           which is the one thing lost by moving the options behind a button. Only once something is
@@ -195,14 +212,16 @@ function EmptyHistory() {
 function usePacificaActivity(apiOrigin: string, account: string) {
   const [state, setState] = useState<RemoteState>({ data: null, status: 'loading' });
   const [refreshKey, setRefreshKey] = useState(0);
-  const hasData = useRef(false);
+  const data = useRef<PacificaActivity | null>(null);
+  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
 
   useEffect(() => {
-    hasData.current = false;
+    data.current = null;
     setState({ data: null, status: 'loading' });
   }, [account, apiOrigin]);
 
   useFocusEffect(useCallback(() => {
+    if (account.length === 0 || apiOrigin.length === 0) return undefined;
     let active = true;
     let controller: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -211,10 +230,17 @@ function usePacificaActivity(apiOrigin: string, account: string) {
       controller?.abort();
       controller = new AbortController();
       try {
-        const data = await fetchPacificaActivity(apiOrigin, account, controller.signal);
+        const current = data.current;
+        const next = await fetchPacificaActivity(
+          apiOrigin,
+          account,
+          controller.signal,
+          current === null || current.incomplete ? 'backfill' : 'latest',
+        );
         if (active) {
-          hasData.current = true;
-          setState({ data, status: 'ready' });
+          const merged = current === null ? next : mergePacificaActivity(current, next);
+          data.current = merged;
+          setState({ data: merged, status: merged.incomplete ? 'stale' : 'ready' });
         }
       } catch (cause) {
         if (active && !controller.signal.aborted) {
@@ -225,7 +251,7 @@ function usePacificaActivity(apiOrigin: string, account: string) {
           }
           setState((current) => ({
             data: current.data,
-            status: hasData.current ? 'stale' : 'error',
+            status: data.current === null ? 'error' : 'stale',
           }));
         }
       } finally {
@@ -242,7 +268,7 @@ function usePacificaActivity(apiOrigin: string, account: string) {
   }, [account, apiOrigin, refreshKey]));
 
   return {
-    refresh: () => setRefreshKey((value) => value + 1),
+    refresh,
     state,
   };
 }
@@ -276,6 +302,14 @@ const styles = StyleSheet.create({
   loading: { gap: spacing.sm, paddingVertical: spacing.md },
   status: { ...typography.bodyCompact, paddingVertical: spacing.md, color: colors.textSecondary },
   error: { ...typography.caption, color: colors.negative },
+  more: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceElevated,
+  },
+  moreText: { ...typography.label, color: colors.textPrimary },
   count: { ...typography.caption, color: colors.textMuted },
   empty: { alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xl },
   emptyTitle: { ...typography.label, marginTop: spacing.xs, color: colors.textPrimary },

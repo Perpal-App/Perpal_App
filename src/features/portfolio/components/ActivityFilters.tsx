@@ -27,7 +27,7 @@ export type ActivityFilter = 'all' | ActivityKind;
 const FILTERS: readonly MenuOption<ActivityFilter>[] = [
   { id: 'all', label: 'All activity' },
   { id: 'trade', label: 'Trades' },
-  { id: 'funding', label: 'Deposits' },
+  { id: 'funding', label: 'Funds' },
   { id: 'withdrawal', label: 'Withdrawals' },
 ];
 

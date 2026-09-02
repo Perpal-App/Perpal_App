@@ -347,7 +347,7 @@ export async function prepareVelocityTransactionPlan(input: {
   if (fee.value === null || !Number.isSafeInteger(fee.value) || !Number.isSafeInteger(balance.value)) {
     throw new Error('Velocity network fee could not be verified.');
   }
-  if (balance.value < fee.value) throw new Error('Private wallet T needs more SOL for this action.');
+  if (balance.value < fee.value) throw new Error('Your private balance needs more SOL for this action.');
   if (input.action === 'setup') {
     const simulation = await signedSolanaRpc<{
       readonly value: {
@@ -382,7 +382,7 @@ export async function prepareVelocityTransactionPlan(input: {
         BigInt(fee.value),
       );
       if (shortfall !== null) {
-        throw new Error(`Add at least ${sol(shortfall)} SOL to private wallet T for setup.`);
+        throw new Error(`Add at least ${sol(shortfall)} SOL to your private balance for setup.`);
       }
       const remainingLamports = simulation.value.accounts?.[0]?.lamports ??
         simulation.value.postBalances?.[0];
@@ -397,12 +397,12 @@ export async function prepareVelocityTransactionPlan(input: {
         });
         if (Number.isSafeInteger(rentMinimum) && rentMinimum > remainingLamports) {
           throw new Error(
-            `Add at least ${sol(BigInt(rentMinimum - remainingLamports))} SOL to private wallet T for its rent reserve.`,
+            `Add at least ${sol(BigInt(rentMinimum - remainingLamports))} SOL to your private balance for its rent reserve.`,
           );
         }
       }
       if (velocitySetupLeavesWalletBelowRent(simulation.value.err)) {
-        throw new Error('Add SOL to private wallet T so it remains rent-exempt after setup.');
+        throw new Error('Add SOL to your private balance so it remains rent-exempt after setup.');
       }
       throw new Error('Velocity setup could not be prepared.');
     }

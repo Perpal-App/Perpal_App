@@ -80,7 +80,7 @@ export function PrivateWithdrawPanel({
   const empty = withdrawable.length === 0;
   const nativeSol = asset?.kind === 'native';
   // The venue keeps its margin in USDC, so only a USDC withdrawal can pull from the trading account
-  // and only a USDC withdrawal pays the venue's withdrawal fee. Anything else is already in T.
+  // Only a USDC withdrawal pays the venue's withdrawal fee; other assets are already private.
   const collectsFromVenue = symbol === 'USDC';
 
   const confirm = () => {
@@ -102,8 +102,8 @@ export function PrivateWithdrawPanel({
         nativeSol ? 'Withdraw SOL privately' : 'Withdraw privately',
         [
           nativeSol
-            ? `${amount.trim()} SOL will move from private wallet T through Umbra`
-            : `${amount.trim()} ${asset.symbol} will move through private wallet T, then privately`,
+            ? `${amount.trim()} SOL will move from your private balance through Umbra`
+            : `${amount.trim()} ${asset.symbol} will move from your private balance through Umbra`,
           `to ${destinationMode === 'privy' ? 'your public wallet' : 'the external wallet'}.`,
           collectsFromVenue ? `Trading withdrawal fee: ${feeLabel()}.` : null,
           nativeSol
@@ -134,10 +134,10 @@ export function PrivateWithdrawPanel({
         {empty
           ? 'Nothing to withdraw yet. Deposited collateral and closed margin appear here.'
           : collectsFromVenue
-            ? 'One withdrawal collects the USDC into your private wallet, then delivers it privately.'
+            ? 'One withdrawal collects the USDC into your private balance, then delivers it privately.'
             : nativeSol
               ? 'SOL is delivered privately through Umbra and arrives as native SOL.'
-            : `${symbol} is already in your private wallet and is delivered privately in one step.`}
+            : `${symbol} is already in your private balance and is delivered privately in one step.`}
       </Text>
 
       <View style={styles.buttons}>
@@ -342,7 +342,7 @@ function ChevronDown() {
 /**
  * Which supported tokens the account actually holds, and how much.
  *
- * USDC counts what is in private wallet T *plus* what the venue reports as withdrawable, because one
+ * USDC counts the private balance plus what the venue reports as withdrawable, because one
  * withdrawal collects the second into the first before delivering it. Counting only the wallet would
  * hide USDC from a trader holding all of it as margin — which is most traders, most of the time — and
  * leave them with no way to withdraw at all.

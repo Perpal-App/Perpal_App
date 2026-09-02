@@ -28,6 +28,7 @@ describe('Velocity trade history', () => {
       makerFee: bn('-1600'),
       ts: bn('1700000000'),
       slot: 42,
+      txSig: 'signature-a',
       txSigIndex: 3,
     } as unknown as WrappedEvent<EventType>;
 
@@ -36,9 +37,10 @@ describe('Velocity trade history', () => {
         amountBaseUnits: 1_000_000_000n,
         effect: 'closed',
         feeBaseUnits: 7_200n,
+        id: 'velocity:signature-a:3',
         priceBaseUnits: 80_000_000n,
         role: 'taker',
-        side: 'short',
+        side: 'long',
       }),
     ]);
     expect(parseVelocityTradeEvents([event], new PublicKey(new Uint8Array(32).fill(3))))

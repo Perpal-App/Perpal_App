@@ -7,6 +7,7 @@ import { StatusRow } from '@/components/ui/StatusRow';
 import { formatAmountWithCommas, parseAmount } from '@/domain/money/amount';
 import {
   fetchPacificaActivity,
+  mergePacificaActivity,
   type PacificaActivity,
   type PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
@@ -34,7 +35,7 @@ const TABS: readonly UnderlineTabOption<AccountTab>[] = [
   { id: 'orders', label: 'Open orders' },
   { id: 'history', label: 'Trade history' },
 ];
-const REFRESH_INTERVAL_MS = 10_000;
+const REFRESH_INTERVAL_MS = 5_000;
 
 export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: string }) {
   const session = useTradingSession();
@@ -200,9 +201,12 @@ function useTradeAccountData(apiOrigin: string, account: string | null) {
   const [state, setState] = useState<AccountState>({ activity: null, portfolio: null, status: 'loading' });
   const [refreshKey, setRefreshKey] = useState(0);
   const hasData = useRef(false);
+  const activityData = useRef<PacificaActivity | null>(null);
+  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
 
   useEffect(() => {
     hasData.current = false;
+    activityData.current = null;
     setState({ activity: null, portfolio: null, status: 'loading' });
   }, [account, apiOrigin]);
 
@@ -215,13 +219,27 @@ function useTradeAccountData(apiOrigin: string, account: string | null) {
       controller?.abort();
       controller = new AbortController();
       try {
+        const previousActivity = activityData.current;
         const [portfolio, activity] = await Promise.all([
           fetchPacificaPortfolio(apiOrigin, account, controller.signal),
-          fetchPacificaActivity(apiOrigin, account, controller.signal),
+          fetchPacificaActivity(
+            apiOrigin,
+            account,
+            controller.signal,
+            previousActivity === null || previousActivity.incomplete ? 'backfill' : 'latest',
+          ),
         ]);
         if (active) {
+          const mergedActivity = previousActivity === null
+            ? activity
+            : mergePacificaActivity(previousActivity, activity);
           hasData.current = true;
-          setState({ activity, portfolio, status: 'ready' });
+          activityData.current = mergedActivity;
+          setState({
+            activity: mergedActivity,
+            portfolio,
+            status: mergedActivity.incomplete ? 'stale' : 'ready',
+          });
         }
       } catch (cause) {
         if (active && !controller.signal.aborted) {
@@ -242,7 +260,7 @@ function useTradeAccountData(apiOrigin: string, account: string | null) {
     };
   }, [account, apiOrigin, refreshKey]));
 
-  return { refresh: () => setRefreshKey((value) => value + 1), state };
+  return { refresh, state };
 }
 
 function decimal(value: string): string {

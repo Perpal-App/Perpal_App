@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { getUserAccountPublicKeySync } from '@velocity-exchange/sdk/lib/browser/addresses/pda';
 import type { VelocityClient } from '@velocity-exchange/sdk/lib/browser/velocityClient';
@@ -12,6 +12,7 @@ import {
 } from '@/integrations/perps/velocity/velocityAccount';
 import {
   fetchVelocityTradeHistory,
+  mergeVelocityTradeHistory,
   type VelocityTradeHistory,
 } from '@/integrations/perps/velocity/velocityActivity';
 import { subscribedVelocityClient } from '@/integrations/perps/velocity/velocityClient';
@@ -23,10 +24,11 @@ export type VelocityAccountState = {
 
 export type VelocityHistoryState = {
   readonly data: VelocityTradeHistory | null;
-  readonly status: 'error' | 'idle' | 'loading' | 'ready';
+  readonly status: 'error' | 'idle' | 'loading' | 'ready' | 'stale';
 };
 
 const DISPLAY_REFRESH_MS = 2_000;
+const HISTORY_REFRESH_MS = 5_000;
 
 export function useVelocityAccount(input: {
   readonly enabled?: boolean;
@@ -44,7 +46,15 @@ export function useVelocityAccount(input: {
   const [history, setHistory] = useState<VelocityHistoryState>({ data: null, status: 'idle' });
   const [refreshKey, setRefreshKey] = useState(0);
   const lastSnapshot = useRef<VelocityAccountSnapshot | null>(null);
+  const historyData = useRef<VelocityTradeHistory | null>(null);
   const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
+
+  useEffect(() => {
+    lastSnapshot.current = null;
+    historyData.current = null;
+    setAccount({ snapshot: null, status: 'loading' });
+    setHistory({ data: null, status: 'idle' });
+  }, [input.historyRpcUrl, input.owner, input.programId, input.publicRpcUrl]);
 
   useFocusEffect(useCallback(() => {
     if (input.enabled === false) return undefined;
@@ -56,14 +66,16 @@ export function useVelocityAccount(input: {
     }
     let active = true;
     let client: VelocityClient | null = null;
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let accountTimer: ReturnType<typeof setInterval> | undefined;
+    let historyTimer: ReturnType<typeof setTimeout> | undefined;
     const abort = new AbortController();
-    setAccount({ snapshot: null, status: 'loading' });
-    setHistory({
-      data: null,
-      status: input.historyRpcUrl && input.historySigner ? 'loading' : 'idle',
-    });
-    lastSnapshot.current = null;
+    if (lastSnapshot.current === null) setAccount({ snapshot: null, status: 'loading' });
+    if (historyData.current === null) {
+      setHistory({
+        data: null,
+        status: input.historyRpcUrl && input.historySigner ? 'loading' : 'idle',
+      });
+    }
 
     const publish = () => {
       if (!active || client === null) return;
@@ -80,6 +92,40 @@ export function useVelocityAccount(input: {
       }
     };
 
+    const loadHistory = async (userPda: PublicKey) => {
+      if (!input.historyRpcUrl || !input.historySigner || client === null) return;
+      try {
+        const previous = historyData.current;
+        const latest = await fetchVelocityTradeHistory({
+          client,
+          rpcUrl: input.historyRpcUrl,
+          signal: abort.signal,
+          signer: input.historySigner,
+          ...(previous?.latestTx ? { untilTx: previous.latestTx } : {}),
+          userPda,
+        });
+        if (active) {
+          const next = previous === null
+            ? latest
+            : mergeVelocityTradeHistory(previous, latest);
+          historyData.current = next;
+          setHistory({ data: next, status: 'ready' });
+        }
+      } catch (cause) {
+        if (active && !abort.signal.aborted) {
+          if (__DEV__) console.warn('[Perpal Velocity history failed]', safeError(cause));
+          setHistory({
+            data: historyData.current,
+            status: historyData.current === null ? 'error' : 'stale',
+          });
+        }
+      } finally {
+        if (active && !abort.signal.aborted) {
+          historyTimer = setTimeout(() => void loadHistory(userPda), HISTORY_REFRESH_MS);
+        }
+      }
+    };
+
     const start = async () => {
       try {
         const connection = new Connection(input.publicRpcUrl, 'confirmed');
@@ -89,8 +135,15 @@ export function useVelocityAccount(input: {
         const userExists = await connection.getAccountInfo(userPda, 'confirmed') !== null;
         if (!active) return;
         if (!userExists) {
+          const emptyHistory: VelocityTradeHistory = {
+            latestTx: null,
+            trades: [],
+            truncated: false,
+          };
+          lastSnapshot.current = EMPTY_VELOCITY_ACCOUNT_SNAPSHOT;
+          historyData.current = emptyHistory;
           setAccount({ snapshot: EMPTY_VELOCITY_ACCOUNT_SNAPSHOT, status: 'not-created' });
-          setHistory({ data: { trades: [], truncated: false }, status: 'ready' });
+          setHistory({ data: emptyHistory, status: 'ready' });
           return;
         }
         client = await subscribedVelocityClient({
@@ -105,25 +158,8 @@ export function useVelocityAccount(input: {
           return;
         }
         publish();
-        timer = setInterval(publish, DISPLAY_REFRESH_MS);
-
-        if (input.historyRpcUrl && input.historySigner) {
-          try {
-            const data = await fetchVelocityTradeHistory({
-              client,
-              rpcUrl: input.historyRpcUrl,
-              signal: abort.signal,
-              signer: input.historySigner,
-              userPda,
-            });
-            if (active) setHistory({ data, status: 'ready' });
-          } catch (cause) {
-            if (active && !abort.signal.aborted) {
-              if (__DEV__) console.warn('[Perpal Velocity history failed]', safeError(cause));
-              setHistory({ data: null, status: 'error' });
-            }
-          }
-        }
+        accountTimer = setInterval(publish, DISPLAY_REFRESH_MS);
+        void loadHistory(userPda);
       } catch (cause) {
         if (active) {
           if (__DEV__) console.warn('[Perpal Velocity account load failed]', safeError(cause));
@@ -132,7 +168,10 @@ export function useVelocityAccount(input: {
             status: lastSnapshot.current === null ? 'error' : 'stale',
           });
           setHistory((current) => current.status === 'loading'
-            ? { data: null, status: 'error' }
+            ? {
+                data: historyData.current,
+                status: historyData.current === null ? 'error' : 'stale',
+              }
             : current);
         }
       }
@@ -142,7 +181,8 @@ export function useVelocityAccount(input: {
     return () => {
       active = false;
       abort.abort();
-      if (timer !== undefined) clearInterval(timer);
+      if (accountTimer !== undefined) clearInterval(accountTimer);
+      if (historyTimer !== undefined) clearTimeout(historyTimer);
       if (client !== null) void client.unsubscribe();
     };
   }, [

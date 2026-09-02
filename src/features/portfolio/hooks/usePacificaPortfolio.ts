@@ -6,7 +6,7 @@ import {
   type PacificaPortfolioSnapshot,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
 
-type PortfolioState = 'idle' | 'loading' | 'ready' | 'error';
+type PortfolioState = 'idle' | 'loading' | 'ready' | 'error' | 'stale';
 const REFRESH_INTERVAL_MS = 5_000;
 
 export function usePacificaPortfolio(apiOrigin: string, walletAddress: string | null) {
@@ -14,12 +14,13 @@ export function usePacificaPortfolio(apiOrigin: string, walletAddress: string | 
   const [status, setStatus] = useState<PortfolioState>('idle');
   const [refreshKey, setRefreshKey] = useState(0);
   const hasSnapshot = useRef(false);
+  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
 
   useEffect(() => {
     hasSnapshot.current = false;
     setSnapshot(null);
     setStatus(walletAddress === null ? 'idle' : 'loading');
-  }, [walletAddress]);
+  }, [apiOrigin, walletAddress]);
 
   useFocusEffect(useCallback(() => {
     if (walletAddress === null || apiOrigin.length === 0) return undefined;
@@ -38,9 +39,9 @@ export function usePacificaPortfolio(apiOrigin: string, walletAddress: string | 
           setStatus('ready');
         }
       } catch (cause) {
-        if (active && !controller.signal.aborted && !hasSnapshot.current) {
+        if (active && !controller.signal.aborted) {
           if (__DEV__) console.error('[Perpal Pacifica portfolio failed]', { error: cause instanceof Error ? cause.message : typeof cause });
-          setStatus('error');
+          setStatus(hasSnapshot.current ? 'stale' : 'error');
         }
       } finally {
         if (active) timer = setTimeout(() => void load(), REFRESH_INTERVAL_MS);
@@ -54,5 +55,5 @@ export function usePacificaPortfolio(apiOrigin: string, walletAddress: string | 
     };
   }, [apiOrigin, refreshKey, walletAddress]));
 
-  return { snapshot, status, refresh: () => setRefreshKey((value) => value + 1) };
+  return { snapshot, status, refresh };
 }

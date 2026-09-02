@@ -84,7 +84,7 @@ export function PrivateSwapPanel({
 
   const prepare = async () => {
     if (!config.ok || session.address === null || session.signer === null) {
-      showAppToast({ outcome: 'error', title: 'Swap unavailable', message: 'Private wallet T is not ready.' });
+      showAppToast({ outcome: 'error', title: 'Swap unavailable', message: 'Private trading is not ready.' });
       return;
     }
 
@@ -184,7 +184,7 @@ export function PrivateSwapPanel({
     <View style={styles.container}>
       <View style={styles.headingBlock}>
         <Text accessibilityRole="header" style={styles.title}>Swap private funds</Text>
-        <Text style={styles.subtitle}>Exchange USDC and USDT inside private wallet T.</Text>
+        <Text style={styles.subtitle}>Exchange USDC and USDT in your private balance.</Text>
       </View>
 
       <View accessibilityRole="radiogroup" style={styles.selector}>
@@ -239,7 +239,7 @@ export function PrivateSwapPanel({
         </Text>
       ) : amountIsMax ? (
         <Text accessibilityLiveRegion="polite" style={styles.note}>
-          Max converts the full {from} balance. SOL stays in T for fees.
+          Max converts the full {from} balance. SOL remains reserved for fees.
         </Text>
       ) : null}
 

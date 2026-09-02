@@ -106,7 +106,10 @@ export function velocityTradeActivityItem(trade: VelocityTradeActivity): Activit
 }
 
 function balanceItem(item: PacificaBalanceActivity): ActivityItem {
-  const kind = item.eventType === 'withdraw' ? 'withdrawal' : 'funding';
+  const kind = item.eventType === 'withdraw'
+    || (item.eventType === 'subaccount_transfer' && item.amount.startsWith('-'))
+    ? 'withdrawal'
+    : 'funding';
 
   return {
     createdAtMs: item.createdAtMs,

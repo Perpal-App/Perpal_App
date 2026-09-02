@@ -30,6 +30,7 @@ export type VelocityTradeActivity = {
 };
 
 export type VelocityTradeHistory = {
+  readonly latestTx: string | null;
   readonly trades: readonly VelocityTradeActivity[];
   readonly truncated: boolean;
 };
@@ -37,6 +38,7 @@ export type VelocityTradeHistory = {
 const HISTORY_PAGE_SIZE = 100;
 const HISTORY_BATCH_SIZE = 10;
 const MAX_HISTORY_PAGES = 10;
+const MAX_HISTORY_ITEMS = HISTORY_PAGE_SIZE * MAX_HISTORY_PAGES;
 
 /** Reads confirmed Velocity fills touching this exact user account PDA. */
 export async function fetchVelocityTradeHistory(input: {
@@ -44,6 +46,7 @@ export async function fetchVelocityTradeHistory(input: {
   readonly rpcUrl: string;
   readonly signal: AbortSignal;
   readonly signer: GatewayRequestSigner;
+  readonly untilTx?: string;
   readonly userPda: PublicKey;
 }): Promise<VelocityTradeHistory> {
   const connection = new Connection(input.rpcUrl, {
@@ -55,6 +58,7 @@ export async function fetchVelocityTradeHistory(input: {
   let before: string | undefined;
   let pageCount = 0;
   let exhausted = false;
+  let latestTx: string | null = null;
 
   while (!input.signal.aborted && pageCount < MAX_HISTORY_PAGES) {
     const page = await fetchLogs(
@@ -62,7 +66,7 @@ export async function fetchVelocityTradeHistory(input: {
       input.userPda,
       'confirmed',
       before,
-      undefined,
+      input.untilTx,
       HISTORY_PAGE_SIZE,
       HISTORY_BATCH_SIZE,
     );
@@ -72,12 +76,13 @@ export async function fetchVelocityTradeHistory(input: {
       exhausted = true;
       break;
     }
+    latestTx ??= page.mostRecentTx;
 
     for (const log of page.transactionLogs) {
       trades.push(...parseVelocityTradeEvents(parser.parseEventsFromLogs(log), input.userPda));
     }
 
-    if (page.earliestTx === before || page.transactionLogs.length < HISTORY_PAGE_SIZE) {
+    if (page.earliestTx === before) {
       exhausted = true;
       break;
     }
@@ -87,8 +92,28 @@ export async function fetchVelocityTradeHistory(input: {
   if (input.signal.aborted) throw abortError();
 
   return {
-    trades: trades.sort((left, right) => right.createdAtMs - left.createdAtMs),
+    latestTx,
+    trades: trades
+      .sort((left, right) => right.createdAtMs - left.createdAtMs)
+      .slice(0, MAX_HISTORY_ITEMS),
     truncated: !exhausted,
+  };
+}
+
+export function mergeVelocityTradeHistory(
+  previous: VelocityTradeHistory,
+  latest: VelocityTradeHistory,
+): VelocityTradeHistory {
+  const trades = new Map(previous.trades.map((trade) => [trade.id, trade]));
+  for (const trade of latest.trades) trades.set(trade.id, trade);
+  const merged = [...trades.values()]
+    .sort((left, right) => right.createdAtMs - left.createdAtMs)
+    .slice(0, MAX_HISTORY_ITEMS);
+
+  return {
+    latestTx: latest.latestTx ?? previous.latestTx,
+    trades: merged,
+    truncated: previous.truncated || latest.truncated || trades.size > merged.length,
   };
 }
 
@@ -123,9 +148,15 @@ export function parseVelocityTradeEvents(
     const amountBaseUnits = BigInt(event.baseAssetAmountFilled.toString());
     const quoteBaseUnits = BigInt(event.quoteAssetAmountFilled.toString());
     if (amountBaseUnits <= 0n || quoteBaseUnits < 0n) return [];
-    const side = isVariant(direction, 'long') ? 'long' : 'short';
+    const orderSide = isVariant(direction, 'long') ? 'long' : 'short';
     const existingBaseUnits = BigInt(existing.toString());
-    const nextBaseUnits = existingBaseUnits + (side === 'long' ? amountBaseUnits : -amountBaseUnits);
+    const nextBaseUnits = existingBaseUnits + (
+      orderSide === 'long' ? amountBaseUnits : -amountBaseUnits
+    );
+    const effect = fillEffect(existingBaseUnits, nextBaseUnits);
+    const side = effect === 'closed' || effect === 'reduced'
+      ? (existingBaseUnits > 0n ? 'long' : 'short')
+      : (nextBaseUnits > 0n ? 'long' : 'short');
     const timestampSeconds = Number(event.ts.toString());
     if (!Number.isSafeInteger(timestampSeconds) || timestampSeconds <= 0) return [];
     const fee = role === 'taker' ? event.takerFee : event.makerFee;
@@ -133,9 +164,9 @@ export function parseVelocityTradeEvents(
     return [{
       amountBaseUnits,
       createdAtMs: timestampSeconds * 1_000,
-      effect: fillEffect(existingBaseUnits, nextBaseUnits),
+      effect,
       feeBaseUnits: fee === null ? 0n : BigInt(fee.toString()),
-      id: `velocity:${event.slot}:${event.txSigIndex}`,
+      id: `velocity:${event.txSig}:${event.txSigIndex}`,
       priceBaseUnits: (quoteBaseUnits * 1_000_000_000n) / amountBaseUnits,
       quoteBaseUnits,
       role,
