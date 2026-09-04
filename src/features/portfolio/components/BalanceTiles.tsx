@@ -12,6 +12,7 @@ import type {
   WalletBalance,
   WalletBalances,
 } from '@/features/account/hooks/useWalletBalances';
+import { ConcealedValue } from '@/features/portfolio/components/ConcealedValue';
 import { TokenLogo } from '@/features/portfolio/components/TokenLogo';
 import { listWalletTokens } from '@/features/portfolio/components/withdrawalAssets';
 import { listTradingCollateralOptions } from '@/integrations/perps/providerCollateral';
@@ -19,8 +20,6 @@ import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pa
 import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
-/** Stands in for a figure while balances are hidden. Matches the card's mask. */
-const MASK = '••••••';
 /** Maximum number of overlapping RPC-sourced marks that fit a half-width summary tile. */
 const MAX_LOGOS = 4;
 const EMPTY_METADATA: TokenMetadataMap = new Map();
@@ -113,30 +112,31 @@ function Tile({
         {label}
       </Text>
 
-      {/* Hidden as well. A wallet's token list is disclosure about the balance above it, which is
-          most of what the eye is for. */}
-      {hidden || logoMints.length === 0 ? null : (
-        <View
-          accessibilityLabel={`${logoMints.length} token ${logoMints.length === 1 ? 'holding' : 'holdings'}`}
-          style={styles.tokens}
-        >
-          {logoMints.map((mint, index) => (
-            <TokenLogo
-              key={mint}
-              size={24}
-              style={index === 0 ? undefined : styles.logoOverlap}
-              url={metadata.get(mint)?.imageUrl ?? null}
-            />
-          ))}
-        </View>
-      )}
+      {/* The slot stays mounted when concealed so toggling privacy cannot resize the tile. */}
+      <View
+        accessibilityElementsHidden={hidden}
+        importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
+        style={[styles.tokens, hidden && styles.concealed]}
+      >
+        {logoMints.map((mint, index) => (
+          <TokenLogo
+            key={mint}
+            size={24}
+            style={index === 0 ? undefined : styles.logoOverlap}
+            url={metadata.get(mint)?.imageUrl ?? null}
+          />
+        ))}
+      </View>
 
-      {value === null ? (
+      {value === null && !hidden ? (
         <SkeletonText role="label" width={64} />
       ) : (
-        <Text numberOfLines={1} selectable={!hidden} style={styles.value}>
-          {hidden ? MASK : value}
-        </Text>
+        <ConcealedValue
+          hidden={hidden}
+          numberOfLines={1}
+          style={styles.value}
+          value={value ?? '***'}
+        />
       )}
     </View>
   );
@@ -161,6 +161,7 @@ const styles = StyleSheet.create({
   },
   label: { ...typography.caption, color: colors.textSecondary },
   tokens: { minHeight: 24, flexDirection: 'row', alignItems: 'center' },
+  concealed: { opacity: 0 },
   logoOverlap: { marginLeft: -6 },
   value: {
     ...typography.label,

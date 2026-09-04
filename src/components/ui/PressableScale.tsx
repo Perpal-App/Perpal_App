@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import {
   Pressable,
   type GestureResponderEvent,
@@ -8,10 +8,12 @@ import {
 } from 'react-native';
 import Animated, {
   Easing,
+  runOnJS,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withDelay,
+  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -27,7 +29,14 @@ type PressableScaleProps = Omit<
   children: ReactNode;
   onPress: (event: GestureResponderEvent) => void;
   disabled?: boolean;
+  pressedOpacity?: number;
   pressedScale?: number;
+  pressedScaleX?: number;
+  pressedScaleY?: number;
+  pressedTranslateY?: number;
+  /** Completes a short compression before invoking `onPress`, so navigation cannot hide the tap. */
+  pressBeforeAction?: boolean;
+  pressPeakDuration?: number;
   /**
    * Spring the press and its release run on. Defaults to the app's `motion.spring`, which is damped
    * enough to arrive without overshoot. Pass a slacker one — `motion.pressGooey` — where the control
@@ -55,12 +64,30 @@ type PressableScaleProps = Omit<
   style?: StyleProp<ViewStyle>;
 };
 
+/** Shared transform-only press sequence for controls that must visibly yield before acting. */
+export const GOOEY_PRESS_EFFECT = {
+  pressBeforeAction: true,
+  pressPeakDuration: 90,
+  pressSpring: motion.pressGooey,
+  pressedOpacity: 0.96,
+  pressedScale: 0.94,
+  pressedScaleX: 1.025,
+  pressedScaleY: 0.9,
+  pressedTranslateY: 2,
+} as const;
+
 /** UI-thread press feedback shared by buttons and icon controls. */
 export function PressableScale({
   children,
   onPress,
   disabled = false,
+  pressedOpacity = 1,
   pressedScale = motion.pressScale,
+  pressedScaleX,
+  pressedScaleY,
+  pressedTranslateY = 0,
+  pressBeforeAction = false,
+  pressPeakDuration = 90,
   pressSpring = motion.spring,
   fadeIn = false,
   fadeDuration = motion.fade.duration,
@@ -71,6 +98,7 @@ export function PressableScale({
 }: PressableScaleProps) {
   const reduceMotion = useReducedMotion();
   const scale = useSharedValue(1);
+  const pendingPress = useRef<GestureResponderEvent | null>(null);
 
   const fades = fadeIn && !reduceMotion;
   // One value drives both the fade and the slide so they cannot drift apart.
@@ -99,29 +127,85 @@ export function PressableScale({
   }, [pressSpring, scale]);
 
   const handlePressIn = () => {
-    if (!disabled && !reduceMotion) {
+    if (!disabled && !reduceMotion && pendingPress.current === null) {
       scale.set(withSpring(pressedScale, pressSpring));
     }
   };
 
+  const handlePressOut = () => {
+    if (pendingPress.current === null) settle();
+  };
+
+  const firePendingPress = useCallback(() => {
+    const event = pendingPress.current;
+    if (event === null) return;
+    pendingPress.current = null;
+    onPress(event);
+  }, [onPress]);
+
   const handlePress = useCallback(
     (event: GestureResponderEvent) => {
+      if (pressBeforeAction && !reduceMotion) {
+        if (pendingPress.current !== null) return;
+        event.persist();
+        pendingPress.current = event;
+        scale.set(
+          withSequence(
+            withTiming(
+              pressedScale,
+              {
+                duration: pressPeakDuration,
+                easing: Easing.out(Easing.cubic),
+              },
+              (finished) => {
+                if (finished) runOnJS(firePendingPress)();
+              },
+            ),
+            withSpring(1, pressSpring),
+          ),
+        );
+        return;
+      }
+
       // Release the pressed state before running the handler: navigation can
       // freeze or unmount this screen before `onPressOut` is delivered, which
       // would otherwise leave the control stuck at its pressed scale.
       settle();
       onPress(event);
     },
-    [onPress, settle],
+    [
+      firePendingPress,
+      onPress,
+      pressBeforeAction,
+      pressedScale,
+      pressPeakDuration,
+      pressSpring,
+      reduceMotion,
+      scale,
+      settle,
+    ],
   );
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: enter.value,
-    transform: [
-      { translateY: (1 - enter.value) * enterOffsetY },
-      { scale: scale.value },
-    ],
-  }));
+  const animatedStyle = useAnimatedStyle(() => {
+    const scaleRange = 1 - pressedScale;
+    const pressProgress = scaleRange === 0
+      ? 0
+      : Math.max(0, Math.min(1, (1 - scale.value) / scaleRange));
+    const scaleX = 1 + ((pressedScaleX ?? pressedScale) - 1) * pressProgress;
+    const scaleY = 1 + ((pressedScaleY ?? pressedScale) - 1) * pressProgress;
+
+    return {
+      opacity: enter.value * (1 - (1 - pressedOpacity) * pressProgress),
+      transform: [
+        {
+          translateY:
+            (1 - enter.value) * enterOffsetY + pressedTranslateY * pressProgress,
+        },
+        { scaleX },
+        { scaleY },
+      ],
+    };
+  });
 
   return (
     <AnimatedPressable
@@ -129,7 +213,7 @@ export function PressableScale({
       disabled={disabled}
       onPress={handlePress}
       onPressIn={handlePressIn}
-      onPressOut={settle}
+      onPressOut={handlePressOut}
       style={[style, animatedStyle]}
     >
       {children}

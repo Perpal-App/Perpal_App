@@ -2,7 +2,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
 import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
-import { PressableScale } from '@/components/ui/PressableScale';
+import {
+  GOOEY_PRESS_EFFECT,
+  PressableScale,
+} from '@/components/ui/PressableScale';
 import { colors, gradients, motion, radii, spacing } from '@/theme/tokens';
 
 /**
@@ -40,6 +43,7 @@ export function RaisedChip({
   children,
   contentStyle,
   onPress,
+  pressEffect = 'raised',
   style,
 }: {
   readonly accessibilityHint?: string;
@@ -48,8 +52,11 @@ export function RaisedChip({
   /** Inner layout — gap and horizontal inset. The outer `style` sizes the chip. */
   readonly contentStyle?: StyleProp<ViewStyle>;
   readonly onPress: () => void;
+  readonly pressEffect?: 'gooey' | 'raised';
   readonly style?: StyleProp<ViewStyle>;
 }) {
+  const gooey = pressEffect === 'gooey';
+
   return (
     <PressableScale
       accessibilityHint={accessibilityHint}
@@ -57,9 +64,10 @@ export function RaisedChip({
       accessibilityRole="button"
       hitSlop={6}
       onPress={onPress}
-      pressSpring={motion.pressGooey}
-      pressedScale={PRESSED_SCALE}
       style={[styles.chip, style]}
+      {...(gooey
+        ? GOOEY_PRESS_EFFECT
+        : { pressSpring: motion.pressGooey, pressedScale: PRESSED_SCALE })}
     >
       {/* The ramp is a child rather than the pressable itself, so the shadow on the parent is not
           clipped by the `overflow` this needs to keep the fill inside the corner. */}

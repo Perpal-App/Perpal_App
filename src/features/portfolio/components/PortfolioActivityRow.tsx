@@ -15,11 +15,10 @@ import {
   unrealizedRate,
   type FigureTone,
 } from '@/domain/portfolio/accountFigures';
+import { ConcealedValue } from '@/features/portfolio/components/ConcealedValue';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
-/** Stands in for a figure while balances are hidden. Matches the summary card's mask. */
-const MASK = '••••••';
 const BADGE_SIZE = 34;
 
 /** The tile takes the figure's own state, so badge and number can never disagree. */
@@ -61,10 +60,10 @@ export function PortfolioActivityRow({
       />
       <StatCard
         badge="pnl"
-        caption={rate === null || hidden ? null : percent(rate)}
+        caption={rate === null ? null : hidden ? '***' : percent(rate)}
         hidden={hidden}
         label="Unrealized PnL"
-        tone={amountTone(pnl)}
+        tone={hidden ? 'plain' : amountTone(pnl)}
         value={signedMoney(pnl)}
       />
     </View>
@@ -115,20 +114,19 @@ function StatCard({
         {label}
       </Text>
 
-      {value === null ? (
+      {value === null && !hidden ? (
         <SkeletonText role="heading" width={84} />
       ) : (
-        <Text
+        <ConcealedValue
+          hidden={hidden}
           numberOfLines={1}
-          selectable={!hidden}
           style={[
             styles.value,
             tone === 'positive' && styles.positive,
             tone === 'negative' && styles.negative,
           ]}
-        >
-          {hidden ? MASK : value}
-        </Text>
+          value={value ?? '***'}
+        />
       )}
 
       {/* Holds its line whether or not there is a rate, so the two cards stay the same height and

@@ -5,7 +5,10 @@ import Svg, { Path } from 'react-native-svg';
 
 import { EyeIcon } from '@/assets/svg/EyeIcon';
 import { SkeletonText } from '@/components/feedback/Skeleton';
-import { PressableScale } from '@/components/ui/PressableScale';
+import {
+  GOOEY_PRESS_EFFECT,
+  PressableScale,
+} from '@/components/ui/PressableScale';
 import { RaisedChip } from '@/components/ui/RaisedChip';
 import {
   money,
@@ -18,6 +21,7 @@ import {
 } from '@/domain/portfolio/accountFigures';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { BalanceTiles } from '@/features/portfolio/components/BalanceTiles';
+import { ConcealedValue } from '@/features/portfolio/components/ConcealedValue';
 import {
   FundingActions,
   type FundingAction,
@@ -26,8 +30,6 @@ import { PortfolioActivityRow } from '@/features/portfolio/components/PortfolioA
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, fonts, gradients, radii, spacing, typography } from '@/theme/tokens';
 
-/** Stands in for every figure while balances are hidden. */
-const MASK = '••••••';
 /** Invisible box around the eye. With `hitSlop` on top it clears the 48pt minimum target. */
 const REVEAL_SIZE = 34;
 /** Matched to the eye's box, so the two controls beside the label read as one cluster. */
@@ -64,6 +66,7 @@ export function PortfolioSummaryCard({
   const publicBalance = walletFunds(balances?.publicWallet ?? null);
   const privateBalance = privateFunds(balances, portfolio);
   const total = sumAmounts(publicBalance, privateBalance);
+  const totalDisplay = money(total);
   const rate = unrealizedRate(portfolio, unrealizedPnl(portfolio));
 
   return (
@@ -97,6 +100,7 @@ export function PortfolioSummaryCard({
             accessibilityLabel="View assets"
             contentStyle={styles.assetsContent}
             onPress={onViewAssets}
+            pressEffect="gooey"
             style={styles.assets}
           >
             <Text maxFontSizeMultiplier={1.2} numberOfLines={1} style={styles.assetsText}>
@@ -113,25 +117,25 @@ export function PortfolioSummaryCard({
             hitSlop={12}
             onPress={() => setHidden((value) => !value)}
             style={styles.reveal}
+            {...GOOEY_PRESS_EFFECT}
           >
             <EyeIcon hidden={hidden} />
           </PressableScale>
         </View>
 
         <View style={styles.valueRow}>
-          {total === null ? (
+          {totalDisplay === null ? (
             <View style={styles.heroPending}>
               <SkeletonText role="display" width={188} />
             </View>
           ) : (
-            <Text
+            <ConcealedValue
               accessibilityLiveRegion="polite"
+              hidden={hidden}
               numberOfLines={1}
-              selectable={!hidden}
               style={styles.hero}
-            >
-              {hidden ? MASK : money(total)}
-            </Text>
+              value={totalDisplay}
+            />
           )}
           <TrendPill hidden={hidden} value={rate} />
         </View>
@@ -149,9 +153,10 @@ export function PortfolioSummaryCard({
 /**
  * The unrealized move as a rate, in a tinted capsule beside the figure.
  *
- * Dropped rather than faked when there is no deposited balance to measure against, and dropped while
- * balances are hidden — a rate discloses how the balance is doing, which is most of what hiding it
- * was for. The amount behind this rate is on the PnL card below, so neither figure is shown twice.
+ * Dropped rather than faked when there is no deposited balance to measure against. While balances
+ * are hidden, its original footprint remains and its value becomes a neutral mask, so privacy does
+ * not move the row. The amount behind this rate is on the PnL card below, so neither figure is shown
+ * twice.
  */
 function TrendPill({
   hidden,
@@ -160,21 +165,32 @@ function TrendPill({
   readonly hidden: boolean;
   readonly value: number | null;
 }) {
-  if (value === null || hidden) return null;
+  if (value === null) return null;
 
   const flat = value === 0;
   const down = value < 0;
-  const tint = flat ? colors.textMuted : down ? colors.negative : colors.positive;
+  const tint = hidden || flat
+    ? colors.textMuted
+    : down
+      ? colors.negative
+      : colors.positive;
 
   return (
     <View style={styles.pill}>
       {/* The tint is a layer, not opacity on the capsule: dimming the container would take the
           percentage down with it and leave the text unreadable. */}
       <View style={[StyleSheet.absoluteFill, styles.pillTint, { backgroundColor: tint }]} />
-      {flat ? null : <TrendArrow color={tint} down={down} />}
-      <Text maxFontSizeMultiplier={1.2} style={[styles.pillText, { color: tint }]}>
-        {percent(value)}
-      </Text>
+      {flat ? null : (
+        <View style={hidden && styles.concealed}>
+          <TrendArrow color={tint} down={down} />
+        </View>
+      )}
+      <ConcealedValue
+        hidden={hidden}
+        maxFontSizeMultiplier={1.2}
+        style={[styles.pillText, { color: tint }]}
+        value={percent(value)}
+      />
     </View>
   );
 }
@@ -261,4 +277,5 @@ const styles = StyleSheet.create({
   // rounded, clipped View is the case Android is least reliable about clipping.
   pillTint: { opacity: 0.18, borderRadius: radii.pill },
   pillText: { ...typography.caption, fontVariant: ['tabular-nums'] },
+  concealed: { opacity: 0 },
 });

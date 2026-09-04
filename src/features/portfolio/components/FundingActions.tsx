@@ -74,6 +74,7 @@ function ActionChip({
       accessibilityHint={hint}
       accessibilityLabel={label}
       onPress={onPress}
+      pressEffect="gooey"
       style={styles.chip}
     >
       <View
