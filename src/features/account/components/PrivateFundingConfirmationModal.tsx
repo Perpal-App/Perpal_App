@@ -6,12 +6,16 @@ import {
   formatAmount,
   type TokenDecimals,
 } from '@/domain/money/amount';
-import { estimateUmbraCreateFee } from '@/integrations/umbra/privateFundingFees';
+import {
+  creditedUmbraAmount,
+  estimateUmbraCreateFee,
+} from '@/integrations/umbra/privateFundingFees';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 export type PrivateFundingConfirmation = {
   readonly amountBaseUnits: bigint;
   readonly decimals: TokenDecimals;
+  readonly destination: 'private' | 'pacifica';
   readonly estimatedNetworkFeeLamports: bigint;
   readonly feeReserveLamports: bigint;
   readonly hasSubmittedTransaction: boolean;
@@ -46,6 +50,10 @@ export function PrivateFundingConfirmationModal({
     estimateUmbraCreateFee(confirmation.amountBaseUnits),
     confirmation.decimals,
   ));
+  const creditedCollateral = formatAmount(amountFromBaseUnits(
+    creditedUmbraAmount(confirmation.amountBaseUnits),
+    confirmation.decimals,
+  ));
   const reserveFee = formatAmount(amountFromBaseUnits(
     estimateUmbraCreateFee(confirmation.feeReserveLamports),
     9,
@@ -78,11 +86,25 @@ export function PrivateFundingConfirmationModal({
             value={`${amount} ${confirmation.symbol}`}
           />
           <ConfirmationRow label="Trading fee reserve" value={`${reserve} SOL`} />
-          <ConfirmationRow label="Route" value="Public → Umbra → private" />
+          <ConfirmationRow
+            label="Route"
+            value={confirmation.destination === 'pacifica'
+              ? 'Public → Umbra → Pacifica'
+              : 'Public → Umbra → private wallet'}
+          />
           <ConfirmationRow
             label="Estimated Umbra fee"
             value={`${collateralFee} ${confirmation.symbol} + ${reserveFee} SOL`}
           />
+          {confirmation.destination === 'pacifica' ? (
+            <>
+              <ConfirmationRow
+                label="Estimated Pacifica credit"
+                value={`${creditedCollateral} ${confirmation.symbol}`}
+              />
+              <ConfirmationRow label="Minimum Pacifica credit" value="10 USDC" />
+            </>
+          ) : null}
           <ConfirmationRow
             label="Estimated network fees"
             value={`${networkFee} SOL`}

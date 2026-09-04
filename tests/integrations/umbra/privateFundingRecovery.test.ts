@@ -4,21 +4,21 @@ import {
 } from '@/integrations/umbra/privateFundingState';
 import { nextPrivateFundingRelayRecoveryAttempt } from '@/integrations/umbra/privateFundingRelayRecovery';
 
-it('finishes in T only after both claims and before any provider deposit', () => {
+it('finishes legacy private-only funding after both claims', () => {
   expect(hasCompletedPrivateWalletFunding({
     claimSignature: 'collateral-claim',
+    destination: 'private',
     feeFundingSignature: 'fee-claim',
-    providerDepositSignature: null,
   })).toBe(true);
   expect(hasCompletedPrivateWalletFunding({
     claimSignature: 'collateral-claim',
+    destination: 'private',
     feeFundingSignature: null,
-    providerDepositSignature: null,
   })).toBe(false);
   expect(hasCompletedPrivateWalletFunding({
     claimSignature: 'collateral-claim',
+    destination: 'pacifica',
     feeFundingSignature: 'fee-claim',
-    providerDepositSignature: 'venue-deposit',
   })).toBe(false);
 });
 

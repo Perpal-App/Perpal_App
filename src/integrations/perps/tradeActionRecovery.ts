@@ -50,8 +50,7 @@ export async function reconcilePendingTradeAction(input: {
     );
   }
   if (record.signedTransactionBase64 !== null && Date.now() < record.expiresAtMs) {
-    const versioned = record.provider === 'velocity' ||
-      record.kind === 'conversion' || record.kind === 'trade';
+    const versioned = record.kind === 'conversion' || record.kind === 'trade';
     const current = versioned
       ? await storedVersionedTransactionIsCurrent({
           rpcUrl: input.rpcUrl,

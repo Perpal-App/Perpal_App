@@ -17,7 +17,6 @@ type SwapBuildPayload = {
 };
 
 export async function handleSwapBuildRequest(input: {
-  readonly actorPublicKey: Uint8Array;
   readonly config: NonNullable<GatewayConfig['jupiter']>;
   readonly payload: unknown;
   readonly traceId: string;
@@ -28,7 +27,7 @@ export async function handleSwapBuildRequest(input: {
 }> {
   const payload = parsePayload(input.payload, input.config.stablecoinMints);
 
-  if (payload === null || !sameBytes(base58.decode(payload.taker), input.actorPublicKey)) {
+  if (payload === null) {
     return {
       response: errorResponse(
         400,
@@ -160,8 +159,4 @@ function validUpstreamResponse(body: string, request: SwapBuildPayload): boolean
   } catch {
     return false;
   }
-}
-
-function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
-  return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }

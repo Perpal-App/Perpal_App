@@ -320,7 +320,6 @@ export default {
         );
       }
       const result = await handleSwapBuildRequest({
-        actorPublicKey: auth.actorPublicKey,
         config: config.jupiter,
         payload: bodyResult.payload,
         traceId,

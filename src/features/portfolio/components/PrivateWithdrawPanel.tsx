@@ -1,22 +1,19 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PublicKey } from '@solana/web3.js';
 import { getSupportedMints } from '@umbra-privacy/sdk/constants';
 import { NATIVE_MINT } from '@solana/spl-token';
-import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path } from 'react-native-svg';
 
 import { ActionButton } from '@/components/ui/ActionButton';
-import {
-  AnchoredMenu,
-  anchorAbove,
-  type MenuAnchor,
-  type MenuOption,
-} from '@/components/ui/AnchoredMenu';
-import { PressableScale } from '@/components/ui/PressableScale';
 import { readAppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
+import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
+import {
+  formatTokenAmount,
+  parseTokenAmount,
+  type WithdrawableToken,
+} from '@/features/portfolio/components/withdrawalAssets';
 import {
   listTradingCollateralOptions,
 } from '@/integrations/perps/providerCollateral';
@@ -25,7 +22,7 @@ import {
   usePrivateExit,
   type PrivateExitAsset,
 } from '@/integrations/umbra/PrivateExitProvider';
-import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 import { showAppToast } from '@/storage/appToast';
 
 /**
@@ -35,12 +32,6 @@ import { showAppToast } from '@/storage/appToast';
  * zero means the token is not offered, and treating "not known yet" as zero would tell a reader they
  * hold nothing a moment before the figures arrive.
  */
-export type WithdrawableToken = {
-  readonly asset: PrivateExitAsset;
-  readonly baseUnits: bigint | null;
-  readonly id?: string;
-};
-
 export function PrivateWithdrawPanel({
   balances,
   snapshot,
@@ -173,7 +164,7 @@ export function PrivateWithdrawPanel({
           style={[styles.input, styles.amountInput]}
           value={amount}
         />
-        <TokenSelector
+        <WithdrawalTokenSelector
           // Open even with a single token, because the menu is where the balance is shown and one
           // token still has a figure worth reading. Only a run in flight or nothing at all locks it.
           disabled={privateExit.isRunning || pending || empty}
@@ -230,112 +221,6 @@ export function PrivateWithdrawPanel({
         />
       )}
     </View>
-  );
-}
-
-/**
- * Which token is being withdrawn.
- *
- * A dropdown rather than a second pair of buttons: the destination above is a choice between two
- * things and reads well as a pair, while this is a value attached to the amount beside it and belongs
- * in a field-shaped control. It is locked while a withdrawal is in flight, because the token is part
- * of the record being recovered and changing it mid-run would describe a different operation than the
- * one that is running.
- */
-export function TokenSelector({
-  disabled,
-  onSelect,
-  selectedMint,
-  symbol,
-  tokens,
-}: {
-  readonly disabled: boolean;
-  readonly onSelect: (mint: string) => void;
-  readonly selectedMint: string;
-  readonly symbol: string;
-  readonly tokens: readonly WithdrawableToken[];
-}) {
-  // A plain View, because the measurement has to come from a host view: `PressableScale` is an
-  // animated component and its ref is not guaranteed to expose the native measure methods.
-  const anchorRef = useRef<View>(null);
-  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
-  const [open, setOpen] = useState(false);
-  // The balance rides each option, because "which token" and "how much of it" are the same question
-  // here: without it the reader picks a symbol and then finds out from an error whether they had any.
-  const menuOptions = useMemo<readonly MenuOption<string>[]>(
-    () => tokens.map((token) => ({
-      id: token.id ?? token.asset.mint,
-      label: token.asset.symbol,
-      ...(token.baseUnits === null
-        ? {}
-        : { detail: formatTokenAmount(token.baseUnits, token.asset.decimals) }),
-    })),
-    [tokens],
-  );
-
-  // Above the control, and sized to it. This sits two rows from the bottom of a docked sheet, so a
-  // menu hanging below would run off the screen — the last option was clipped behind the home
-  // indicator. Matching the control's width is what stops a card twice its size reading as detached
-  // from the button that opened it; the floor is what keeps "Token" and a tick from crowding.
-  const openMenu = () => {
-    anchorRef.current?.measureInWindow((x, y, width) => {
-      setAnchor(anchorAbove(x, y, width, Math.max(width, MIN_MENU_WIDTH)));
-      setOpen(true);
-    });
-  };
-
-  return (
-    <View ref={anchorRef}>
-      <PressableScale
-        accessibilityHint="Chooses which token to withdraw"
-        accessibilityLabel={`Withdrawal token, ${symbol}`}
-        accessibilityRole="button"
-        accessibilityState={{ disabled, expanded: open }}
-        disabled={disabled}
-        onPress={openMenu}
-        pressedScale={0.97}
-        style={[styles.token, disabled && styles.tokenDisabled]}
-      >
-        <LinearGradient
-          colors={gradients.surfaceRaise.colors}
-          end={{ x: 0.5, y: 1 }}
-          locations={gradients.surfaceRaise.locations}
-          start={{ x: 0.5, y: 0 }}
-          style={styles.tokenFill}
-        >
-          <Text numberOfLines={1} style={styles.tokenLabel}>{symbol}</Text>
-          <ChevronDown />
-        </LinearGradient>
-      </PressableScale>
-
-      <AnchoredMenu
-        anchor={anchor}
-        onClose={() => setOpen(false)}
-        onSelect={(next) => {
-          onSelect(next);
-          setOpen(false);
-        }}
-        options={menuOptions}
-        selected={selectedMint}
-        title="Token"
-        visible={open}
-      />
-    </View>
-  );
-}
-
-function ChevronDown() {
-  return (
-    <Svg height={14} viewBox="0 0 24 24" width={14}>
-      <Path
-        d="M6 9.5 12 15.5 18 9.5"
-        fill="none"
-        stroke={colors.textMuted}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2.2}
-      />
-    </Svg>
   );
 }
 
@@ -416,28 +301,6 @@ function feeLabel(): string {
   return `${formatAmount(amountFromBaseUnits(units, 6))} USDC`;
 }
 
-export function parseTokenAmount(value: string, decimals: number): bigint {
-  const trimmed = value.trim();
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) throw new Error('invalid');
-  const parts = trimmed.split('.');
-  if (parts.length > 2) throw new Error('invalid');
-  const [whole = '', fraction = ''] = parts;
-  if (!/^\d+$/u.test(whole) || !/^\d*$/u.test(fraction) || fraction.length > decimals) {
-    throw new Error('invalid');
-  }
-  return BigInt(`${whole}${fraction.padEnd(decimals, '0')}`);
-}
-
-export function formatTokenAmount(value: bigint, decimals: number): string {
-  if (value < 0n || !Number.isInteger(decimals) || decimals < 0 || decimals > 255) return '--';
-  if (decimals === 0) return value.toString();
-  const digits = value.toString().padStart(decimals + 1, '0');
-  const fraction = digits.slice(-decimals).replace(/0+$/u, '');
-  return fraction.length === 0
-    ? digits.slice(0, -decimals)
-    : `${digits.slice(0, -decimals)}.${fraction}`;
-}
-
 /**
  * Floor for a field's height.
  *
@@ -446,9 +309,6 @@ export function formatTokenAmount(value: bigint, decimals: number): string {
  * its own with the reader's text size.
  */
 const FIELD_MIN_HEIGHT = layout.minTouchTarget;
-
-/** Floor for the token menu: enough for a symbol, its balance, and the tick beside them. */
-const MIN_MENU_WIDTH = 196;
 
 const styles = StyleSheet.create({
   panel: { gap: spacing.md },
@@ -470,23 +330,4 @@ const styles = StyleSheet.create({
     ...typography.bodyCompact,
   },
   amountInput: { flex: 1, minWidth: 0 },
-  // The raised material, because this is a control rather than a field — the same neutral ramp the
-  // activity filter button carries, so a dropdown looks the same wherever it appears.
-  token: {
-    minHeight: FIELD_MIN_HEIGHT,
-    flexShrink: 0,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.sm,
-  },
-  tokenDisabled: { opacity: 0.4 },
-  tokenFill: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xxs,
-    paddingHorizontal: spacing.sm,
-  },
-  tokenLabel: { ...typography.label, color: colors.textPrimary },
 });

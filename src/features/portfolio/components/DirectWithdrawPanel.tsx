@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
-import { NATIVE_MINT } from '@solana/spl-token';
 import { PublicKey } from '@solana/web3.js';
 
 import { ActionButton } from '@/components/ui/ActionButton';
 import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
+import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
 import {
   formatTokenAmount,
+  listWalletTokens,
   parseTokenAmount,
-  TokenSelector,
-  type WithdrawableToken,
-} from '@/features/portfolio/components/PrivateWithdrawPanel';
+} from '@/features/portfolio/components/withdrawalAssets';
 import { listTradingCollateralOptions } from '@/integrations/perps/providerCollateral';
 import { reconcilePendingTradeAction } from '@/integrations/perps/tradeActionRecovery';
 import {
@@ -21,7 +20,6 @@ import {
   type DirectWithdrawalPlan,
 } from '@/integrations/solana/directWithdrawal';
 import { TransactionSigningError } from '@/integrations/solana/signedLegacyTransaction';
-import type { PrivateExitAsset } from '@/integrations/umbra/PrivateExitProvider';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { showAppToast } from '@/storage/appToast';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
@@ -291,7 +289,7 @@ export function DirectWithdrawPanel({
           style={[styles.input, styles.amountInput]}
           value={amount}
         />
-        <TokenSelector
+        <WithdrawalTokenSelector
           disabled={running || tokens.length === 0}
           onSelect={(id) => {
             setChosenId(id);
@@ -345,36 +343,14 @@ export function DirectWithdrawPanel({
   );
 }
 
-function directTokens(balances: WalletBalances | null): readonly WithdrawableToken[] {
-  if (balances === null) return [];
+function directTokens(balances: WalletBalances | null) {
   const config = readAppConfig();
-  const known = new Map((config.ok
-    ? listTradingCollateralOptions(config.value.perps.usdcMint, config.value.perps.usdtMint)
-    : []).map((asset) => [asset.mint, asset]));
-  const nativeMint = NATIVE_MINT.toBase58();
-  const tokens = balances.privateWallet.holdings.flatMap((holding): WithdrawableToken[] => {
-    if (holding.baseUnits <= 0n) return [];
-    const configured = known.get(holding.mint);
-    const asset: PrivateExitAsset = configured === undefined
-      ? {
-          decimals: holding.decimals,
-          kind: 'spl',
-          mint: holding.mint,
-          symbol: holding.mint === nativeMint
-            ? 'WSOL'
-            : `MINT-${holding.mint.slice(0, 5).toUpperCase()}`,
-        }
-      : { ...configured, kind: 'spl' };
-    return [{ asset, baseUnits: holding.baseUnits, id: `spl:${holding.mint}` }];
-  });
-  if (balances.privateWallet.solLamports > 0n) {
-    tokens.unshift({
-      asset: { decimals: 9, kind: 'native', mint: nativeMint, symbol: 'SOL' },
-      baseUnits: balances.privateWallet.solLamports,
-      id: `native:${nativeMint}`,
-    });
-  }
-  return tokens;
+  return listWalletTokens(
+    balances?.privateWallet ?? null,
+    config.ok
+      ? listTradingCollateralOptions(config.value.perps.usdcMint, config.value.perps.usdtMint)
+      : [],
+  );
 }
 
 function directErrorMessage(cause: unknown): string {

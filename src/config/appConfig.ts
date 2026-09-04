@@ -5,7 +5,7 @@ import { readRawAppEnv, type RawAppEnv } from '@/config/rawAppEnv';
 
 export type { RawAppEnv } from '@/config/rawAppEnv';
 
-export type PerpsProviderId = 'pacifica' | 'velocity';
+export type PerpsProviderId = 'pacifica';
 export type SolanaCluster = 'mainnet';
 
 export type AppConfig = {
@@ -19,9 +19,6 @@ export type AppConfig = {
     readonly pacificaCentralState: string;
     readonly pacificaVault: string;
     readonly pacificaWithdrawalFeeBaseUnits: bigint;
-    readonly velocityDlobApiOrigin: string;
-    readonly velocityDlobWsOrigin: string;
-    readonly velocityProgramId: string;
     readonly usdcMint: string;
     readonly usdtMint: string;
   };
@@ -124,7 +121,6 @@ function validateAddress(
     | 'EXPO_PUBLIC_PACIFICA_PROGRAM_ID'
     | 'EXPO_PUBLIC_PACIFICA_CENTRAL_STATE'
     | 'EXPO_PUBLIC_PACIFICA_VAULT'
-    | 'EXPO_PUBLIC_VELOCITY_PROGRAM_ID'
     | 'EXPO_PUBLIC_USDC_MINT'
     | 'EXPO_PUBLIC_USDT_MINT',
   issues: ConfigIssue[],
@@ -143,7 +139,7 @@ function validateAddress(
 
 function validateWebSocketOrigin(
   raw: string,
-  variable: 'EXPO_PUBLIC_PACIFICA_WS_ORIGIN' | 'EXPO_PUBLIC_VELOCITY_DLOB_WS_ORIGIN',
+  variable: 'EXPO_PUBLIC_PACIFICA_WS_ORIGIN',
   issues: ConfigIssue[],
 ): string {
   try {
@@ -176,7 +172,6 @@ function validatePublicServiceOrigin(
   variable:
     | 'EXPO_PUBLIC_PACIFICA_API_ORIGIN'
     | 'EXPO_PUBLIC_PACIFICA_ASSET_ORIGIN'
-    | 'EXPO_PUBLIC_VELOCITY_DLOB_API_ORIGIN'
     | 'EXPO_PUBLIC_UMBRA_INDEXER_URL'
     | 'EXPO_PUBLIC_UMBRA_RELAYER_URL'
     | 'EXPO_PUBLIC_UMBRA_ZK_ASSET_BASE_URL',
@@ -298,11 +293,6 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
     'EXPO_PUBLIC_PACIFICA_VAULT',
     issues,
   );
-  const velocityProgramId = validateAddress(
-    raw.velocityProgramId,
-    'EXPO_PUBLIC_VELOCITY_PROGRAM_ID',
-    issues,
-  );
   const usdcMint = validateAddress(raw.usdcMint, 'EXPO_PUBLIC_USDC_MINT', issues);
   const usdtMint = validateAddress(
     raw.usdtMint,
@@ -322,16 +312,6 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
   const pacificaWsOrigin = validateWebSocketOrigin(
     raw.pacificaWsOrigin,
     'EXPO_PUBLIC_PACIFICA_WS_ORIGIN',
-    issues,
-  );
-  const velocityDlobApiOrigin = validatePublicServiceOrigin(
-    raw.velocityDlobApiOrigin,
-    'EXPO_PUBLIC_VELOCITY_DLOB_API_ORIGIN',
-    issues,
-  );
-  const velocityDlobWsOrigin = validateWebSocketOrigin(
-    raw.velocityDlobWsOrigin,
-    'EXPO_PUBLIC_VELOCITY_DLOB_WS_ORIGIN',
     issues,
   );
   const pacificaWithdrawalFeeBaseUnits = validateUsdcFee(
@@ -383,9 +363,6 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
         pacificaCentralState,
         pacificaVault,
         pacificaWithdrawalFeeBaseUnits,
-        velocityDlobApiOrigin,
-        velocityDlobWsOrigin,
-        velocityProgramId,
         usdcMint,
         usdtMint,
       },

@@ -76,9 +76,7 @@ export function PacificaTradingWorkspace(props: {
                   programId={props.config.perps.pacificaProgramId}
                   rpcUrl={props.config.api.rpcUrl}
                   snapshot={props.snapshot}
-                  swapBuildUrl={props.config.api.swapBuildUrl}
                   usdcMint={props.config.perps.usdcMint}
-                  usdtMint={props.config.perps.usdtMint}
                   vault={props.config.perps.pacificaVault}
                 />
               ) : (

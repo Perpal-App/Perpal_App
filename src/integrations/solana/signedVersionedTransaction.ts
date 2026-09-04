@@ -13,12 +13,27 @@ import {
 const CONFIRMATION_ATTEMPTS = 10;
 const CONFIRMATION_INTERVAL_MS = 1_200;
 
+/**
+ * Owns the on-chain transaction signature only. Gateway RPC authentication is
+ * deliberately supplied separately so a Privy public wallet can authorize the
+ * transaction while the anonymous trading signer authenticates the RPC call.
+ */
+export type VersionedTransactionAuthority = {
+  readonly publicKey: Uint8Array;
+  readonly signTransaction: (
+    transaction: VersionedTransaction,
+  ) => Promise<VersionedTransaction>;
+};
+
 export async function signAndSubmitVersionedTransaction(input: {
   readonly idempotencyKey: string;
   readonly owner: string;
   readonly operationLabel?: string;
   readonly rpcUrl: string;
+  /** Authenticates gateway build, simulation, submission, and status requests. */
   readonly signer: GatewayRequestSigner;
+  /** Defaults to the gateway signer for locally controlled wallet T. */
+  readonly transactionAuthority?: VersionedTransactionAuthority;
   readonly transaction: VersionedTransaction;
   readonly onSigned: (
     signature: string,
@@ -27,7 +42,8 @@ export async function signAndSubmitVersionedTransaction(input: {
 }): Promise<SubmittedTransactionResult> {
   const operation = input.operationLabel ?? 'stablecoin conversion';
   const owner = new PublicKey(input.owner);
-  assertTransactionAuthority(input.transaction, owner, input.signer, true);
+  const authority = input.transactionAuthority ?? localAuthority(input.signer);
+  assertTransactionAuthority(input.transaction, owner, authority.publicKey, true);
   const valid = await isBlockhashValid(
     input.transaction.message.recentBlockhash,
     input.rpcUrl,
@@ -42,25 +58,30 @@ export async function signAndSubmitVersionedTransaction(input: {
   }
 
   const message = input.transaction.message.serialize();
-  const signature = await input.signer.sign(message);
+  const unsigned = clone(input.transaction);
+  const signed = await authority.signTransaction(unsigned);
+  const signedMessage = signed.message.serialize();
+  const signature = signed.signatures[0];
 
   if (
+    !equalBytes(signedMessage, message) ||
+    signed.signatures.length !== 1 ||
+    signature === undefined ||
     signature.length !== 64 ||
-    !ed25519.verify(signature, message, input.signer.publicKey)
+    !ed25519.verify(signature, message, owner.toBytes())
   ) {
     throw new TransactionSigningError(
-      'The trading wallet returned an invalid signature.',
+      'The wallet returned an invalid transaction signature.',
       'signature_invalid',
     );
   }
 
-  input.transaction.signatures[0] = signature;
   const simulation = await signedSolanaRpc<{
     readonly value: { readonly err: unknown };
   }>({
     method: 'simulateTransaction',
     params: [
-      base64.encode(input.transaction.serialize()),
+      base64.encode(signed.serialize()),
       {
         commitment: 'confirmed',
         encoding: 'base64',
@@ -81,7 +102,7 @@ export async function signAndSubmitVersionedTransaction(input: {
   }
 
   const expectedSignature = base58.encode(signature);
-  const signedTransactionBase64 = base64.encode(input.transaction.serialize());
+  const signedTransactionBase64 = base64.encode(signed.serialize());
   await input.onSigned(expectedSignature, signedTransactionBase64);
   return submitSignedVersionedTransaction({
     ...input,
@@ -103,7 +124,7 @@ export async function submitSignedVersionedTransaction(input: {
     base64.decode(input.signedTransactionBase64),
   );
   const owner = new PublicKey(input.owner);
-  assertTransactionAuthority(transaction, owner, input.signer, false);
+  assertTransactionAuthority(transaction, owner, owner.toBytes(), false);
   const signature = transaction.signatures[0];
 
   if (
@@ -112,7 +133,7 @@ export async function submitSignedVersionedTransaction(input: {
     !ed25519.verify(
       signature,
       transaction.message.serialize(),
-      input.signer.publicKey,
+      owner.toBytes(),
     )
   ) {
     throw new TransactionSigningError(
@@ -165,7 +186,7 @@ export async function storedVersionedTransactionIsCurrent(input: {
 function assertTransactionAuthority(
   transaction: VersionedTransaction,
   owner: PublicKey,
-  signer: GatewayRequestSigner,
+  authorityPublicKey: Uint8Array,
   requireUnsigned: boolean,
 ): void {
   const requiredSigners = transaction.message.header.numRequiredSignatures;
@@ -175,7 +196,7 @@ function assertTransactionAuthority(
     requiredSigners !== 1 ||
     feePayer === undefined ||
     !feePayer.equals(owner) ||
-    !new PublicKey(signer.publicKey).equals(owner) ||
+    !new PublicKey(authorityPublicKey).equals(owner) ||
     transaction.signatures.length !== 1 ||
     (requireUnsigned &&
       transaction.signatures.some((entry) =>
@@ -187,6 +208,42 @@ function assertTransactionAuthority(
       'signer_mismatch',
     );
   }
+}
+
+function localAuthority(
+  signer: GatewayRequestSigner,
+): VersionedTransactionAuthority {
+  return {
+    publicKey: signer.publicKey,
+    signTransaction: async (transaction) => {
+      const signed = clone(transaction);
+      const message = signed.message.serialize();
+      const signature = await signer.sign(message);
+
+      if (
+        signature.length !== 64 ||
+        !ed25519.verify(signature, message, signer.publicKey)
+      ) {
+        throw new TransactionSigningError(
+          'The wallet returned an invalid transaction signature.',
+          'signature_invalid',
+        );
+      }
+
+      signed.signatures[0] = signature;
+      return signed;
+    },
+  };
+}
+
+function clone(transaction: VersionedTransaction): VersionedTransaction {
+  return VersionedTransaction.deserialize(transaction.serialize());
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every(
+    (byte, index) => byte === right[index],
+  );
 }
 
 async function isBlockhashValid(

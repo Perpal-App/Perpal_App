@@ -29,6 +29,7 @@ export function classifyPrivateFundingFailure(cause: unknown): string {
       code.startsWith('swap_') ||
       code.startsWith('create_utxo_') ||
       code.startsWith('fetch_utxos_') ||
+      code.startsWith('pacifica_deposit_') ||
       code.startsWith('relayer_') ||
       code.startsWith('rpc_') ||
       code.startsWith('master_seed_') ||
@@ -78,6 +79,26 @@ export function privateFundingFailureDiagnostic(cause: unknown): string | null {
 }
 
 export function privateFundingUserMessage(code: string): string {
+  if (code === 'pacifica_deposit_below_minimum') {
+    return 'Pacifica must receive at least 10 USDC after the Umbra fee.';
+  }
+
+  if (code === 'pacifica_deposit_insufficient_usdc') {
+    return 'The private USDC claim is not available for the Pacifica deposit yet.';
+  }
+
+  if (code === 'pacifica_deposit_insufficient_sol') {
+    return 'The private wallet needs more SOL to finish the Pacifica deposit.';
+  }
+
+  if (code === 'pacifica_deposit_pending') {
+    return 'The Pacifica deposit is submitted and still confirming. Resume to reconcile it.';
+  }
+
+  if (code.startsWith('pacifica_deposit_')) {
+    return 'The Pacifica deposit did not complete. Progress is saved; resume to reconcile it.';
+  }
+
   if (code === 'insufficient_sol') {
     return 'The public wallet needs more SOL for the reserve, temporary rent, and network fees.';
   }

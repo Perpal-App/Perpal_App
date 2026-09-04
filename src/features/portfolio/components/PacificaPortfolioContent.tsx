@@ -11,16 +11,12 @@ import { GlobalActivityTracker } from '@/features/portfolio/components/GlobalAct
 import {
   OrderCard,
   PositionCard,
-  VelocityOrderCard,
-  VelocityPositionCard,
 } from '@/features/portfolio/components/PortfolioCards';
-import type { VelocityHistoryState } from '@/features/portfolio/hooks/useVelocityAccount';
 import { cancelPacificaOrder } from '@/integrations/perps/pacifica/pacificaOrder';
 import type {
   PacificaOpenOrder,
   PacificaPortfolioSnapshot,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import type { VelocityAccountSnapshot } from '@/integrations/perps/velocity/velocityAccount';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
@@ -30,29 +26,21 @@ type Props = {
   readonly balances: WalletBalances | null;
   readonly onBalancesChanged: () => void;
   readonly onPacificaRefresh: () => void;
-  readonly onVelocityRefresh: () => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
-  readonly velocity: VelocityAccountSnapshot | null;
-  readonly velocityHistory: VelocityHistoryState;
 };
 
 export function PacificaPortfolioContent({
   balances,
   onBalancesChanged,
   onPacificaRefresh,
-  onVelocityRefresh,
   snapshot,
-  velocity,
-  velocityHistory,
 }: Props) {
   const config = readAppConfig();
   const session = useTradingSession();
   const positions = snapshot?.positions ?? [];
   const orders = snapshot?.orders ?? [];
-  const velocityPositions = velocity?.positions ?? [];
-  const velocityOrders = velocity?.orders ?? [];
-  const hasPositions = positions.length > 0 || velocityPositions.length > 0;
-  const hasOrders = orders.length > 0 || velocityOrders.length > 0;
+  const hasPositions = positions.length > 0;
+  const hasOrders = orders.length > 0;
 
   const cancel = (order: PacificaOpenOrder) => Alert.alert(
     `Cancel ${order.symbol} order?`,
@@ -95,16 +83,13 @@ export function PacificaPortfolioContent({
     <AppScreen contentContainerStyle={styles.container}>
       <Text accessibilityRole="header" style={styles.title}>Portfolio</Text>
 
-      <AccountOverviewCard balances={balances} portfolio={snapshot} velocity={velocity} />
+      <AccountOverviewCard balances={balances} portfolio={snapshot} />
 
       {hasPositions ? (
         <View style={styles.section}>
           <Text accessibilityRole="header" style={styles.heading}>Open positions</Text>
           {positions.map((position) => (
             <PositionCard key={`pacifica:${position.symbol}:${position.side}`} position={position} />
-          ))}
-          {velocityPositions.map((position) => (
-            <VelocityPositionCard key={`velocity:${position.marketIndex}`} position={position} />
           ))}
         </View>
       ) : null}
@@ -119,9 +104,6 @@ export function PacificaPortfolioContent({
               order={order}
             />
           ))}
-          {velocityOrders.map((order) => (
-            <VelocityOrderCard key={`velocity:${order.orderId}`} order={order} />
-          ))}
         </View>
       ) : null}
 
@@ -131,17 +113,13 @@ export function PacificaPortfolioContent({
           balances={balances}
           onBalancesChanged={onBalancesChanged}
           onPacificaRefresh={onPacificaRefresh}
-          onVelocityRefresh={onVelocityRefresh}
           snapshot={snapshot}
-          velocity={velocity}
         />
       </View>
 
       <GlobalActivityTracker
         account={session.address ?? ''}
         apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
-        onVelocityRefresh={onVelocityRefresh}
-        velocityHistory={velocityHistory}
       />
     </AppScreen>
   );
@@ -151,16 +129,12 @@ function Funds({
   balances,
   onBalancesChanged,
   onPacificaRefresh,
-  onVelocityRefresh,
   snapshot,
-  velocity,
 }: {
   readonly balances: WalletBalances | null;
   readonly onBalancesChanged: () => void;
   readonly onPacificaRefresh: () => void;
-  readonly onVelocityRefresh: () => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
-  readonly velocity: VelocityAccountSnapshot | null;
 }) {
   const [mode, setMode] = useState<FundsMode | null>(null);
 
@@ -201,9 +175,7 @@ function Funds({
         onClose={() => setMode(null)}
         onBalancesChanged={onBalancesChanged}
         onPacificaRefresh={onPacificaRefresh}
-        onVelocityRefresh={onVelocityRefresh}
         snapshot={snapshot}
-        velocity={velocity}
       />
     </>
   );

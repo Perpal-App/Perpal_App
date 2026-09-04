@@ -23,9 +23,16 @@ export type SubmittedTransactionResult = {
 
 export type SubmittedTransactionStatus = 'confirmed' | 'failed' | 'pending';
 
+/** Transaction authority is separate from the signer that authenticates gateway RPC calls. */
+export type LegacyTransactionAuthority = {
+  readonly publicKey: Uint8Array;
+  readonly signTransaction: (transaction: Transaction) => Promise<Transaction>;
+};
+
 export async function readSubmittedTransactionStatus(input: {
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
+  readonly transactionAuthority?: LegacyTransactionAuthority;
   readonly signature: string;
   readonly signal?: AbortSignal;
 }): Promise<SubmittedTransactionStatus> {
@@ -81,10 +88,11 @@ export async function signAndSubmitLegacyTransaction(input: {
   readonly tradeTiming?: TradeTimingContext;
 }): Promise<SubmittedTransactionResult> {
   const owner = new PublicKey(input.owner);
+  const authority = input.transactionAuthority ?? localAuthority(input.signer);
 
-  if (!new PublicKey(input.signer.publicKey).equals(owner)) {
+  if (!new PublicKey(authority.publicKey).equals(owner)) {
     throw new TransactionSigningError(
-      'The active trading signer does not match the transaction authority.',
+      'The active wallet does not match the transaction authority.',
       'signer_mismatch',
     );
   }
@@ -124,22 +132,28 @@ export async function signAndSubmitLegacyTransaction(input: {
   }
 
   const message = transaction.serializeMessage();
-  const signature = await input.signer.sign(message);
+  const signed = await authority.signTransaction(Transaction.from(input.unsignedTransaction));
+  const ownerSignature = signed.signatures.find((entry) => entry.publicKey.equals(owner));
+  const signature = ownerSignature?.signature;
 
   if (
+    !Buffer.from(signed.serializeMessage()).equals(Buffer.from(message)) ||
+    !signed.feePayer?.equals(owner) ||
+    signed.signatures.length !== 1 ||
+    signature === null ||
+    signature === undefined ||
     signature.length !== 64 ||
-    !ed25519.verify(signature, message, input.signer.publicKey)
+    !ed25519.verify(signature, message, authority.publicKey)
   ) {
     throw new TransactionSigningError(
-      'The trading wallet returned an invalid signature.',
+      'The wallet returned an invalid transaction signature.',
       'signature_invalid',
     );
   }
 
-  transaction.addSignature(owner, Buffer.from(signature));
   const expectedSignature = base58.encode(signature);
   const signedTransactionBase64 = base64.encode(
-    transaction.serialize({ requireAllSignatures: true, verifySignatures: true }),
+    signed.serialize({ requireAllSignatures: true, verifySignatures: true }),
   );
   await input.onSigned?.(expectedSignature, signedTransactionBase64);
   const submissionStartedAtMs = performance.now();
@@ -252,7 +266,6 @@ export async function submitSignedLegacyTransaction(input: {
     ownerSignature?.signature === null ||
     ownerSignature?.signature === undefined ||
     base58.encode(ownerSignature.signature) !== input.expectedSignature ||
-    !new PublicKey(input.signer.publicKey).equals(owner) ||
     !ed25519.verify(
       ownerSignature.signature,
       transaction.serializeMessage(),
@@ -287,6 +300,24 @@ export async function submitSignedLegacyTransaction(input: {
     status: submitted === input.expectedSignature
       ? await confirmSignature(input.rpcUrl, input.signer, input.expectedSignature)
       : 'unknown',
+  };
+}
+
+function localAuthority(signer: GatewayRequestSigner): LegacyTransactionAuthority {
+  return {
+    publicKey: signer.publicKey,
+    signTransaction: async (transaction) => {
+      const message = transaction.serializeMessage();
+      const signature = await signer.sign(message);
+      if (signature.length !== 64 || !ed25519.verify(signature, message, signer.publicKey)) {
+        throw new TransactionSigningError(
+          'The wallet returned an invalid transaction signature.',
+          'signature_invalid',
+        );
+      }
+      transaction.addSignature(new PublicKey(signer.publicKey), Buffer.from(signature));
+      return transaction;
+    },
   };
 }
 

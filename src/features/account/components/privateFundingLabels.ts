@@ -87,8 +87,6 @@ export function phaseLabel(phase: string | undefined): string {
     case 'scanning':
     case 'relaying':
     case 'fee-funding':
-    case 'collateral-converting':
-    case 'provider-setup':
     case 'provider-depositing': return 'Getting trading funds ready';
     case 'complete': return 'Ready to trade';
     default: return 'Ready';
@@ -124,8 +122,6 @@ export function hasSubmittedTransaction(record: PrivateFundingRecord): boolean {
     record.feeFundingDepositSignature,
     record.feeFundingRelayRequestId,
     record.feeFundingSignature,
-    record.conversionSignature,
-    record.providerSetupSignature,
     record.providerDepositSignature,
   ].some((value) => value !== null);
 }

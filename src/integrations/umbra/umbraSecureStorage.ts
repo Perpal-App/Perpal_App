@@ -2,7 +2,6 @@ import { base58, base64 } from '@scure/base';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
-import type { PerpsProviderId } from '@/config/appConfig';
 import { hasCompletedPrivateWalletFunding } from '@/integrations/umbra/privateFundingState';
 
 const MASTER_SEED_PREFIX = 'perpal.umbra.master-seed.v1.';
@@ -14,17 +13,18 @@ export type PrivateFundingPhase =
   | 'proving'
   | 'relaying'
   | 'fee-funding'
-  | 'collateral-converting'
-  | 'provider-setup'
   | 'provider-depositing'
   | 'complete';
 
+export type PrivateFundingDestination = 'private' | 'pacifica';
+
 export type PrivateFundingRecord = {
-  readonly version: 1;
+  readonly version: 2;
   readonly id: string;
   readonly mainWalletAddress: string;
   readonly tradingWalletAddress: string;
-  readonly provider: PerpsProviderId;
+  readonly provider: 'pacifica';
+  readonly destination: PrivateFundingDestination;
   readonly mint: string;
   readonly symbol: 'USDC' | 'USDT';
   readonly amountBaseUnits: string;
@@ -49,15 +49,10 @@ export type PrivateFundingRecord = {
   readonly feeFundingSignature: string | null;
   readonly feeFundingNoteAmountLamports: string | null;
   readonly feeFundingRelayerFixedFeeLamports: string | null;
-  readonly conversionExpectedOutBaseUnits: string | null;
-  readonly conversionMinimumOutBaseUnits: string | null;
-  readonly conversionOutputBalanceBeforeBaseUnits: string | null;
-  readonly conversionOutputBaseUnits: string | null;
-  readonly conversionSignature: string | null;
-  readonly conversionSignedTransactionBase64: string | null;
-  readonly providerSetupComplete: boolean;
-  readonly providerSetupSignature: string | null;
+  readonly providerDepositExpiresAtMs: number | null;
+  readonly providerDepositIdempotencyKey: string | null;
   readonly providerDepositSignature: string | null;
+  readonly providerDepositSignedTransactionBase64: string | null;
   readonly errorCode: string | null;
   readonly updatedAtMs: number;
 };
@@ -68,18 +63,13 @@ export async function readUmbraMasterSeed(
   const encoded = await SecureStore.getItemAsync(
     await storageKey(MASTER_SEED_PREFIX, mainWalletAddress),
   );
-
-  if (encoded === null) {
-    return null;
-  }
+  if (encoded === null) return null;
 
   const seed = base64.decode(encoded);
-
   if (seed.length !== 64) {
     seed.fill(0);
     throw new Error('Stored Umbra recovery material is invalid.');
   }
-
   return seed;
 }
 
@@ -90,7 +80,6 @@ export async function writeUmbraMasterSeed(
   if (seed.length !== 64) {
     throw new Error('Umbra recovery material is invalid.');
   }
-
   await SecureStore.setItemAsync(
     await storageKey(MASTER_SEED_PREFIX, mainWalletAddress),
     base64.encode(seed),
@@ -103,13 +92,9 @@ export async function readPrivateFundingRecord(
   const value = await SecureStore.getItemAsync(
     await storageKey(OPERATION_PREFIX, mainWalletAddress),
   );
-
-  if (value === null) {
-    return null;
-  }
+  if (value === null) return null;
 
   const parsed = parseRecord(value);
-
   if (parsed === null || parsed.mainWalletAddress !== mainWalletAddress) {
     throw new Error('Stored private-funding recovery state is invalid.');
   }
@@ -124,7 +109,6 @@ export async function readPrivateFundingRecord(
     await writePrivateFundingRecord(completed);
     return completed;
   }
-
   return parsed;
 }
 
@@ -134,7 +118,6 @@ export async function writePrivateFundingRecord(
   if (parseRecord(JSON.stringify(record)) === null) {
     throw new Error('Private-funding recovery state is invalid.');
   }
-
   await SecureStore.setItemAsync(
     await storageKey(OPERATION_PREFIX, record.mainWalletAddress),
     JSON.stringify(record),
@@ -144,119 +127,118 @@ export async function writePrivateFundingRecord(
 function parseRecord(value: string): PrivateFundingRecord | null {
   try {
     const record = JSON.parse(value) as Record<string, unknown>;
-    const phase = record.phase;
-    const noteAmountBaseUnits = record.noteAmountBaseUnits ?? null;
-    const relayerFixedFeeLamports = record.relayerFixedFeeLamports ?? null;
-    const scanStartLeafCounts = record.scanStartLeafCounts ?? null;
-    const feeFundingLamports = record.feeFundingLamports ?? null;
-    const feeFundingWrapSignature = record.feeFundingWrapSignature ?? null;
-    const feeFundingGenerationIndex = record.feeFundingGenerationIndex ?? null;
-    const feeFundingExcludedNoteIds = record.feeFundingExcludedNoteIds ?? [];
-    const feeFundingScanStartLeafCounts =
-      record.feeFundingScanStartLeafCounts ?? null;
-    const feeFundingPopulateSignature = record.feeFundingPopulateSignature ?? null;
-    const feeFundingDepositSignature = record.feeFundingDepositSignature ?? null;
-    const feeFundingRelayRequestId = record.feeFundingRelayRequestId ?? null;
-    const feeFundingSignature = record.feeFundingSignature ?? null;
-    const feeFundingNoteAmountLamports = record.feeFundingNoteAmountLamports ?? null;
-    const feeFundingRelayerFixedFeeLamports =
-      record.feeFundingRelayerFixedFeeLamports ?? null;
-    const conversionExpectedOutBaseUnits =
-      record.conversionExpectedOutBaseUnits ?? null;
-    const conversionMinimumOutBaseUnits =
-      record.conversionMinimumOutBaseUnits ?? null;
-    const conversionOutputBalanceBeforeBaseUnits =
-      record.conversionOutputBalanceBeforeBaseUnits ?? null;
-    const conversionOutputBaseUnits = record.conversionOutputBaseUnits ?? null;
-    const conversionSignature = record.conversionSignature ?? null;
-    const conversionSignedTransactionBase64 =
-      record.conversionSignedTransactionBase64 ?? null;
-    const providerSetupComplete = record.providerSetupComplete ?? false;
-    const providerSetupSignature = record.providerSetupSignature ?? null;
-    const providerDepositSignature = record.providerDepositSignature ?? null;
+    if (!validCommonFields(record)) return null;
 
-    if (
-      record.version !== 1 ||
-      typeof record.id !== 'string' ||
-      !isAddress(record.mainWalletAddress) ||
-      !isAddress(record.tradingWalletAddress) ||
-      (record.provider !== 'pacifica' && record.provider !== 'flash') ||
-      !isAddress(record.mint) ||
-      (record.symbol !== 'USDC' && record.symbol !== 'USDT') ||
-      typeof record.amountBaseUnits !== 'string' ||
-      !/^\d+$/u.test(record.amountBaseUnits) ||
-      !isPhase(phase) ||
-      !nullableString(record.generationIndex) ||
-      !Array.isArray(record.excludedNoteIds) ||
-      !record.excludedNoteIds.every((entry) => typeof entry === 'string') ||
-      !nullableScanBoundary(scanStartLeafCounts) ||
-      !nullableString(record.populateSignature) ||
-      !nullableString(record.depositSignature) ||
-      !nullableString(record.relayRequestId) ||
-      !nullableString(record.claimSignature) ||
-      !nullableUnsignedInteger(noteAmountBaseUnits) ||
-      !nullableUnsignedInteger(relayerFixedFeeLamports) ||
-      !nullableUnsignedInteger(feeFundingLamports) ||
-      !nullableString(feeFundingWrapSignature) ||
-      !nullableString(feeFundingGenerationIndex) ||
-      !Array.isArray(feeFundingExcludedNoteIds) ||
-      !feeFundingExcludedNoteIds.every((entry) => typeof entry === 'string') ||
-      !nullableScanBoundary(feeFundingScanStartLeafCounts) ||
-      !nullableString(feeFundingPopulateSignature) ||
-      !nullableString(feeFundingDepositSignature) ||
-      !nullableString(feeFundingRelayRequestId) ||
-      !nullableString(feeFundingSignature) ||
-      !nullableUnsignedInteger(feeFundingNoteAmountLamports) ||
-      !nullableUnsignedInteger(feeFundingRelayerFixedFeeLamports) ||
-      !nullableUnsignedInteger(conversionExpectedOutBaseUnits) ||
-      !nullableUnsignedInteger(conversionMinimumOutBaseUnits) ||
-      !nullableUnsignedInteger(conversionOutputBalanceBeforeBaseUnits) ||
-      !nullableUnsignedInteger(conversionOutputBaseUnits) ||
-      !nullableString(conversionSignature) ||
-      !nullableString(conversionSignedTransactionBase64) ||
-      typeof providerSetupComplete !== 'boolean' ||
-      !nullableString(providerSetupSignature) ||
-      !nullableString(providerDepositSignature) ||
-      !nullableString(record.errorCode) ||
-      typeof record.updatedAtMs !== 'number' ||
-      !Number.isSafeInteger(record.updatedAtMs)
-    ) {
-      return null;
-    }
+    const destination = record.version === 1 ? 'private' : record.destination;
+    if (destination !== 'private' && destination !== 'pacifica') return null;
+    if (destination === 'pacifica' && record.symbol !== 'USDC') return null;
 
-    return {
-      ...record,
-      // Preserve resumable Umbra state created before the venue migration. The
-      // old provider field never controlled custody or signing; completed funds
-      // are already in T, so normalize the record without replaying a transfer.
+    const parsed: PrivateFundingRecord = {
+      version: 2,
+      id: record.id as string,
+      mainWalletAddress: record.mainWalletAddress as string,
+      tradingWalletAddress: record.tradingWalletAddress as string,
       provider: 'pacifica',
-      noteAmountBaseUnits,
-      relayerFixedFeeLamports,
-      scanStartLeafCounts,
-      feeFundingLamports,
-      feeFundingWrapSignature,
-      feeFundingGenerationIndex,
-      feeFundingExcludedNoteIds,
-      feeFundingScanStartLeafCounts,
-      feeFundingPopulateSignature,
-      feeFundingDepositSignature,
-      feeFundingRelayRequestId,
-      feeFundingSignature,
-      feeFundingNoteAmountLamports,
-      feeFundingRelayerFixedFeeLamports,
-      conversionExpectedOutBaseUnits,
-      conversionMinimumOutBaseUnits,
-      conversionOutputBalanceBeforeBaseUnits,
-      conversionOutputBaseUnits,
-      conversionSignature,
-      conversionSignedTransactionBase64,
-      providerSetupComplete,
-      providerSetupSignature,
-      providerDepositSignature,
-    } as unknown as PrivateFundingRecord;
+      destination,
+      mint: record.mint as string,
+      symbol: record.symbol as 'USDC' | 'USDT',
+      amountBaseUnits: record.amountBaseUnits as string,
+      phase: normalizePhase(record.phase),
+      generationIndex: nullable(record.generationIndex),
+      excludedNoteIds: stringArray(record.excludedNoteIds, []),
+      scanStartLeafCounts: scanBoundary(record.scanStartLeafCounts),
+      populateSignature: nullable(record.populateSignature),
+      depositSignature: nullable(record.depositSignature),
+      relayRequestId: nullable(record.relayRequestId),
+      claimSignature: nullable(record.claimSignature),
+      noteAmountBaseUnits: unsigned(record.noteAmountBaseUnits),
+      relayerFixedFeeLamports: unsigned(record.relayerFixedFeeLamports),
+      feeFundingLamports: unsigned(record.feeFundingLamports),
+      feeFundingWrapSignature: nullable(record.feeFundingWrapSignature),
+      feeFundingGenerationIndex: nullable(record.feeFundingGenerationIndex),
+      feeFundingExcludedNoteIds: stringArray(record.feeFundingExcludedNoteIds, []),
+      feeFundingScanStartLeafCounts: scanBoundary(record.feeFundingScanStartLeafCounts),
+      feeFundingPopulateSignature: nullable(record.feeFundingPopulateSignature),
+      feeFundingDepositSignature: nullable(record.feeFundingDepositSignature),
+      feeFundingRelayRequestId: nullable(record.feeFundingRelayRequestId),
+      feeFundingSignature: nullable(record.feeFundingSignature),
+      feeFundingNoteAmountLamports: unsigned(record.feeFundingNoteAmountLamports),
+      feeFundingRelayerFixedFeeLamports: unsigned(record.feeFundingRelayerFixedFeeLamports),
+      providerDepositExpiresAtMs: nullableSafeInteger(record.providerDepositExpiresAtMs),
+      providerDepositIdempotencyKey: nullable(record.providerDepositIdempotencyKey),
+      providerDepositSignature: nullable(record.providerDepositSignature),
+      providerDepositSignedTransactionBase64: nullable(
+        record.providerDepositSignedTransactionBase64,
+      ),
+      errorCode: nullable(record.errorCode),
+      updatedAtMs: record.updatedAtMs as number,
+    };
+    return validNormalizedRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+function validCommonFields(record: Record<string, unknown>): boolean {
+  return (record.version === 1 || record.version === 2) &&
+    typeof record.id === 'string' &&
+    isAddress(record.mainWalletAddress) &&
+    isAddress(record.tradingWalletAddress) &&
+    ['pacifica', 'flash'].includes(String(record.provider)) &&
+    (record.version === 1 || record.provider === 'pacifica') &&
+    isAddress(record.mint) &&
+    (record.symbol === 'USDC' || record.symbol === 'USDT') &&
+    typeof record.amountBaseUnits === 'string' &&
+    /^\d+$/u.test(record.amountBaseUnits) &&
+    isLegacyPhase(record.phase) &&
+    typeof record.updatedAtMs === 'number' &&
+    Number.isSafeInteger(record.updatedAtMs);
+}
+
+function validNormalizedRecord(record: PrivateFundingRecord): boolean {
+  const nullableStrings = [
+    record.generationIndex,
+    record.populateSignature,
+    record.depositSignature,
+    record.relayRequestId,
+    record.claimSignature,
+    record.feeFundingWrapSignature,
+    record.feeFundingGenerationIndex,
+    record.feeFundingPopulateSignature,
+    record.feeFundingDepositSignature,
+    record.feeFundingRelayRequestId,
+    record.feeFundingSignature,
+    record.providerDepositIdempotencyKey,
+    record.providerDepositSignature,
+    record.providerDepositSignedTransactionBase64,
+    record.errorCode,
+  ];
+  const unsignedValues = [
+    record.noteAmountBaseUnits,
+    record.relayerFixedFeeLamports,
+    record.feeFundingLamports,
+    record.feeFundingNoteAmountLamports,
+    record.feeFundingRelayerFixedFeeLamports,
+  ];
+  const providerCheckpoint = [
+    record.providerDepositExpiresAtMs,
+    record.providerDepositIdempotencyKey,
+    record.providerDepositSignature,
+    record.providerDepositSignedTransactionBase64,
+  ];
+  const providerCheckpointValid = record.destination === 'private' ||
+    providerCheckpoint.every((value) => value === null) ||
+    providerCheckpoint.every((value) => value !== null);
+  return nullableStrings.every((entry) => entry === null || typeof entry === 'string') &&
+    unsignedValues.every((entry) => entry === null || /^\d+$/u.test(entry)) &&
+    nullableScanBoundary(record.scanStartLeafCounts) &&
+    nullableScanBoundary(record.feeFundingScanStartLeafCounts) &&
+    Number.isSafeInteger(record.updatedAtMs) &&
+    (record.providerDepositExpiresAtMs === null ||
+      Number.isSafeInteger(record.providerDepositExpiresAtMs)) &&
+    providerCheckpointValid &&
+    (record.destination === 'private' || record.phase !== 'complete' ||
+      record.providerDepositSignature !== null);
 }
 
 async function storageKey(prefix: string, address: string): Promise<string> {
@@ -275,33 +257,70 @@ function isAddress(value: unknown): value is string {
   }
 }
 
-function nullableString(value: unknown): value is string | null {
-  return value === null || typeof value === 'string';
+function nullable(value: unknown): string | null {
+  return value === null || value === undefined
+    ? null
+    : typeof value === 'string'
+      ? value
+      : invalidValue();
 }
 
-function nullableUnsignedInteger(value: unknown): value is string | null {
-  return value === null || (typeof value === 'string' && /^\d+$/u.test(value));
+function unsigned(value: unknown): string | null {
+  const parsed = nullable(value);
+  if (parsed !== null && !/^\d+$/u.test(parsed)) invalidValue();
+  return parsed;
 }
 
-function nullableScanBoundary(
-  value: unknown,
-): value is readonly string[] | null {
+function nullableSafeInteger(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    invalidValue();
+  }
+  return value;
+}
+
+function stringArray(value: unknown, fallback: readonly string[]): readonly string[] {
+  if (value === undefined) return fallback;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    invalidValue();
+  }
+  return value as readonly string[];
+}
+
+function scanBoundary(value: unknown): readonly string[] | null {
+  if (value === undefined || value === null) return null;
+  if (!nullableScanBoundary(value)) invalidValue();
+  return value;
+}
+
+function nullableScanBoundary(value: unknown): value is readonly string[] | null {
   return value === null || (
     Array.isArray(value) &&
     value.every((entry) => typeof entry === 'string' && /^\d+:\d+$/u.test(entry))
   );
 }
 
-function isPhase(value: unknown): value is PrivateFundingPhase {
-  return (
-    value === 'depositing' ||
-    value === 'scanning' ||
-    value === 'proving' ||
-    value === 'relaying' ||
-    value === 'fee-funding' ||
-    value === 'collateral-converting' ||
-    value === 'provider-setup' ||
-    value === 'provider-depositing' ||
-    value === 'complete'
-  );
+function normalizePhase(value: unknown): PrivateFundingPhase {
+  if (value === 'collateral-converting' || value === 'provider-setup') {
+    return 'provider-depositing';
+  }
+  return value as PrivateFundingPhase;
+}
+
+function isLegacyPhase(value: unknown): boolean {
+  return [
+    'depositing',
+    'scanning',
+    'proving',
+    'relaying',
+    'fee-funding',
+    'collateral-converting',
+    'provider-setup',
+    'provider-depositing',
+    'complete',
+  ].includes(String(value));
+}
+
+function invalidValue(): never {
+  throw new Error('invalid private-funding record');
 }

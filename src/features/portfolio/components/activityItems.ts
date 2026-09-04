@@ -3,10 +3,6 @@ import type {
   PacificaBalanceActivity,
   PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
-import type {
-  VelocityTradeActivity,
-  VelocityTradeHistory,
-} from '@/integrations/perps/velocity/velocityActivity';
 import type { InAppNotification } from '@/storage/inAppNotifications';
 
 /**
@@ -38,12 +34,10 @@ export type ActivityItem = {
  */
 export function mergeActivity(
   remote: PacificaActivity | null,
-  velocity: VelocityTradeHistory | null,
   local: readonly InAppNotification[],
 ): readonly ActivityItem[] {
   const items: ActivityItem[] = [
     ...(remote?.trades.map(tradeItem) ?? []),
-    ...(velocity?.trades.map(velocityTradeActivityItem) ?? []),
     ...(remote?.balances.filter(isFundMovement).map(balanceItem) ?? []),
     ...local.filter((item) => item.kind !== 'wallet').map(localItem),
   ];
@@ -88,20 +82,6 @@ function tradeItem(trade: PacificaTradeActivity): ActivityItem {
     outcome: trade.cause === 'normal' ? 'success' : 'info',
     title,
     value: opening ? null : signedUsd(trade.pnl),
-  };
-}
-
-export function velocityTradeActivityItem(trade: VelocityTradeActivity): ActivityItem {
-  return {
-    createdAtMs: trade.createdAtMs,
-    detail: `${baseUnits(trade.amountBaseUnits, 9)} ${trade.symbol} at ${usd(
-      baseUnits(trade.priceBaseUnits, 6),
-    )} · ${capitalize(trade.role)} fee ${signedUsd(baseUnits(trade.feeBaseUnits, 6))}`,
-    id: trade.id,
-    kind: 'trade',
-    outcome: 'success',
-    title: `${capitalize(trade.effect)} ${trade.symbol} ${trade.side}`,
-    value: usd(baseUnits(trade.quoteBaseUnits, 6)),
   };
 }
 
@@ -176,14 +156,4 @@ function trimDecimal(value: string): string {
   const visibleFraction = fraction.replace(/0+$/u, '');
   const body = visibleFraction.length === 0 ? grouped : `${grouped}.${visibleFraction}`;
   return negative ? `-${body}` : body;
-}
-
-function baseUnits(value: bigint, decimals: number): string {
-  const negative = value < 0n;
-  const absolute = negative ? -value : value;
-  const scale = 10n ** BigInt(decimals);
-  const whole = absolute / scale;
-  const fraction = (absolute % scale).toString().padStart(decimals, '0').replace(/0+$/u, '');
-  const rendered = fraction.length === 0 ? whole.toString() : `${whole}.${fraction}`;
-  return negative ? `-${rendered}` : rendered;
 }

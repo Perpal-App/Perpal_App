@@ -104,7 +104,6 @@ export async function prepareStablecoinSwap(input: {
 
   if (
     input.amountBaseUnits <= 0n ||
-    !new PublicKey(input.signer.publicKey).equals(owner) ||
     input.inputMint === input.outputMint
   ) {
     throw invalidPlan();
@@ -242,8 +241,8 @@ export function assertStablecoinSwapSolFunding(
   if (solBalanceLamports < feeLamports + rentLamports) {
     throw new StablecoinSwapError(
       rentLamports > 0
-        ? 'Private wallet T needs more SOL for the network fee and first-time token-account rent.'
-        : 'Private wallet T needs more SOL for the network fee.',
+        ? 'This wallet needs more SOL for the network fee and first-time token-account rent.'
+        : 'This wallet needs more SOL for the network fee.',
       'insufficient_sol',
     );
   }

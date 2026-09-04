@@ -7,7 +7,7 @@ import { TicketRow } from '@/features/trade/components/OrderTicketControls';
 import {
   decimalUsd,
   priceText,
-  privateStablecoinText,
+  privateUsdcText,
   usdcText,
 } from '@/features/trade/components/PacificaOrderTicketFormatting';
 import { pacificaOrderTicketStyles as styles } from '@/features/trade/components/PacificaOrderTicketStyles';
@@ -52,10 +52,7 @@ export function PacificaFundingRequirementRows(props: {
         label="Available"
         selectable
         singleLine
-        value={privateStablecoinText({
-          usdcBaseUnits: props.requirement.usdcAvailableBaseUnits,
-          usdtBaseUnits: props.requirement.usdtAvailableBaseUnits,
-        })}
+        value={usdcText(props.requirement.usdcAvailableBaseUnits)}
       />
     </View>
   );
@@ -96,7 +93,7 @@ export function PacificaRiskRows(props: {
         screenReaderLabel="Available in Pacifica"
         value={decimalUsd(props.portfolio.availableToSpend)}
       />
-      <TicketRow label="Private" value={privateStablecoinText(props.privateBalances)} />
+      <TicketRow label="Private USDC" value={privateUsdcText(props.privateBalances)} />
     </View>
   );
 }

@@ -1,44 +1,26 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { AppScreen } from '@/components/layout/AppScreen';
-import {
-  AnchoredMenu,
-  anchorBelow,
-  type MenuAnchor,
-  type MenuOption,
-} from '@/components/ui/AnchoredMenu';
-import { ChevronDown } from '@/components/ui/ChevronDown';
-import { PressableScale } from '@/components/ui/PressableScale';
 import { SearchField } from '@/components/ui/SearchField';
-import { readAppConfig, type PerpsProviderId } from '@/config/appConfig';
+import { readAppConfig } from '@/config/appConfig';
 import {
   MarketTableHeader,
   MarketTableRow,
   MarketTableSkeletonRow,
   type MarketTableEntry,
 } from '@/features/trade/components/MarketTable';
-import {
-  usePacificaMarkets,
-} from '@/features/trade/hooks/usePacificaMarkets';
-import { useVelocityMarkets } from '@/features/trade/hooks/useVelocityMarkets';
+import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { useMinimizeOnScroll } from '@/navigation/tabs/minimizeState';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
-import { useAppPreferences } from '@/storage/AppPreferencesProvider';
-
-const PROVIDERS: readonly MenuOption<PerpsProviderId>[] = [
-  { id: 'pacifica', label: 'Pacifica' },
-  { id: 'velocity', label: 'Velocity' },
-];
 
 export function TradeScreen() {
   const router = useRouter();
   const config = readAppConfig();
-  const { perpsProvider, setPerpsProvider } = useAppPreferences();
   const [query, setQuery] = useState('');
   const onScroll = useMinimizeOnScroll();
   const compact = useWindowDimensions().width < layout.compactWidth;
@@ -46,38 +28,24 @@ export function TradeScreen() {
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     config.ok ? config.value.perps.pacificaAssetOrigin : '',
     config.ok ? config.value.perps.pacificaWsOrigin : '',
-    perpsProvider === 'pacifica',
-  );
-  const velocity = useVelocityMarkets(
-    config.ok ? config.value.api.publicRpcUrl : '',
-    config.ok ? config.value.perps.velocityProgramId : '',
-    config.ok ? config.value.perps.pacificaAssetOrigin : '',
-    perpsProvider === 'velocity',
   );
   const entries = useMemo<readonly MarketTableEntry[]>(
     () => {
-      const rows = perpsProvider === 'pacifica'
-        ? joinMarkets(
-            pacifica.markets,
-            pacifica.snapshots,
-            query,
-            (snapshot) => `Next ${formatPacificaRatePercent(snapshot.nextFundingRate)}`,
-          )
-        : joinMarkets(
-            velocity.markets,
-            velocity.snapshots,
-            query,
-            () => 'USDT collateral',
-          );
+      const rows = joinMarkets(
+        pacifica.markets,
+        pacifica.snapshots,
+        query,
+        (snapshot) => `Next ${formatPacificaRatePercent(snapshot.nextFundingRate)}`,
+      );
       return rows.sort((left, right) => {
         const leftVolume = left.venue?.volume24h?.baseUnits ?? -1n;
         const rightVolume = right.venue?.volume24h?.baseUnits ?? -1n;
         return leftVolume === rightVolume ? 0 : leftVolume > rightVolume ? -1 : 1;
       });
     },
-    [pacifica.markets, pacifica.snapshots, perpsProvider, query, velocity.markets, velocity.snapshots],
+    [pacifica.markets, pacifica.snapshots, query],
   );
-  const venueStatus = perpsProvider === 'pacifica' ? pacifica.status : velocity.status;
+  const venueStatus = pacifica.status;
 
   // Both stable, which is what lets `MarketTableRow`'s memo hold: a `renderItem` or an
   // `onPress` rebuilt inline would hand every row a new prop on every price message and
@@ -85,9 +53,9 @@ export function TradeScreen() {
   const openMarket = useCallback(
     (venueRef: string) => router.push({
       pathname: '/(tabs)/trade/[venueRef]',
-      params: { provider: perpsProvider, venueRef },
+      params: { venueRef },
     }),
-    [perpsProvider, router],
+    [router],
   );
   const renderRow = useCallback(
     ({ item }: { readonly item: MarketTableEntry }) => (
@@ -114,10 +82,6 @@ export function TradeScreen() {
           <View>
             <View style={[styles.header, compact && styles.compactGutter]}>
               <Text accessibilityRole="header" style={styles.title}>Markets</Text>
-              <ProviderSelector
-                onSelect={setPerpsProvider}
-                selected={perpsProvider}
-              />
             </View>
             <SearchField
               compact={compact}
@@ -127,7 +91,7 @@ export function TradeScreen() {
             />
             {venueStatus === 'error' ? (
               <Text accessibilityRole="alert" style={styles.notice}>
-                {perpsProvider === 'pacifica' ? 'Pacifica' : 'Velocity'} market data is reconnecting. Trading stays blocked until prices are current.
+                Pacifica market data is reconnecting. Trading stays blocked until prices are current.
               </Text>
             ) : null}
             <MarketTableHeader compact={compact} />
@@ -138,7 +102,6 @@ export function TradeScreen() {
             compact={compact}
             query={query}
             status={venueStatus}
-            provider={perpsProvider}
           />
         )}
         keyboardShouldPersistTaps="handled"
@@ -155,57 +118,6 @@ export function TradeScreen() {
         windowSize={3}
       />
     </AppScreen>
-  );
-}
-
-function ProviderSelector({
-  onSelect,
-  selected,
-}: {
-  readonly onSelect: (provider: PerpsProviderId) => void;
-  readonly selected: PerpsProviderId;
-}) {
-  const anchorRef = useRef<View>(null);
-  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
-  const [open, setOpen] = useState(false);
-  const label = selected === 'pacifica' ? 'Pacifica' : 'Velocity';
-
-  const openMenu = () => {
-    anchorRef.current?.measureInWindow((x, y, width, height) => {
-      setAnchor(anchorBelow(x, y, width, height, width));
-      setOpen(true);
-    });
-  };
-
-  return (
-    <>
-      <View ref={anchorRef}>
-        <PressableScale
-          accessibilityHint="Selects the perpetuals provider"
-          accessibilityLabel={`Trading provider, ${label}`}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: open }}
-          onPress={openMenu}
-          pressedScale={0.97}
-          style={styles.providerTrigger}
-        >
-          <Text numberOfLines={1} style={styles.providerLabel}>{label}</Text>
-          <ChevronDown color={colors.textSecondary} />
-        </PressableScale>
-      </View>
-      <AnchoredMenu
-        anchor={anchor}
-        onClose={() => setOpen(false)}
-        onSelect={(provider) => {
-          onSelect(provider);
-          setOpen(false);
-        }}
-        options={PROVIDERS}
-        selected={selected}
-        title="Provider"
-        visible={open}
-      />
-    </>
   );
 }
 
@@ -254,11 +166,9 @@ function MarketListPlaceholder({
   compact,
   query,
   status,
-  provider,
 }: {
   readonly compact: boolean;
   readonly query: string;
-  readonly provider: 'pacifica' | 'velocity';
   readonly status: 'idle' | 'loading' | 'ready' | 'error';
 }) {
   const searching = query.trim().length > 0;
@@ -274,7 +184,7 @@ function MarketListPlaceholder({
   if (status === 'ready') {
     return (
       <Text accessibilityLiveRegion="polite" style={styles.empty}>
-        {`No markets reported by ${provider === 'pacifica' ? 'Pacifica' : 'Velocity'}.`}
+        No markets reported by Pacifica.
       </Text>
     );
   }
@@ -308,23 +218,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   title: { ...typography.title, color: colors.textPrimary },
-
-  providerTrigger: {
-    minWidth: 144,
-    minHeight: layout.minTouchTarget,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderStrong,
-    borderRadius: 14,
-    borderCurve: 'continuous',
-    backgroundColor: colors.surface,
-  },
-  providerLabel: { ...typography.label, color: colors.textPrimary },
-
 
   notice: {
     ...typography.caption,

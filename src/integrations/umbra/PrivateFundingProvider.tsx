@@ -163,8 +163,10 @@ export function PrivateFundingProvider({
         publishInAppNotification({
           kind: 'funding',
           outcome: 'success',
-          title: 'Private deposit completed',
-          message: 'Funds are available in private wallet T.',
+          title: 'Deposit completed',
+          message: next.destination === 'pacifica'
+            ? 'USDC is credited to Pacifica and ready to trade.'
+            : 'Funds are available in the private wallet.',
         });
       }
     }).catch((cause) => {
@@ -245,7 +247,8 @@ export function PrivateFundingProvider({
     if (
       record === null ||
       record.feeFundingLamports === null ||
-      record.phase === 'complete'
+      record.phase === 'complete' ||
+      (record.claimSignature !== null && record.feeFundingSignature !== null)
     ) {
       return;
     }
@@ -316,8 +319,10 @@ export function PrivateFundingProvider({
         publishInAppNotification({
           kind: 'funding',
           outcome: 'success',
-          title: 'Private deposit completed',
-          message: 'Funds are available in private wallet T.',
+          title: 'Deposit completed',
+          message: next.destination === 'pacifica'
+            ? 'USDC is credited to Pacifica and ready to trade.'
+            : 'Funds are available in the private wallet.',
         });
       }
     } catch (cause) {

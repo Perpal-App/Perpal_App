@@ -52,3 +52,6 @@ yarn-error.*
 /docs/
 perpal_docs_gitignore_it/
 IMPLEMENTATION_STATUS.md
+
+# local pitch deck
+/PerPal_Pitch_Deck_Brand_Revision_2026-09-01.html

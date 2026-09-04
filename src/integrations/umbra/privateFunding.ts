@@ -4,9 +4,10 @@ import { NATIVE_MINT } from '@solana/spl-token';
 import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
-  listTradingCollateralOptions,
+  pacificaCollateral,
   type ProviderCollateral,
 } from '@/integrations/perps/providerCollateral';
+import { PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS } from '@/integrations/perps/pacifica/pacificaDeposit';
 import {
   classifyPrivateFundingFailure,
   PrivateFundingError,
@@ -18,15 +19,21 @@ import {
 } from '@/integrations/umbra/privateFundingClient';
 import {
   runPrivateFundingLeg,
-  type PrivateFundingLegPhase,
-  type PrivateFundingLegState,
 } from '@/integrations/umbra/privateFundingLeg';
+import {
+  collateralLeg,
+  feeReserveLeg,
+  withCollateralLeg,
+  withFeeReserveLeg,
+} from '@/integrations/umbra/privateFundingRecord';
 import { ensurePrivateFundingRegistration } from '@/integrations/umbra/privateFundingRegistration';
 import { createPrivateFundingRelayer } from '@/integrations/umbra/privateFundingRelayer';
 import {
   assertPrivateFundingPreflight,
   preparePrivateFundingPreflight,
 } from '@/integrations/umbra/privateFundingPreflight';
+import { creditedUmbraAmount } from '@/integrations/umbra/privateFundingFees';
+import { fundPacificaFromPrivateWallet } from '@/integrations/umbra/privateFundingPacifica';
 import {
   createUmbraGatewayDependencies,
   type PrivySolanaProvider,
@@ -72,28 +79,33 @@ export async function beginPrivateFunding(
     );
   }
 
-  const collateral = listTradingCollateralOptions(
-    input.config.perps.usdcMint,
-    input.config.perps.usdtMint,
-  ).find(
-    (option) =>
-      option.symbol === input.collateral.symbol &&
-      option.mint === input.collateral.mint &&
-      option.decimals === input.collateral.decimals,
-  );
-
-  if (collateral === undefined) {
+  const collateral = pacificaCollateral(input.config.perps.usdcMint);
+  if (
+    input.collateral.symbol !== collateral.symbol ||
+    input.collateral.mint !== collateral.mint ||
+    input.collateral.decimals !== collateral.decimals
+  ) {
     throw new PrivateFundingError(
-      'The selected collateral is unavailable.',
+      'Pacifica deposits accept USDC only.',
       'amount_invalid',
     );
   }
+  if (
+    creditedUmbraAmount(input.amountBaseUnits) <
+      PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS
+  ) {
+    throw new PrivateFundingError(
+      'Enter enough USDC for Pacifica to receive at least 10 USDC after the Umbra fee.',
+      'pacifica_deposit_below_minimum',
+    );
+  }
   const record: PrivateFundingRecord = {
-    version: 1,
+    version: 2,
     id: Crypto.randomUUID(),
     mainWalletAddress: input.mainWalletAddress,
     tradingWalletAddress: input.tradingWalletAddress,
     provider: 'pacifica',
+    destination: 'pacifica',
     mint: collateral.mint,
     symbol: collateral.symbol,
     amountBaseUnits: input.amountBaseUnits.toString(),
@@ -118,15 +130,10 @@ export async function beginPrivateFunding(
     feeFundingSignature: null,
     feeFundingNoteAmountLamports: null,
     feeFundingRelayerFixedFeeLamports: null,
-    conversionExpectedOutBaseUnits: null,
-    conversionMinimumOutBaseUnits: null,
-    conversionOutputBalanceBeforeBaseUnits: null,
-    conversionOutputBaseUnits: null,
-    conversionSignature: null,
-    conversionSignedTransactionBase64: null,
-    providerSetupComplete: false,
-    providerSetupSignature: null,
+    providerDepositExpiresAtMs: null,
+    providerDepositIdempotencyKey: null,
     providerDepositSignature: null,
+    providerDepositSignedTransactionBase64: null,
     errorCode: null,
     updatedAtMs: Date.now(),
   };
@@ -224,6 +231,11 @@ async function runPrivateFunding(
         signer: input.gatewaySigner,
         walletAddress: input.mainWalletAddress,
       }));
+    }
+    if (fundingClaimsComplete(record)) {
+      await completeFundingDestination(record, input, save);
+      logFundingCompleted(operationStartedAtMs);
+      return record;
     }
     const dependencies = createUmbraGatewayDependencies({
       gatewaySigner: input.gatewaySigner,
@@ -335,22 +347,12 @@ async function runPrivateFunding(
         await save(withFeeReserveLeg(record, state));
       },
     });
-    await save({
-      ...record,
-      phase: 'complete',
-      errorCode: null,
-      updatedAtMs: Date.now(),
-    });
-    console.info('[Perpal Umbra deposit]', JSON.stringify({
-      durationMs: Math.round(performance.now() - operationStartedAtMs),
-      event: 'funding_completed',
-    }));
+    await completeFundingDestination(record, input, save);
+    logFundingCompleted(operationStartedAtMs);
     return record;
   } catch (cause) {
     const classifiedCode = classifyPrivateFundingFailure(cause);
-    const code = classifiedCode === 'simulation_failed' && record.phase === 'provider-depositing'
-      ? `${record.provider}_deposit_simulation_failed`
-      : classifiedCode;
+    const code = classifiedCode;
     await save({ ...record, errorCode: code, updatedAtMs: Date.now() });
     console.error('[Perpal Umbra deposit]', JSON.stringify({
       durationMs: Math.round(performance.now() - operationStartedAtMs),
@@ -362,6 +364,62 @@ async function runPrivateFunding(
       ? cause
       : new PrivateFundingError(privateFundingUserMessage(code), code);
   }
+}
+
+async function completeFundingDestination(
+  current: PrivateFundingRecord,
+  input: PrivateFundingInput,
+  save: (record: PrivateFundingRecord) => Promise<void>,
+): Promise<void> {
+  if (current.destination === 'private') {
+    await save({
+      ...current,
+      phase: 'complete',
+      errorCode: null,
+      updatedAtMs: Date.now(),
+    });
+    return;
+  }
+
+  let providerRecord: PrivateFundingRecord = {
+    ...current,
+    phase: 'provider-depositing',
+    errorCode: null,
+    updatedAtMs: Date.now(),
+  };
+  await save(providerRecord);
+  const signature = await fundPacificaFromPrivateWallet({
+    config: input.config,
+    record: providerRecord,
+    signer: input.gatewaySigner,
+    onCheckpoint: async (checkpoint) => {
+      providerRecord = {
+        ...providerRecord,
+        ...checkpoint,
+        phase: 'provider-depositing',
+        updatedAtMs: Date.now(),
+      };
+      await save(providerRecord);
+    },
+  });
+  await save({
+    ...providerRecord,
+    providerDepositSignature: signature,
+    phase: 'complete',
+    errorCode: null,
+    updatedAtMs: Date.now(),
+  });
+}
+
+function fundingClaimsComplete(record: PrivateFundingRecord): boolean {
+  return record.claimSignature !== null && record.feeFundingSignature !== null;
+}
+
+function logFundingCompleted(startedAtMs: number): void {
+  console.info('[Perpal Umbra deposit]', JSON.stringify({
+    durationMs: Math.round(performance.now() - startedAtMs),
+    event: 'funding_completed',
+  }));
 }
 
 function hasNoSubmittedFundingStage(record: PrivateFundingRecord): boolean {
@@ -376,81 +434,6 @@ function hasNoSubmittedFundingStage(record: PrivateFundingRecord): boolean {
     record.feeFundingRelayRequestId,
     record.feeFundingSignature,
   ].every((value) => value === null);
-}
-
-function collateralLeg(record: PrivateFundingRecord): PrivateFundingLegState {
-  return {
-    amountBaseUnits: record.amountBaseUnits,
-    claimSignature: record.claimSignature,
-    depositSignature: record.depositSignature,
-    excludedNoteIds: record.excludedNoteIds,
-    generationIndex: record.generationIndex,
-    mint: record.mint,
-    noteAmountBaseUnits: record.noteAmountBaseUnits,
-    populateSignature: record.populateSignature,
-    relayRequestId: record.relayRequestId,
-    relayerFixedFeeLamports: record.relayerFixedFeeLamports,
-    scanStartLeafCounts: record.scanStartLeafCounts,
-    tradingWalletAddress: record.tradingWalletAddress,
-  };
-}
-
-function feeReserveLeg(record: PrivateFundingRecord): PrivateFundingLegState {
-  return {
-    amountBaseUnits: record.feeFundingLamports ?? '0',
-    claimSignature: record.feeFundingSignature,
-    depositSignature: record.feeFundingDepositSignature,
-    excludedNoteIds: record.feeFundingExcludedNoteIds,
-    generationIndex: record.feeFundingGenerationIndex,
-    mint: NATIVE_MINT.toBase58(),
-    noteAmountBaseUnits: record.feeFundingNoteAmountLamports,
-    populateSignature: record.feeFundingPopulateSignature,
-    relayRequestId: record.feeFundingRelayRequestId,
-    relayerFixedFeeLamports: record.feeFundingRelayerFixedFeeLamports,
-    scanStartLeafCounts: record.feeFundingScanStartLeafCounts,
-    tradingWalletAddress: record.tradingWalletAddress,
-  };
-}
-
-function withCollateralLeg(
-  record: PrivateFundingRecord,
-  state: PrivateFundingLegState,
-  phase: PrivateFundingLegPhase,
-): PrivateFundingRecord {
-  return {
-    ...record,
-    phase,
-    generationIndex: state.generationIndex,
-    excludedNoteIds: state.excludedNoteIds,
-    scanStartLeafCounts: state.scanStartLeafCounts,
-    populateSignature: state.populateSignature,
-    depositSignature: state.depositSignature,
-    relayRequestId: state.relayRequestId,
-    claimSignature: state.claimSignature,
-    noteAmountBaseUnits: state.noteAmountBaseUnits,
-    relayerFixedFeeLamports: state.relayerFixedFeeLamports,
-    updatedAtMs: Date.now(),
-  };
-}
-
-function withFeeReserveLeg(
-  record: PrivateFundingRecord,
-  state: PrivateFundingLegState,
-): PrivateFundingRecord {
-  return {
-    ...record,
-    phase: 'fee-funding',
-    feeFundingGenerationIndex: state.generationIndex,
-    feeFundingExcludedNoteIds: state.excludedNoteIds,
-    feeFundingScanStartLeafCounts: state.scanStartLeafCounts,
-    feeFundingPopulateSignature: state.populateSignature,
-    feeFundingDepositSignature: state.depositSignature,
-    feeFundingRelayRequestId: state.relayRequestId,
-    feeFundingSignature: state.claimSignature,
-    feeFundingNoteAmountLamports: state.noteAmountBaseUnits,
-    feeFundingRelayerFixedFeeLamports: state.relayerFixedFeeLamports,
-    updatedAtMs: Date.now(),
-  };
 }
 
 async function persist(

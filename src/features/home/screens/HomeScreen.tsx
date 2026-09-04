@@ -25,7 +25,6 @@ import { NotificationsPanel } from '@/features/home/components/NotificationsPane
 import { useFearGreed } from '@/features/home/hooks/useFearGreed';
 import { useMarketBriefing } from '@/features/home/hooks/useMarketBriefing';
 import { usePacificaPortfolio } from '@/features/portfolio/hooks/usePacificaPortfolio';
-import { useVelocityAccount } from '@/features/portfolio/hooks/useVelocityAccount';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { useWalletProvisioning } from '@/integrations/privy/useWalletProvisioning';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
@@ -75,11 +74,6 @@ export function HomeScreen() {
     config.ok ? config.value.perps.pacificaApiOrigin : '',
     tradingSession.status === 'ready' ? tradingSession.address : null,
   );
-  const velocity = useVelocityAccount({
-    owner: tradingSession.status === 'ready' ? tradingSession.address : null,
-    programId: config.ok ? config.value.perps.velocityProgramId : '',
-    publicRpcUrl: config.ok ? config.value.api.publicRpcUrl : '',
-  });
   const publicWalletPending = publicWallet.status === 'provisioning';
 
   // Indexed, not scanned. Every price message hands back a new snapshot array, so this
@@ -179,7 +173,6 @@ export function HomeScreen() {
             ? tradingSession.retryRestore
             : () => void tradingSession.activate()}
           portfolio={portfolio.snapshot}
-          velocity={velocity.account.snapshot}
         />
       </RiseInView>
 

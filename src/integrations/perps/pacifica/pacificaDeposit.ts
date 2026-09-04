@@ -53,8 +53,11 @@ export async function preparePacificaDeposit(input: {
   readonly signal?: AbortSignal;
   readonly vault: string;
 }): Promise<PacificaDepositPlan> {
-  if (input.amountBaseUnits <= 0n || input.amountBaseUnits > 0xffff_ffff_ffff_ffffn) {
-    throw new Error('Pacifica deposit amount is invalid.');
+  if (
+    input.amountBaseUnits < PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS ||
+    input.amountBaseUnits > 0xffff_ffff_ffff_ffffn
+  ) {
+    throw new Error('Pacifica requires a credited deposit of at least 10 USDC.');
   }
   const owner = new PublicKey(input.owner);
   const programId = new PublicKey(input.programId);

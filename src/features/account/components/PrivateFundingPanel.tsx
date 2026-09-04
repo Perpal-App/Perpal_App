@@ -1,15 +1,7 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path } from 'react-native-svg';
 import { ActionButton } from '@/components/ui/ActionButton';
-import {
-  AnchoredMenu,
-  anchorAbove,
-  type MenuAnchor,
-  type MenuOption,
-} from '@/components/ui/AnchoredMenu';
-import { PressableScale } from '@/components/ui/PressableScale';
 import { readAppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
@@ -26,21 +18,22 @@ import {
   storedError,
 } from '@/features/account/components/privateFundingLabels';
 import {
-  listTradingCollateralOptions,
+  pacificaCollateral,
   type ProviderCollateral,
 } from '@/integrations/perps/providerCollateral';
+import { PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS } from '@/integrations/perps/pacifica/pacificaDeposit';
 import { usePrivateFunding } from '@/integrations/umbra/PrivateFundingProvider';
 import { PrivateFundingError } from '@/integrations/umbra/privateFundingErrors';
+import {
+  creditedUmbraAmount,
+  minimumUmbraInputForCredit,
+} from '@/integrations/umbra/privateFundingFees';
 import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
-type CollateralSymbol = ProviderCollateral['symbol'];
 const SOL_DECIMALS = 9;
 const FIELD_MIN_HEIGHT = layout.minTouchTarget;
-const MIN_MENU_WIDTH = 196;
-
-type FundableToken = {
-  readonly collateral: ProviderCollateral;
-  readonly baseUnits: bigint | null;
-};
+const MINIMUM_PUBLIC_USDC_BASE_UNITS = minimumUmbraInputForCredit(
+  PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS,
+);
 
 export function PrivateFundingPanel({
   balances,
@@ -54,24 +47,14 @@ export function PrivateFundingPanel({
   const [amount, setAmount] = useState('');
   const [feeReserve, setFeeReserve] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
-  const [chosen, setChosen] = useState<CollateralSymbol>('USDC');
   const [confirmation, setConfirmation] = useState<PrivateFundingConfirmation | null>(null);
 
-  const supported = useMemo<readonly ProviderCollateral[]>(() => {
+  const collateral = useMemo<ProviderCollateral | null>(() => {
     const config = readAppConfig();
-    return config.ok
-      ? listTradingCollateralOptions(config.value.perps.usdcMint, config.value.perps.usdtMint)
-      : [];
+    return config.ok ? pacificaCollateral(config.value.perps.usdcMint) : null;
   }, []);
-  const fundable = useMemo(() => readFundable(supported, balances), [balances, supported]);
-
-  const symbol = fundable.some((entry) => entry.collateral.symbol === chosen)
-    ? chosen
-    : fundable[0]?.collateral.symbol ?? chosen;
-  const collateral = fundable.find((entry) => entry.collateral.symbol === symbol)
-    ?.collateral ?? null;
-  const selectedBalance = fundable.find((entry) => entry.collateral.symbol === symbol)
-    ?.baseUnits ?? null;
+  const symbol = collateral?.symbol ?? 'USDC';
+  const selectedBalance = balances?.publicWallet.usdcBaseUnits ?? null;
   const solLamports = balances?.publicWallet.solLamports ?? null;
 
   const pending = funding.record?.phase === 'complete' ? null : funding.record;
@@ -99,6 +82,15 @@ export function PrivateFundingPanel({
       if (parsed.baseUnits <= 0n || parsedFeeReserve.baseUnits <= 0n) {
         throw new Error('invalid amount');
       }
+      if (
+        creditedUmbraAmount(parsed.baseUnits) <
+          PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS
+      ) {
+        throw new PrivateFundingError(
+          `Enter at least ${minimumPublicUsdc()} USDC so Pacifica receives 10 USDC after the Umbra fee.`,
+          'pacifica_deposit_below_minimum',
+        );
+      }
 
       setInputError(null);
       const preflight = await funding.check({
@@ -118,6 +110,7 @@ export function PrivateFundingPanel({
       setConfirmation({
         amountBaseUnits: parsed.baseUnits,
         decimals: collateral.decimals,
+        destination: 'pacifica',
         estimatedNetworkFeeLamports: preflight.estimatedNetworkFeeLamports,
         feeReserveLamports: parsedFeeReserve.baseUnits,
         hasSubmittedTransaction: false,
@@ -145,6 +138,24 @@ export function PrivateFundingPanel({
       if (reserveLamports <= 0n) throw new Error('invalid amount');
 
       setInputError(null);
+      if (
+        record.claimSignature !== null &&
+        record.feeFundingSignature !== null
+      ) {
+        setConfirmation({
+          amountBaseUnits: BigInt(record.amountBaseUnits),
+          decimals: 6,
+          destination: record.destination,
+          estimatedNetworkFeeLamports: 0n,
+          feeReserveLamports: reserveLamports,
+          hasSubmittedTransaction: hasSubmittedTransaction(record),
+          mode: 'resume',
+          requiredSolLamports: 0n,
+          symbol: record.symbol,
+          temporaryRentLamports: 0n,
+        });
+        return;
+      }
       const preflight = await funding.check({
         amountBaseUnits: BigInt(record.amountBaseUnits),
         collateralLegPending:
@@ -160,6 +171,7 @@ export function PrivateFundingPanel({
       setConfirmation({
         amountBaseUnits: BigInt(record.amountBaseUnits),
         decimals: 6,
+        destination: record.destination,
         estimatedNetworkFeeLamports: preflight.estimatedNetworkFeeLamports,
         feeReserveLamports: reserveLamports,
         hasSubmittedTransaction: hasSubmittedTransaction(record),
@@ -189,11 +201,7 @@ export function PrivateFundingPanel({
       return;
     }
 
-    const confirmedCollateral = supported.find(
-      (option) => option.symbol === confirmed.symbol,
-    );
-
-    if (confirmedCollateral === undefined) {
+    if (collateral === null || confirmed.symbol !== 'USDC') {
       setInputError('Collateral configuration is unavailable.');
       return;
     }
@@ -201,7 +209,7 @@ export function PrivateFundingPanel({
     void funding.start(
       confirmed.amountBaseUnits,
       confirmed.feeReserveLamports,
-      confirmedCollateral,
+      collateral,
     );
   };
 
@@ -215,33 +223,39 @@ export function PrivateFundingPanel({
       ) : null}
 
       {pending === null ? (
-        <View style={styles.field}>
-          <FieldHead
-            available={selectedBalance === null
-              ? null
-              : `${formatAmount(amountFromBaseUnits(selectedBalance, 6))} available`}
-            label="COLLATERAL"
-          />
-          <View style={styles.row}>
-            <TextInput
-              accessibilityLabel={`${symbol} amount`}
-              autoCapitalize="none"
-              editable={!locked}
-              inputMode="decimal"
-              onChangeText={setAmount}
-              placeholder="0.00"
-              placeholderTextColor={colors.textMuted}
-              style={[styles.input, styles.amountInput]}
-              value={amount}
-            />
-            <TokenSelector
-              disabled={locked || fundable.length === 0}
-              onSelect={setChosen}
-              symbol={symbol}
-              tokens={fundable}
-            />
+        <>
+          <View style={styles.requirements}>
+            <RequirementRow label="Provider" value="Pacifica" />
+            <RequirementRow label="Accepted collateral" value="USDC" />
+            <RequirementRow label="Minimum credited" value="10 USDC" />
           </View>
-        </View>
+          <Text style={styles.note}>
+            Enter at least {minimumPublicUsdc()} USDC. The difference covers the
+            Umbra fee before funds are credited to Pacifica.
+          </Text>
+          <View style={styles.field}>
+            <FieldHead
+              available={selectedBalance === null
+                ? null
+                : `${formatAmount(amountFromBaseUnits(selectedBalance, 6))} available`}
+              label="AMOUNT"
+            />
+            <View style={styles.row}>
+              <TextInput
+                accessibilityLabel="USDC amount"
+                autoCapitalize="none"
+                editable={!locked}
+                inputMode="decimal"
+                onChangeText={setAmount}
+                placeholder="0.00"
+                placeholderTextColor={colors.textMuted}
+                style={[styles.input, styles.amountInput]}
+                value={amount}
+              />
+              <TokenTag label="USDC" />
+            </View>
+          </View>
+        </>
       ) : null}
 
       {pending === null || funding.record?.feeFundingLamports === null ? (
@@ -326,68 +340,11 @@ function FieldHead({
   );
 }
 
-function TokenSelector({
-  disabled,
-  onSelect,
-  symbol,
-  tokens,
-}: {
-  readonly disabled: boolean;
-  readonly onSelect: (symbol: CollateralSymbol) => void;
-  readonly symbol: CollateralSymbol;
-  readonly tokens: readonly FundableToken[];
-}) {
-  const anchorRef = useRef<View>(null);
-  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
-  const [open, setOpen] = useState(false);
-  const menuOptions = useMemo<readonly MenuOption<CollateralSymbol>[]>(
-    () => tokens.map((entry) => ({
-      id: entry.collateral.symbol,
-      label: entry.collateral.symbol,
-      ...(entry.baseUnits === null
-        ? {}
-        : { detail: formatAmount(amountFromBaseUnits(entry.baseUnits, entry.collateral.decimals)) }),
-    })),
-    [tokens],
-  );
-
-  const openMenu = () => {
-    anchorRef.current?.measureInWindow((x, y, width) => {
-      setAnchor(anchorAbove(x, y, width, Math.max(width, MIN_MENU_WIDTH)));
-      setOpen(true);
-    });
-  };
-
+function RequirementRow({ label, value }: { label: string; value: string }) {
   return (
-    <View ref={anchorRef}>
-      <PressableScale
-        accessibilityHint="Chooses which token to deposit"
-        accessibilityLabel={`Deposit token, ${symbol}`}
-        accessibilityRole="button"
-        accessibilityState={{ disabled, expanded: open }}
-        disabled={disabled}
-        onPress={openMenu}
-        pressedScale={0.97}
-        style={[styles.token, disabled && styles.tokenDisabled]}
-      >
-        <TokenSurface>
-          <Text numberOfLines={1} style={styles.tokenLabel}>{symbol}</Text>
-          <ChevronDown />
-        </TokenSurface>
-      </PressableScale>
-
-      <AnchoredMenu
-        anchor={anchor}
-        onClose={() => setOpen(false)}
-        onSelect={(next) => {
-          onSelect(next);
-          setOpen(false);
-        }}
-        options={menuOptions}
-        selected={symbol}
-        title="Token"
-        visible={open}
-      />
+    <View style={styles.requirementRow}>
+      <Text style={styles.requirementLabel}>{label}</Text>
+      <Text numberOfLines={1} style={styles.requirementValue}>{value}</Text>
     </View>
   );
 }
@@ -416,35 +373,8 @@ function TokenSurface({ children }: { readonly children: ReactNode }) {
   );
 }
 
-function ChevronDown() {
-  return (
-    <Svg height={14} viewBox="0 0 24 24" width={14}>
-      <Path
-        d="M6 9.5 12 15.5 18 9.5"
-        fill="none"
-        stroke={colors.textMuted}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2.2}
-      />
-    </Svg>
-  );
-}
-
-function readFundable(
-  supported: readonly ProviderCollateral[],
-  balances: WalletBalances | null,
-): readonly FundableToken[] {
-  if (balances === null) {
-    return supported.map((collateral) => ({ baseUnits: null, collateral }));
-  }
-
-  const wallet = balances.publicWallet;
-
-  return supported.flatMap((collateral) => {
-    const held = collateral.symbol === 'USDC' ? wallet.usdcBaseUnits : wallet.usdtBaseUnits;
-    return held > 0n ? [{ baseUnits: held, collateral }] : [];
-  });
+function minimumPublicUsdc(): string {
+  return formatAmount(amountFromBaseUnits(MINIMUM_PUBLIC_USDC_BASE_UNITS, 6));
 }
 
 const styles = StyleSheet.create({
@@ -452,6 +382,27 @@ const styles = StyleSheet.create({
   title: { ...typography.heading, color: colors.textPrimary },
   note: { ...typography.bodyCompact, color: colors.textSecondary },
   status: { ...typography.label, color: colors.accentSoft },
+  requirements: {
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  requirementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  requirementLabel: { ...typography.bodyCompact, color: colors.textSecondary },
+  requirementValue: {
+    ...typography.label,
+    flexShrink: 1,
+    color: colors.textPrimary,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
   field: { gap: spacing.xs },
   fieldHead: {
     flexDirection: 'row',
@@ -486,7 +437,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.sm,
   },
-  tokenDisabled: { opacity: 0.4 },
   tokenFill: {
     flex: 1,
     flexDirection: 'row',

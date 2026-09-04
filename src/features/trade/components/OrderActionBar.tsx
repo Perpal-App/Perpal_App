@@ -113,9 +113,7 @@ export function OrderActionBar({
                   programId={config.value.perps.pacificaProgramId}
                   rpcUrl={config.value.api.rpcUrl}
                   snapshot={snapshot}
-                  swapBuildUrl={config.value.api.swapBuildUrl}
                   usdcMint={config.value.perps.usdcMint}
-                  usdtMint={config.value.perps.usdtMint}
                   vault={config.value.perps.pacificaVault}
                 />
               ) : null}

@@ -27,7 +27,6 @@ import {
   mergePacificaActivity,
   type PacificaActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
-import type { VelocityHistoryState } from '@/features/portfolio/hooks/useVelocityAccount';
 import {
   readInAppNotifications,
   subscribeInAppNotifications,
@@ -57,13 +56,9 @@ type RemoteState = {
 export function GlobalActivityTracker({
   account,
   apiOrigin,
-  onVelocityRefresh,
-  velocityHistory,
 }: {
   readonly account: string;
   readonly apiOrigin: string;
-  readonly onVelocityRefresh: () => void;
-  readonly velocityHistory: VelocityHistoryState;
 }) {
   const remote = usePacificaActivity(apiOrigin, account);
   const local = useSyncExternalStore(
@@ -76,8 +71,8 @@ export function GlobalActivityTracker({
   const [visibleLimit, setVisibleLimit] = useState(VISIBLE_PAGE_SIZE);
 
   const items = useMemo(
-    () => mergeActivity(remote.state.data, velocityHistory.data, local),
-    [local, remote.state.data, velocityHistory.data],
+    () => mergeActivity(remote.state.data, local),
+    [local, remote.state.data],
   );
   const visible = useMemo(
     () => items.filter((item) => (
@@ -88,12 +83,8 @@ export function GlobalActivityTracker({
   const displayed = visible.slice(0, visibleLimit);
 
   const remoteUnavailable = remote.state.status === 'error'
-    || remote.state.status === 'stale'
-    || velocityHistory.status === 'error'
-    || velocityHistory.status === 'stale';
-  const loading = (remote.state.status === 'loading'
-    || velocityHistory.status === 'loading'
-    || remoteUnavailable)
+    || remote.state.status === 'stale';
+  const loading = (remote.state.status === 'loading' || remoteUnavailable)
     && items.length === 0;
   const narrowed = filter !== 'all' || query.trim().length > 0;
 
@@ -107,7 +98,6 @@ export function GlobalActivityTracker({
             accessibilityRole="button"
             onPress={() => {
               remote.refresh();
-              onVelocityRefresh();
             }}
             style={styles.retry}
           >
@@ -132,7 +122,7 @@ export function GlobalActivityTracker({
         query={query}
       />
 
-      {remote.state.data?.truncated || velocityHistory.data?.truncated ? (
+      {remote.state.data?.truncated ? (
         <Text accessibilityRole="alert" selectable style={styles.error}>
           Showing the latest available provider history.
         </Text>

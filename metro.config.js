@@ -14,29 +14,6 @@ config.resolver.assetExts.push('lottie');
 // globally makes Solana Kit bypass its React Native assertions. Keep both
 // resolver workarounds package-scoped so native exports remain authoritative.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  const velocityPackageSegment = [
-    path.sep,
-    'node_modules',
-    path.sep,
-    '@velocity-exchange',
-    path.sep,
-    'sdk',
-    path.sep,
-  ].join('');
-
-  if (
-    nativePlatforms.includes(platform) &&
-    moduleName === 'node-fetch' &&
-    context.originModulePath.includes(velocityPackageSegment)
-  ) {
-    // Velocity's browser bundle imports node-fetch in optional helpers. React Native
-    // already supplies the Fetch API, so keep this workaround package-scoped.
-    return {
-      filePath: path.join(__dirname, 'src', 'polyfills', 'velocityNodeFetch.js'),
-      type: 'sourceFile',
-    };
-  }
-
   if (nativePlatforms.includes(platform) && moduleName === 'rpc-websockets') {
     const packageEntry = require.resolve('rpc-websockets', {
       paths: [path.dirname(context.originModulePath)],

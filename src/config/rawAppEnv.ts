@@ -16,9 +16,6 @@ export type RawAppEnv = {
   readonly pacificaCentralState: string;
   readonly pacificaVault: string;
   readonly pacificaWithdrawalFeeUsdc: string;
-  readonly velocityDlobApiOrigin: string;
-  readonly velocityDlobWsOrigin: string;
-  readonly velocityProgramId: string;
   readonly usdcMint: string;
   readonly usdtMint: string;
   readonly umbraIndexerUrl: string;
@@ -50,11 +47,6 @@ export function readRawAppEnv(): RawAppEnv {
     pacificaVault: process.env.EXPO_PUBLIC_PACIFICA_VAULT?.trim() ?? '',
     pacificaWithdrawalFeeUsdc:
       process.env.EXPO_PUBLIC_PACIFICA_WITHDRAWAL_FEE_USDC?.trim() ?? '',
-    velocityDlobApiOrigin:
-      process.env.EXPO_PUBLIC_VELOCITY_DLOB_API_ORIGIN?.trim() ?? '',
-    velocityDlobWsOrigin:
-      process.env.EXPO_PUBLIC_VELOCITY_DLOB_WS_ORIGIN?.trim() ?? '',
-    velocityProgramId: process.env.EXPO_PUBLIC_VELOCITY_PROGRAM_ID?.trim() ?? '',
     usdcMint: process.env.EXPO_PUBLIC_USDC_MINT?.trim() ?? '',
     usdtMint: process.env.EXPO_PUBLIC_USDT_MINT?.trim() ?? '',
     umbraIndexerUrl: process.env.EXPO_PUBLIC_UMBRA_INDEXER_URL?.trim() ?? '',

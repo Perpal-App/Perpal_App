@@ -124,7 +124,9 @@ function completeFeeRelay(
   return {
     ...record,
     feeFundingSignature: signature,
-    phase: 'complete',
+    phase: record.destination === 'pacifica'
+      ? 'provider-depositing'
+      : 'complete',
     errorCode: null,
     updatedAtMs: Date.now(),
   };

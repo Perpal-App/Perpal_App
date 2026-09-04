@@ -6,7 +6,6 @@ import { readTokenBalance } from '@/integrations/solana/stablecoinSwap';
 
 export type TradingStablecoinBalances = {
   readonly usdcBaseUnits: bigint;
-  readonly usdtBaseUnits: bigint;
 };
 
 type BalanceStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -17,7 +16,6 @@ export function useTradingStablecoinBalances(input: {
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner | null;
   readonly usdcMint: string;
-  readonly usdtMint: string;
 }) {
   const [balances, setBalances] = useState<TradingStablecoinBalances | null>(null);
   const [status, setStatus] = useState<BalanceStatus>('idle');
@@ -42,25 +40,16 @@ export function useTradingStablecoinBalances(input: {
       controller = new AbortController();
       if (!hasBalances.current) setStatus('loading');
       try {
-        const [usdcBaseUnits, usdtBaseUnits] = await Promise.all([
-          readTokenBalance({
-            mint: input.usdcMint,
-            owner,
-            rpcUrl: input.rpcUrl,
-            signal: controller.signal,
-            signer,
-          }),
-          readTokenBalance({
-            mint: input.usdtMint,
-            owner,
-            rpcUrl: input.rpcUrl,
-            signal: controller.signal,
-            signer,
-          }),
-        ]);
+        const usdcBaseUnits = await readTokenBalance({
+          mint: input.usdcMint,
+          owner,
+          rpcUrl: input.rpcUrl,
+          signal: controller.signal,
+          signer,
+        });
         if (active) {
           hasBalances.current = true;
-          setBalances({ usdcBaseUnits, usdtBaseUnits });
+          setBalances({ usdcBaseUnits });
           setStatus('ready');
         }
       } catch (cause) {
@@ -83,7 +72,7 @@ export function useTradingStablecoinBalances(input: {
       controller?.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [input.owner, input.rpcUrl, input.signer, input.usdcMint, input.usdtMint]));
+  }, [input.owner, input.rpcUrl, input.signer, input.usdcMint]));
 
   return { balances, status };
 }

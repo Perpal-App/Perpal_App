@@ -12,13 +12,6 @@ import {
   resumePacificaCollateralWithdrawalToWallet,
   withdrawPacificaCollateralToWallet,
 } from '@/integrations/perps/pacifica/pacificaWithdrawal';
-import type { VelocityAccountSnapshot } from '@/integrations/perps/velocity/velocityAccount';
-import {
-  submitVelocityTradePreparation,
-  type VelocityTradePreparation,
-} from '@/integrations/perps/velocity/velocityTrade';
-import { prepareVelocityWithdrawal } from '@/integrations/perps/velocity/velocityWithdrawal';
-import { reconcilePendingTradeAction } from '@/integrations/perps/tradeActionRecovery';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { colors, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
@@ -26,13 +19,11 @@ import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 export function ProviderFundsPanel(props: {
   readonly onBalancesChanged: () => void;
   readonly onPacificaRefresh: () => void;
-  readonly onVelocityRefresh: () => void;
   readonly pacifica: PacificaPortfolioSnapshot | null;
-  readonly velocity: VelocityAccountSnapshot | null;
 }) {
   const config = readAppConfig();
   const session = useTradingSession();
-  const [busy, setBusy] = useState<'pacifica' | 'velocity' | null>(null);
+  const [busy, setBusy] = useState(false);
   const [pacificaPending, setPacificaPending] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const pacificaAvailable = config.ok && props.pacifica !== null
@@ -41,7 +32,6 @@ export function ProviderFundsPanel(props: {
         config.value.perps.pacificaWithdrawalFeeBaseUnits,
       )
     : null;
-  const velocityAvailable = props.velocity?.freeCollateralBaseUnits ?? null;
   const ready = config.ok && session.address !== null && session.signer !== null;
 
   useEffect(() => {
@@ -64,7 +54,7 @@ export function ProviderFundsPanel(props: {
   const movePacifica = async () => {
     if (!config.ok || session.address === null || session.signer === null ||
       (!pacificaPending && (pacificaAvailable === null || pacificaAvailable <= 0n))) return;
-    setBusy('pacifica');
+    setBusy(true);
     const abort = new AbortController();
     controller.current?.abort();
     controller.current = abort;
@@ -103,98 +93,7 @@ export function ProviderFundsPanel(props: {
         publishFailure('Pacifica', cause);
       }
     } finally {
-      if (!abort.signal.aborted) setBusy(null);
-    }
-  };
-
-  const prepareVelocity = async () => {
-    if (!config.ok || session.address === null || session.signer === null ||
-      velocityAvailable === null || velocityAvailable <= 0n) return;
-    setBusy('velocity');
-    const abort = new AbortController();
-    controller.current?.abort();
-    controller.current = abort;
-    try {
-      const recovery = await reconcilePendingTradeAction({
-        owner: session.address,
-        provider: 'velocity',
-        rpcUrl: config.value.api.rpcUrl,
-        signal: abort.signal,
-        signer: session.signer,
-      });
-      if (recovery === 'pending') {
-        publishInAppNotification({
-          kind: 'withdrawal',
-          outcome: 'info',
-          title: 'Velocity action confirming',
-          message: 'The previous signed action is still confirming. It was not submitted again.',
-        });
-        setBusy(null);
-        return;
-      }
-      const preparation = await prepareVelocityWithdrawal({
-        amountBaseUnits: velocityAvailable,
-        owner: session.address,
-        programId: config.value.perps.velocityProgramId,
-        publicRpcUrl: config.value.api.publicRpcUrl,
-        rpcUrl: config.value.api.rpcUrl,
-        signal: abort.signal,
-        signer: session.signer,
-        usdtMint: config.value.perps.usdtMint,
-      });
-      if (!abort.signal.aborted) reviewVelocity(preparation);
-    } catch (cause) {
-      if (!abort.signal.aborted) publishFailure('Velocity', cause);
-      setBusy(null);
-    }
-  };
-
-  const reviewVelocity = (preparation: VelocityTradePreparation) => {
-    if (preparation.kind !== 'velocity' || preparation.plan.action !== 'withdraw') {
-      setBusy(null);
-      publishFailure('Velocity', new Error('The withdrawal preview was invalid.'));
-      return;
-    }
-    Alert.alert(
-      'Return Velocity funds?',
-      `Amount: ${stable(preparation.plan.amountBaseUnits)} USDT\n` +
-        `Network fee: ${sol(preparation.plan.feeLamports)} SOL\n` +
-        'Open positions remain untouched. Velocity limits the withdrawal to free collateral.',
-      [
-        { text: 'Cancel', style: 'cancel', onPress: () => setBusy(null) },
-        { text: 'Confirm and sign', onPress: () => void submitVelocity(preparation) },
-      ],
-      { cancelable: false },
-    );
-  };
-
-  const submitVelocity = async (preparation: VelocityTradePreparation) => {
-    if (!config.ok || session.address === null || session.signer === null) {
-      setBusy(null);
-      publishFailure('Velocity', new Error('Private trading changed. Review the withdrawal again.'));
-      return;
-    }
-    try {
-      const result = await submitVelocityTradePreparation({
-        owner: session.address,
-        preparation,
-        rpcUrl: config.value.api.rpcUrl,
-        signer: session.signer,
-      });
-      publishInAppNotification({
-        kind: 'withdrawal',
-        outcome: result.status === 'confirmed' ? 'success' : 'info',
-        title: result.status === 'confirmed' ? 'Velocity funds moved' : 'Withdrawal submitted',
-        message: result.status === 'confirmed'
-          ? `${stable(preparation.plan.amountBaseUnits)} USDT returned to your private balance.`
-          : 'Velocity is confirming the withdrawal. It will resume safely.',
-      });
-      props.onBalancesChanged();
-      props.onVelocityRefresh();
-    } catch (cause) {
-      publishFailure('Velocity', cause);
-    } finally {
-      setBusy(null);
+      if (!abort.signal.aborted) setBusy(false);
     }
   };
 
@@ -207,7 +106,7 @@ export function ProviderFundsPanel(props: {
           disabled={!ready || (!pacificaPending &&
             (pacificaAvailable === null || pacificaAvailable <= 0n))}
           label={pacificaPending ? 'Resume Pacifica return' : 'Return from Pacifica'}
-          loading={busy === 'pacifica'}
+          loading={busy}
           onPress={() => Alert.alert(
             'Return Pacifica funds?',
             pacificaPending
@@ -218,16 +117,6 @@ export function ProviderFundsPanel(props: {
               { text: 'Confirm', onPress: () => void movePacifica() },
             ],
           )}
-        />
-      </View>
-      <View style={styles.provider}>
-        <StatusRow label="Velocity USDT" value={token(velocityAvailable, 'USDT')} />
-        <ActionButton
-          disabled={!ready || velocityAvailable === null || velocityAvailable <= 0n}
-          label="Return from Velocity"
-          loading={busy === 'velocity'}
-          onPress={() => void prepareVelocity()}
-          tone="neutral"
         />
       </View>
     </View>
@@ -243,10 +132,6 @@ function publishFailure(provider: string, cause: unknown): void {
 
 function stable(value: bigint): string {
   return formatAmount(amountFromBaseUnits(value, 6));
-}
-
-function sol(value: bigint): string {
-  return formatAmount(amountFromBaseUnits(value, 9));
 }
 
 function token(value: bigint | null, symbol: string): string {

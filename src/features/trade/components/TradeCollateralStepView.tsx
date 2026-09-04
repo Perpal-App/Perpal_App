@@ -46,14 +46,6 @@ export function TradeCollateralStepView({
 }
 
 function summary(step: TradeCollateralStep): readonly (readonly [string, string])[] {
-  if (step.kind === 'conversion') {
-    return [
-      ['Action', `Convert ${step.input.symbol} to ${step.output.symbol}`],
-      ['Spend', token(step.inputAmountBaseUnits, step.input.symbol)],
-      ['Receive at least', token(step.plan.minimumOutputBaseUnits, step.output.symbol)],
-      ['Maximum slippage', '0.5%'],
-    ];
-  }
   return [
     ['Action', 'Deposit collateral to Pacifica'],
     ['Collateral', token(step.plan.amountBaseUnits, 'USDC')],
@@ -63,15 +55,13 @@ function summary(step: TradeCollateralStep): readonly (readonly [string, string]
 }
 
 function blockedMessage(step: TradeCollateralStep): string {
-  if (step.kind === 'pacifica-deposit') {
-    if (step.plan.simulation === 'insufficient-token') {
-      return `Pacifica funding requires ${token(step.plan.amountBaseUnits, 'USDC')}. ` +
-        `Private balance has ${token(step.plan.tokenBalanceBaseUnits, 'USDC')}.`;
-    }
-    return `Minimum network fee still needed: ${sol(step.plan.feeLamports - step.plan.solBalanceLamports)}.`;
+  if (step.plan.simulation === 'insufficient-token') {
+    return `Pacifica funding requires ${token(step.plan.amountBaseUnits, 'USDC')}. ` +
+      `Private balance has ${token(step.plan.tokenBalanceBaseUnits, 'USDC')}.`;
   }
-  return `Conversion requires ${token(step.inputAmountBaseUnits, step.input.symbol)}. ` +
-    `Private balance has ${token(step.sourceBalanceBaseUnits, step.input.symbol)}.`;
+  return `Minimum network fee still needed: ${sol(
+    step.plan.feeLamports - step.plan.solBalanceLamports,
+  )}.`;
 }
 
 function token(value: bigint, symbol: string): string {

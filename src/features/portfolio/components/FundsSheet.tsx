@@ -23,11 +23,10 @@ import { AppToastHost } from '@/components/feedback/AppToastHost';
 import { PressableScale } from '@/components/ui/PressableScale';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
-import { PrivateSwapPanel } from '@/features/portfolio/components/PrivateSwapPanel';
+import { WalletSwapPanel } from '@/features/portfolio/components/WalletSwapPanel';
 import { ProviderFundsPanel } from '@/features/portfolio/components/ProviderFundsPanel';
 import { WithdrawPanel } from '@/features/portfolio/components/WithdrawPanel';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import type { VelocityAccountSnapshot } from '@/integrations/perps/velocity/velocityAccount';
 import { colors, layout, motion, radii, spacing } from '@/theme/tokens';
 
 export type FundsMode = 'deposit' | 'providers' | 'swap' | 'withdraw';
@@ -86,9 +85,7 @@ export function FundsSheet({
   onClose,
   onBalancesChanged,
   onPacificaRefresh,
-  onVelocityRefresh,
   snapshot,
-  velocity,
 }: {
   /** Forwarded so the withdraw panel lists the tokens actually held, not every supported one. */
   readonly balances: WalletBalances | null;
@@ -96,9 +93,7 @@ export function FundsSheet({
   readonly onClose: () => void;
   readonly onBalancesChanged: () => void;
   readonly onPacificaRefresh: () => void;
-  readonly onVelocityRefresh: () => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
-  readonly velocity: VelocityAccountSnapshot | null;
 }) {
   const reduceMotion = useReducedMotion();
   // `mounted` keeps the modal in the tree; `offset` is where the sheet sits. A dismissal has to finish
@@ -274,7 +269,7 @@ export function FundsSheet({
                     />
                   ) : null}
                   {mode === 'swap' ? (
-                    <PrivateSwapPanel
+                    <WalletSwapPanel
                       balances={balances}
                       onBalancesChanged={onBalancesChanged}
                     />
@@ -283,9 +278,7 @@ export function FundsSheet({
                     <ProviderFundsPanel
                       onBalancesChanged={onBalancesChanged}
                       onPacificaRefresh={onPacificaRefresh}
-                      onVelocityRefresh={onVelocityRefresh}
                       pacifica={snapshot}
-                      velocity={velocity}
                     />
                   ) : null}
                 </ScrollView>

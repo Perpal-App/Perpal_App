@@ -72,9 +72,7 @@ export function PacificaOrderTicket(props: {
   readonly programId: string;
   readonly rpcUrl: string;
   readonly snapshot: PacificaMarketSnapshot;
-  readonly swapBuildUrl: string;
   readonly usdcMint: string;
-  readonly usdtMint: string;
   readonly vault: string;
 }) {
   const session = useTradingSession();
@@ -110,7 +108,6 @@ export function PacificaOrderTicket(props: {
     rpcUrl: props.rpcUrl,
     signer: session.signer,
     usdcMint: props.usdcMint,
-    usdtMint: props.usdtMint,
   });
   const reset = () => {
     controller.current?.abort();
@@ -205,9 +202,7 @@ export function PacificaOrderTicket(props: {
           rpcUrl: props.rpcUrl,
           signal: abort.signal,
           signer: session.signer,
-          swapBuildUrl: props.swapBuildUrl,
           usdcMint: props.usdcMint,
-          usdtMint: props.usdtMint,
           vault: props.vault,
         });
         if (next !== null) {

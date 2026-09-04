@@ -15,16 +15,15 @@ export function availableTradingFundsBaseUnits(
     const provider = providerAvailable === undefined
       ? 0n
       : parseAmount(providerAvailable, 6).baseUnits;
-    return provider + privateBalances.usdcBaseUnits + privateBalances.usdtBaseUnits;
+    return provider + privateBalances.usdcBaseUnits;
   } catch {
     return null;
   }
 }
 
-export function privateStablecoinText(balances: TradingStablecoinBalances | null): string {
+export function privateUsdcText(balances: TradingStablecoinBalances | null): string {
   if (balances === null) return '--';
-  return `${formatAmountWithCommas(amountFromBaseUnits(balances.usdcBaseUnits, 6))} USDC · ` +
-    `${formatAmountWithCommas(amountFromBaseUnits(balances.usdtBaseUnits, 6))} USDT`;
+  return usdcText(balances.usdcBaseUnits);
 }
 
 export function usdcText(value: bigint): string {
