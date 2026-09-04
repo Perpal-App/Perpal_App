@@ -108,36 +108,40 @@ function Tile({
 
   return (
     <View style={styles.tile}>
-      <Text maxFontSizeMultiplier={1.3} numberOfLines={2} style={styles.label}>
-        {label}
-      </Text>
+      <View style={styles.head}>
+        <Text maxFontSizeMultiplier={1.3} numberOfLines={2} style={styles.label}>
+          {label}
+        </Text>
 
-      {/* The slot stays mounted when concealed so toggling privacy cannot resize the tile. */}
-      <View
-        accessibilityElementsHidden={hidden}
-        importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
-        style={[styles.tokens, hidden && styles.concealed]}
-      >
-        {logoMints.map((mint, index) => (
-          <TokenLogo
-            key={mint}
-            size={24}
-            style={index === 0 ? undefined : styles.logoOverlap}
-            url={metadata.get(mint)?.imageUrl ?? null}
-          />
-        ))}
+        {/* The slot stays mounted when concealed so toggling privacy cannot resize the tile. */}
+        <View
+          accessibilityElementsHidden={hidden}
+          importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
+          style={[styles.tokens, hidden && styles.concealed]}
+        >
+          {logoMints.map((mint, index) => (
+            <TokenLogo
+              key={mint}
+              size={24}
+              style={index === 0 ? undefined : styles.logoOverlap}
+              url={metadata.get(mint)?.imageUrl ?? null}
+            />
+          ))}
+        </View>
       </View>
 
-      {value === null && !hidden ? (
-        <SkeletonText role="label" width={64} />
-      ) : (
-        <ConcealedValue
-          hidden={hidden}
-          numberOfLines={1}
-          style={styles.value}
-          value={value ?? '***'}
-        />
-      )}
+      <View style={styles.figure}>
+        {value === null && !hidden ? (
+          <SkeletonText align="right" role="title" width={88} />
+        ) : (
+          <ConcealedValue
+            hidden={hidden}
+            numberOfLines={1}
+            style={styles.value}
+            value={value ?? '***'}
+          />
+        )}
+      </View>
     </View>
   );
 }
@@ -153,18 +157,25 @@ const styles = StyleSheet.create({
   tile: {
     flex: 1,
     minWidth: 0,
+    justifyContent: 'space-between',
     gap: spacing.xs,
     padding: spacing.md,
     borderRadius: radii.lg,
     borderCurve: 'continuous',
     backgroundColor: colors.glassHighlight,
   },
+  head: { gap: spacing.xs },
   label: { ...typography.caption, color: colors.textSecondary },
   tokens: { minHeight: 24, flexDirection: 'row', alignItems: 'center' },
   concealed: { opacity: 0 },
   logoOverlap: { marginLeft: -6 },
+  // The activity cards' arrangement: the figure lands in the corner diagonally opposite the marks, held
+  // off the right edge by half a step more than the tile's own inset. A bold 26pt figure carries more
+  // mass to its boundary than caption-size text, so matching the label's inset reads tighter on the
+  // right than it does on the left.
+  figure: { alignItems: 'flex-end', paddingRight: spacing.xs },
   value: {
-    ...typography.label,
+    ...typography.title,
     color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
