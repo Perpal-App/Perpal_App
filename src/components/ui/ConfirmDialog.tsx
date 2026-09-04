@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   runOnJS,
@@ -7,8 +7,11 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 
 import { ActionButton, type ActionButtonTone } from '@/components/ui/ActionButton';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
 /** Scale the card grows from. Close to one: a dialog is an interruption, not an entrance. */
@@ -36,27 +39,38 @@ const DIALOG_SPRING = { damping: 22, stiffness: 320, mass: 0.6 } as const;
  * Deliberately not a sheet. A sheet is a place you go; a confirmation is a question asked where you
  * already are, and moving the screen for it implies the first is happening.
  */
-export function ConfirmDialog({
-  cancelLabel = 'Cancel',
-  confirmLabel,
-  message,
-  onCancel,
-  onConfirm,
-  title,
-  tone = 'accent',
-  visible,
-}: {
+type ConfirmDialogBody =
+  | { readonly children: ReactNode; readonly message?: never }
+  | { readonly children?: never; readonly message: string };
+
+type ConfirmDialogProps = ConfirmDialogBody & {
   readonly cancelLabel?: string;
   readonly confirmLabel: string;
-  readonly message: string;
+  readonly confirmLoading?: boolean;
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
   readonly title: string;
   /** `negative` for an action that destroys something. `accent` for one that is merely consequential. */
   readonly tone?: Extract<ActionButtonTone, 'accent' | 'negative'>;
   readonly visible: boolean;
-}) {
+};
+
+export function ConfirmDialog({
+  cancelLabel = 'Cancel',
+  children,
+  confirmLabel,
+  confirmLoading = false,
+  message,
+  onCancel,
+  onConfirm,
+  title,
+  tone = 'accent',
+  visible,
+}: ConfirmDialogProps) {
   const reduceMotion = useReducedMotion();
+  const requestCancel = () => {
+    if (!confirmLoading) onCancel();
+  };
   // `mounted` keeps the modal in the tree; `progress` is how far open the card is. A dismissal has to
   // finish travelling before the modal can unmount, so one boolean cannot express both.
   const [mounted, setMounted] = useState(false);
@@ -97,43 +111,84 @@ export function ConfirmDialog({
       // The presentation is ours: `animationType` would run a second, unsprung transition underneath
       // this one and the two would fight over the same frames.
       animationType="none"
-      onRequestClose={onCancel}
+      onRequestClose={requestCancel}
+      presentationStyle="overFullScreen"
       statusBarTranslucent
       transparent
       visible={mounted}
     >
-      <View style={styles.root}>
+      <SafeAreaView edges={['top', 'bottom']} style={styles.root}>
         <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, scrimStyle]}>
           {/* Tapping outside cancels, which is the same answer the cancel button gives. A dialog that
               can only be dismissed by reading it is a dialog people learn to dismiss without reading. */}
           <Pressable
             accessibilityLabel={cancelLabel}
             accessibilityRole="button"
-            onPress={onCancel}
+            accessibilityState={{ disabled: confirmLoading }}
+            disabled={confirmLoading}
+            onPress={requestCancel}
             style={StyleSheet.absoluteFill}
           />
         </Animated.View>
 
-        <Animated.View accessibilityViewIsModal style={[styles.card, cardStyle]}>
-          <Text accessibilityRole="header" style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
+        <Animated.View
+          accessibilityViewIsModal
+          onAccessibilityEscape={requestCancel}
+          style={[styles.card, cardStyle]}
+        >
+          <View style={styles.titleRow}>
+            <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+            <PressableScale
+              accessibilityLabel={`Close ${title}`}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: confirmLoading }}
+              disabled={confirmLoading}
+              hitSlop={12}
+              onPress={requestCancel}
+              pressedScale={0.94}
+              style={styles.close}
+            >
+              <CloseIcon />
+            </PressableScale>
+          </View>
+          <View style={styles.content}>
+            {message === undefined ? children : (
+              <Text selectable style={styles.message}>{message}</Text>
+            )}
+          </View>
           <View style={styles.actions}>
             <ActionButton
+              disabled={confirmLoading}
               label={cancelLabel}
-              onPress={onCancel}
+              onPress={requestCancel}
               style={styles.action}
               tone="neutral"
             />
             <ActionButton
               label={confirmLabel}
+              loading={confirmLoading}
               onPress={onConfirm}
               style={styles.action}
               tone={tone}
             />
           </View>
         </Animated.View>
-      </View>
+      </SafeAreaView>
     </Modal>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <Svg accessibilityElementsHidden height={18} viewBox="0 0 24 24" width={18}>
+      <Path
+        d="M6 6 18 18M18 6 6 18"
+        fill="none"
+        stroke={colors.textSecondary}
+        strokeLinecap="round"
+        strokeWidth={2}
+      />
+    </Svg>
   );
 }
 
@@ -145,6 +200,8 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 360,
+    maxHeight: '100%',
+    flexShrink: 1,
     gap: spacing.sm,
     padding: spacing.lg,
     borderWidth: StyleSheet.hairlineWidth,
@@ -153,10 +210,24 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     backgroundColor: colors.surfaceElevated,
   },
-  title: { ...typography.heading, color: colors.textPrimary },
+  titleRow: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  title: { ...typography.heading, flex: 1, color: colors.textPrimary },
+  close: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    backgroundColor: colors.surface,
+  },
+  content: { flexShrink: 1 },
   message: { ...typography.bodyCompact, color: colors.textSecondary },
-  // Equal halves, and the confirm on the right: the same order as the order bar's two sides, so the
-  // action that proceeds is always the one under the thumb that reaches furthest.
-  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
-  action: { flex: 1 },
+  // Full-width actions survive small screens and large text without shortening a consequential label.
+  actions: { gap: spacing.sm, marginTop: spacing.xs },
+  action: { width: '100%' },
 });

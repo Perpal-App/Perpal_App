@@ -35,6 +35,7 @@ export type WorkerEnv = {
   readonly FED_MONETARY_NEWS_FEED_URL?: string;
   readonly USD_ECONOMIC_CALENDAR_URL?: string;
   readonly JUPITER_API_ORIGIN?: string;
+  readonly SWAP_ASSET_MINTS?: string;
   readonly STABLECOIN_MINTS?: string;
 
   // Bindings
@@ -65,7 +66,11 @@ export type GatewayConfig = {
   readonly jupiter: {
     readonly origin: string;
     readonly apiKey: string;
-    readonly stablecoinMints: readonly [string, string];
+    readonly legacyStablecoinMints: Readonly<{
+      readonly USDC: string;
+      readonly USDT: string;
+    }>;
+    readonly swapAssetMints: Readonly<{ readonly SOL: string; readonly USDC: string }>;
   } | null;
   readonly redis: { readonly url: string; readonly token: string } | null;
   readonly corsAllowedOrigins: readonly string[];
@@ -129,10 +134,38 @@ function parseMarketFeeds(
   return result;
 }
 
-function parseStablecoinMints(
+function parseSwapAssetMints(
   raw: string | undefined,
   invalid: string[],
-): readonly [string, string] {
+): Readonly<{ readonly SOL: string; readonly USDC: string }> {
+  const entries = new Map(
+    (raw ?? '').split(',').map((entry) => {
+      const [symbol = '', mint = ''] = entry.split(':');
+      return [symbol.trim(), mint.trim()];
+    }),
+  );
+  const usdc = entries.get('USDC') ?? '';
+  const sol = entries.get('SOL') ?? '';
+
+  try {
+    if (
+      base58.decode(usdc).length !== 32 ||
+      base58.decode(sol).length !== 32 ||
+      usdc === sol
+    ) {
+      throw new Error('invalid mint');
+    }
+  } catch {
+    invalid.push('SWAP_ASSET_MINTS (USDC and SOL addresses required)');
+  }
+
+  return { SOL: sol, USDC: usdc };
+}
+
+function parseLegacyStablecoinMints(
+  raw: string | undefined,
+  invalid: string[],
+): Readonly<{ readonly USDC: string; readonly USDT: string }> {
   const entries = new Map(
     (raw ?? '').split(',').map((entry) => {
       const [symbol = '', mint = ''] = entry.split(':');
@@ -143,14 +176,18 @@ function parseStablecoinMints(
   const usdt = entries.get('USDT') ?? '';
 
   try {
-    if (base58.decode(usdc).length !== 32 || base58.decode(usdt).length !== 32) {
+    if (
+      base58.decode(usdc).length !== 32 ||
+      base58.decode(usdt).length !== 32 ||
+      usdc === usdt
+    ) {
       throw new Error('invalid mint');
     }
   } catch {
     invalid.push('STABLECOIN_MINTS (USDC and USDT addresses required)');
   }
 
-  return [usdc, usdt];
+  return { USDC: usdc, USDT: usdt };
 }
 
 export function resolveMarketDataConfig(env: WorkerEnv): MarketDataConfig {
@@ -311,10 +348,17 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
     'JUPITER_API_ORIGIN',
     missing,
   );
-  const stablecoinMints = parseStablecoinMints(
+  const swapAssetMints = parseSwapAssetMints(
+    env.SWAP_ASSET_MINTS,
+    missing,
+  );
+  const legacyStablecoinMints = parseLegacyStablecoinMints(
     env.STABLECOIN_MINTS,
     missing,
   );
+  if (swapAssetMints.USDC !== legacyStablecoinMints.USDC) {
+    missing.push('SWAP_ASSET_MINTS and STABLECOIN_MINTS (USDC must match)');
+  }
   const jupiterApiKey = env.JUPITER_API_KEY?.trim() ?? '';
   let marketData: MarketDataConfig | null = null;
 
@@ -372,7 +416,8 @@ export function resolveConfig(env: WorkerEnv): GatewayConfig {
         : {
             origin: jupiterOrigin,
             apiKey: jupiterApiKey,
-            stablecoinMints,
+            legacyStablecoinMints,
+            swapAssetMints,
           },
     redis:
       redisUrl.length > 0 && redisToken.length > 0

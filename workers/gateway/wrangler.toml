@@ -25,6 +25,7 @@ MARKETWATCH_NEWS_FEED_URL = "https://feeds.content.dowjones.io/public/rss/mw_top
 FED_MONETARY_NEWS_FEED_URL = "https://www.federalreserve.gov/feeds/press_monetary.xml"
 USD_ECONOMIC_CALENDAR_URL = "https://api.fxmacrodata.com/v1/calendar/usd"
 JUPITER_API_ORIGIN = "https://api.jup.ag"
+SWAP_ASSET_MINTS = "USDC:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v,SOL:So11111111111111111111111111111111111111112"
 STABLECOIN_MINTS = "USDC:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v,USDT:Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
 
 [[env.mainnet.ratelimits]]

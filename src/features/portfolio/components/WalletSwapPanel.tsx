@@ -1,22 +1,35 @@
 import { isConnected, useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { SkeletonText } from '@/components/feedback/Skeleton';
 import { ActionButton } from '@/components/ui/ActionButton';
 import { Button } from '@/components/ui/Button';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { readAppConfig } from '@/config/appConfig';
-import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
+import { parseAmount } from '@/domain/money/amount';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
-import { reconcilePendingTradeAction } from '@/integrations/perps/tradeActionRecovery';
+import { WalletSwapConfirmationDialog } from '@/features/portfolio/components/WalletSwapConfirmationDialog';
+import { useWalletSwapRecovery } from '@/features/portfolio/hooks/useWalletSwapRecovery';
+import {
+  formatSol,
+  formatSwapAmount,
+  formatSwapExpiry,
+  maxConfirmationNotice,
+  optionalSol,
+  parseSwapInput,
+  walletLabel,
+} from '@/features/portfolio/components/walletSwapPresentation';
 import {
   createPrivyVersionedTransactionAuthority,
   isPrivyWalletAddress,
 } from '@/integrations/privy/privySolanaTransactionAuthority';
 import {
+  prepareMaximumWalletStablecoinSwap,
   prepareWalletStablecoinSwap,
   submitWalletStablecoinSwap,
-  type Stablecoin,
+  swapAssetDecimals,
+  type SwapAsset,
   type WalletStablecoinSwapPlan,
   type WalletSwapScope,
 } from '@/integrations/solana/walletStablecoinSwap';
@@ -38,60 +51,44 @@ export function WalletSwapPanel({
   const embeddedWallet = useEmbeddedSolanaWallet();
   const session = useTradingSession();
   const [scope, setScope] = useState<WalletSwapScope>(initialScope);
-  const [from, setFrom] = useState<Stablecoin>('USDC');
+  const [from, setFrom] = useState<SwapAsset>('USDC');
   const [amount, setAmount] = useState('');
   const [plan, setPlan] = useState<WalletStablecoinSwapPlan | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'preparing' | 'submitting' | 'pending'>('idle');
+  const [confirmationVisible, setConfirmationVisible] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'preparing' | 'submitting'>('idle');
   const prepareAbort = useRef<AbortController | null>(null);
-  const to: Stablecoin = from === 'USDC' ? 'USDT' : 'USDC';
+  const submitInFlight = useRef(false);
+  const to: SwapAsset = from === 'USDC' ? 'SOL' : 'USDC';
   const owner = scope === 'public' ? session.mainWalletAddress : session.address;
-  const walletBalance = scope === 'public'
+  const walletBalance = (scope === 'public'
     ? balances?.publicWallet
-    : balances?.privateWallet;
-  const sourceBalance = from === 'USDC'
-    ? walletBalance?.usdcBaseUnits ?? 0n
-    : walletBalance?.usdtBaseUnits ?? 0n;
-  const enteredBaseUnits = enteredAmount(amount);
-  const amountIsMax = sourceBalance > 0n && enteredBaseUnits === sourceBalance;
-  const amountExceedsBalance = enteredBaseUnits !== null && enteredBaseUnits > sourceBalance;
+    : balances?.privateWallet) ?? null;
+  const sourceBalance = walletBalance === null
+    ? null
+    : from === 'USDC'
+      ? walletBalance.usdcBaseUnits
+      : walletBalance.solLamports;
+  const enteredBaseUnits = parseSwapInput(amount, from);
+  const amountIsMax = plan?.amountMode === 'max';
+  const amountExceedsBalance = sourceBalance !== null &&
+    enteredBaseUnits !== null && enteredBaseUnits > sourceBalance;
+  const recovery = useWalletSwapRecovery({
+    onBalancesChanged,
+    owner,
+    rpcUrl: config.ok ? config.value.api.rpcUrl : null,
+    signer: session.signer,
+    walletLabel: walletLabel(scope),
+  });
+  const controlsLocked = phase !== 'idle' || recovery.blocked;
 
   const invalidate = useCallback(() => {
     prepareAbort.current?.abort();
+    setConfirmationVisible(false);
     setPlan(null);
     setPhase('idle');
   }, []);
 
   useEffect(() => () => prepareAbort.current?.abort(), []);
-
-  useEffect(() => {
-    if (!config.ok || owner === null || session.signer === null) return;
-    const controller = new AbortController();
-    void reconcilePendingTradeAction({
-      owner,
-      provider: 'wallet',
-      rpcUrl: config.value.api.rpcUrl,
-      signal: controller.signal,
-      signer: session.signer,
-    }).then((status) => {
-      if (controller.signal.aborted || status === 'none' || status === 'expired') return;
-      if (status === 'confirmed') {
-        showAppToast({
-          outcome: 'success',
-          title: 'Swap confirmed',
-          message: `${walletLabel(scope)} balances were updated.`,
-        });
-        onBalancesChanged();
-        return;
-      }
-      setPhase('pending');
-      showAppToast({ outcome: 'info', title: 'Swap confirming', message: 'The signed swap was not submitted again.' });
-    }).catch((cause) => {
-      if (!controller.signal.aborted) {
-        showAppToast({ outcome: 'error', title: 'Swap recovery paused', message: userMessage(cause) });
-      }
-    });
-    return () => controller.abort();
-  }, [config, onBalancesChanged, owner, scope, session.signer]);
 
   const selectScope = (next: WalletSwapScope) => {
     if (next === scope) return;
@@ -100,14 +97,14 @@ export function WalletSwapPanel({
     setAmount('');
   };
 
-  const selectFrom = (next: Stablecoin) => {
+  const selectFrom = (next: SwapAsset) => {
     if (next === from) return;
     invalidate();
     setFrom(next);
     setAmount('');
   };
 
-  const prepare = async () => {
+  const prepare = async (mode: 'exact' | 'max') => {
     if (!config.ok || owner === null || session.signer === null) {
       showAppToast({
         outcome: 'error',
@@ -117,13 +114,19 @@ export function WalletSwapPanel({
       return;
     }
 
-    let amountBaseUnits: bigint;
+    let amountBaseUnits: bigint | null = null;
     try {
-      amountBaseUnits = parseAmount(amount, 6).baseUnits;
-      if (amountBaseUnits <= 0n) throw new Error('Enter an amount greater than zero.');
-      if (balances === null) throw new Error('Wallet balances are still loading.');
-      if (amountBaseUnits > sourceBalance) {
-        throw new Error(`Available balance is ${token(sourceBalance)} ${from}.`);
+      if (balances === null || sourceBalance === null) {
+        throw new Error('Wallet balances are still loading.');
+      }
+      if (mode === 'exact') {
+        amountBaseUnits = parseAmount(amount, swapAssetDecimals(from)).baseUnits;
+        if (amountBaseUnits <= 0n) throw new Error('Enter an amount greater than zero.');
+        if (amountBaseUnits > sourceBalance) {
+          throw new Error(`Available balance is ${formatSwapAmount(sourceBalance, from)} ${from}.`);
+        }
+      } else if (sourceBalance <= 0n) {
+        throw new Error(`No ${from} is available to swap.`);
       }
     } catch (cause) {
       showAppToast({ outcome: 'error', title: 'Review swap', message: userMessage(cause) });
@@ -136,8 +139,7 @@ export function WalletSwapPanel({
     setPhase('preparing');
     setPlan(null);
     try {
-      const next = await prepareWalletStablecoinSwap({
-        amountBaseUnits,
+      const preparation = {
         from,
         owner,
         requestSigner: session.signer,
@@ -146,9 +148,21 @@ export function WalletSwapPanel({
         signal: controller.signal,
         swapBuildUrl: config.value.api.swapBuildUrl,
         usdcMint: config.value.perps.usdcMint,
-        usdtMint: config.value.perps.usdtMint,
-      });
+      } as const;
+      let next: WalletStablecoinSwapPlan;
+      if (mode === 'max') {
+        next = await prepareMaximumWalletStablecoinSwap(preparation);
+      } else {
+        if (amountBaseUnits === null) {
+          throw new Error('Enter an amount greater than zero.');
+        }
+        next = await prepareWalletStablecoinSwap({
+          ...preparation,
+          amountBaseUnits,
+        });
+      }
       if (!controller.signal.aborted) {
+        setAmount(formatSwapAmount(next.amountBaseUnits, next.from));
         setPlan(next);
         setPhase('idle');
       }
@@ -162,7 +176,17 @@ export function WalletSwapPanel({
   };
 
   const submit = async (confirmedPlan: WalletStablecoinSwapPlan) => {
-    if (!config.ok || session.signer === null) return;
+    if (submitInFlight.current || recovery.isBlocked()) return;
+    if (!config.ok || session.signer === null) {
+      setConfirmationVisible(false);
+      showAppToast({
+        outcome: 'error',
+        title: 'Swap unavailable',
+        message: 'Wallet services are still getting ready.',
+      });
+      return;
+    }
+    submitInFlight.current = true;
     setPhase('submitting');
     try {
       const transactionAuthority = confirmedPlan.scope === 'public'
@@ -178,7 +202,9 @@ export function WalletSwapPanel({
         ...(transactionAuthority === undefined ? {} : { transactionAuthority }),
       });
       const confirmed = result.status === 'confirmed';
-      setPhase(confirmed ? 'idle' : 'pending');
+      setPhase('idle');
+      if (!confirmed) recovery.resume();
+      setConfirmationVisible(false);
       setPlan(null);
       setAmount('');
       onBalancesChanged();
@@ -186,42 +212,30 @@ export function WalletSwapPanel({
         kind: 'wallet',
         outcome: confirmed ? 'success' : 'info',
         title: confirmed ? 'Swap complete' : 'Swap submitted',
-        message: `${token(confirmedPlan.amountBaseUnits)} ${confirmedPlan.from} → ${confirmedPlan.to}.`,
+        message: `${formatSwapAmount(confirmedPlan.amountBaseUnits, confirmedPlan.from)} ${confirmedPlan.from} → ${confirmedPlan.to}.`,
       });
     } catch (cause) {
       logSwapFailure('submission', cause);
       setPhase('idle');
+      setConfirmationVisible(false);
+      if (errorCode(cause) === 'quote_stale') setPlan(null);
       showAppToast({ outcome: 'error', title: 'Swap failed', message: userMessage(cause) });
+      recovery.resume();
+    } finally {
+      submitInFlight.current = false;
     }
   };
 
   const confirm = () => {
     if (plan === null) return;
-    const maxNotice = plan.amountBaseUnits === plan.sourceBalanceBaseUnits
-      ? `\nThis converts the full ${plan.from} token balance.`
-      : '';
-    const rentNotice = plan.swap.rentLamports > 0n
-      ? `\nToken-account rent: ${sol(plan.swap.rentLamports)}`
-      : '';
-    Alert.alert(
-      `Swap ${plan.from} to ${plan.to}?`,
-      `Spend: ${token(plan.amountBaseUnits)} ${plan.from}\n` +
-      `Receive at least: ${token(plan.swap.minimumOutputBaseUnits)} ${plan.to}\n` +
-      `Wallet: ${walletLabel(plan.scope)}\n` +
-      `Network fee: ${sol(plan.swap.feeLamports)}${rentNotice}\n` +
-      `Maximum slippage: 0.5%${maxNotice}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Confirm and sign', onPress: () => void submit(plan) },
-      ],
-    );
+    setConfirmationVisible(true);
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.headingBlock}>
-        <Text accessibilityRole="header" style={styles.title}>Swap stablecoins</Text>
-        <Text style={styles.subtitle}>Exchange USDC and USDT in either wallet.</Text>
+        <Text accessibilityRole="header" style={styles.title}>Swap</Text>
+        <Text style={styles.subtitle}>Exchange USDC and SOL in either wallet.</Text>
       </View>
 
       <View style={styles.controlBlock}>
@@ -229,7 +243,7 @@ export function WalletSwapPanel({
         <View accessibilityRole="radiogroup" style={styles.selector}>
           {(['public', 'private'] as const).map((value) => (
             <ActionButton
-              disabled={phase !== 'idle'}
+              disabled={controlsLocked}
               key={value}
               label={walletLabel(value)}
               onPress={() => selectScope(value)}
@@ -244,9 +258,9 @@ export function WalletSwapPanel({
       <View style={styles.controlBlock}>
         <Text style={styles.fieldLabel}>From</Text>
         <View accessibilityRole="radiogroup" style={styles.selector}>
-          {(['USDC', 'USDT'] as const).map((symbol) => (
+          {(['USDC', 'SOL'] as const).map((symbol) => (
             <ActionButton
-              disabled={phase !== 'idle'}
+              disabled={controlsLocked}
               key={symbol}
               label={symbol}
               onPress={() => selectFrom(symbol)}
@@ -261,12 +275,18 @@ export function WalletSwapPanel({
       <View style={styles.amountBlock}>
         <View style={styles.amountHeader}>
           <Text style={styles.fieldLabel}>You pay</Text>
-          <Text style={styles.balance}>Available {token(sourceBalance)} {from}</Text>
+          {sourceBalance === null ? (
+            <SkeletonText align="right" role="caption" width={128} />
+          ) : (
+            <Text style={styles.balance}>
+              Available {formatSwapAmount(sourceBalance, from)} {from}
+            </Text>
+          )}
         </View>
         <View style={styles.inputRow}>
           <TextInput
             accessibilityLabel={`Amount of ${from} to swap`}
-            editable={phase === 'idle'}
+            editable={!controlsLocked}
             keyboardType="decimal-pad"
             onChangeText={(value) => {
               invalidate();
@@ -280,12 +300,9 @@ export function WalletSwapPanel({
           />
           <Text style={styles.symbol}>{from}</Text>
           <ActionButton
-            disabled={phase !== 'idle'}
+            disabled={controlsLocked || sourceBalance === null || sourceBalance === 0n}
             label="Max"
-            onPress={() => {
-              invalidate();
-              setAmount(token(sourceBalance));
-            }}
+            onPress={() => void prepare('max')}
             style={styles.max}
             tone="neutral"
           />
@@ -294,25 +311,32 @@ export function WalletSwapPanel({
 
       {amountExceedsBalance ? (
         <Text accessibilityLiveRegion="polite" style={styles.warning}>
-          Available: {token(sourceBalance)} {from}
+          Available: {sourceBalance === null ? 'Loading' : formatSwapAmount(sourceBalance, from)} {from}
         </Text>
       ) : amountIsMax ? (
         <Text accessibilityLiveRegion="polite" style={styles.note}>
-          Max converts the full {from} balance. SOL remains reserved for fees.
+          {from === 'SOL'
+            ? 'Max keeps the live network fee and required rent in SOL.'
+            : 'Max uses the full USDC balance.'}
         </Text>
       ) : null}
 
       <StatusRow label="You receive" value={plan === null
         ? to
-        : `${token(plan.swap.minimumOutputBaseUnits)} ${to} minimum`} />
+        : `${formatSwapAmount(plan.swap.minimumOutputBaseUnits, to)} ${to} minimum`} />
       {plan === null ? null : (
         <>
-          <StatusRow label="Network fee" value={sol(plan.swap.feeLamports)} />
-          <StatusRow label="SOL required" value={sol(plan.swap.requiredSolLamports)} />
+          <StatusRow label="Network fee" value={formatSol(plan.swap.feeLamports)} />
+          <StatusRow label="SOL required" value={formatSol(plan.swap.requiredSolLamports)} />
           <StatusRow label="Maximum slippage" value="0.5%" />
-          {plan.swap.createsTokenAccount ? (
+          {plan.swap.persistentRentLamports > 0n ? (
             <Text style={styles.note}>
-              Includes {sol(plan.swap.rentLamports)} first-time token-account rent.
+              Includes {formatSol(plan.swap.persistentRentLamports)} token-account rent.
+            </Text>
+          ) : null}
+          {plan.swap.temporaryRentLamports > 0n ? (
+            <Text style={styles.note}>
+              {formatSol(plan.swap.temporaryRentLamports)} temporary WSOL rent is returned after the swap.
             </Text>
           ) : null}
         </>
@@ -320,17 +344,46 @@ export function WalletSwapPanel({
 
       <Button
         disabled={
-          phase === 'pending' ||
+          recovery.blocked ||
           balances === null ||
           owner === null ||
           session.signer === null ||
+          sourceBalance === null ||
           sourceBalance === 0n ||
-          amountExceedsBalance
+          amountExceedsBalance ||
+          (plan === null && (enteredBaseUnits === null || enteredBaseUnits <= 0n))
         }
-        label={phase === 'pending' ? 'Swap confirming' : plan === null ? 'Review swap' : 'Confirm swap'}
-        loading={phase === 'preparing' || phase === 'submitting'}
-        onPress={plan === null ? () => void prepare() : confirm}
+        label={recovery.state === 'checking'
+          ? 'Checking swap'
+          : recovery.state === 'pending'
+            ? 'Swap confirming'
+            : plan === null ? 'Review swap' : 'Confirm swap'}
+        loading={phase === 'preparing' || phase === 'submitting' || recovery.state === 'checking'}
+        onPress={plan === null ? () => void prepare('exact') : confirm}
       />
+
+      {plan === null ? null : (
+        <WalletSwapConfirmationDialog
+          estimatedEndingSol={formatSol(plan.swap.estimatedEndingSolLamports)}
+          expiresAt={formatSwapExpiry(plan.expiresAtMs)}
+          fee={formatSol(plan.swap.feeLamports)}
+          loading={phase === 'submitting'}
+          maxNotice={maxConfirmationNotice(plan)}
+          minimumReceive={`${formatSwapAmount(plan.swap.minimumOutputBaseUnits, plan.to)} ${plan.to}`}
+          onCancel={() => setConfirmationVisible(false)}
+          onConfirm={() => void submit(plan)}
+          persistentRent={optionalSol(plan.swap.persistentRentLamports)}
+          slippage="0.5%"
+          spend={`${formatSwapAmount(plan.amountBaseUnits, plan.from)} ${plan.from}`}
+          temporaryRent={optionalSol(plan.swap.temporaryRentLamports)}
+          temporaryRentRefundNote={plan.swap.temporaryRentLamports > 0n
+            ? 'Temporary WSOL rent returns to this wallet when the swap closes its temporary account.'
+            : null}
+          title={`Review ${plan.from} → ${plan.to}`}
+          visible={confirmationVisible}
+          wallet={walletLabel(plan.scope)}
+        />
+      )}
     </View>
   );
 }
@@ -360,28 +413,15 @@ async function publicTransactionAuthority(
   });
 }
 
-function walletLabel(scope: WalletSwapScope): string {
-  return scope === 'public' ? 'Public wallet' : 'Private wallet';
-}
-
-function token(value: bigint): string {
-  return formatAmount(amountFromBaseUnits(value, 6));
-}
-
-function sol(value: bigint): string {
-  return `${formatAmount(amountFromBaseUnits(value, 9))} SOL`;
-}
-
-function enteredAmount(value: string): bigint | null {
-  try {
-    return parseAmount(value, 6).baseUnits;
-  } catch {
-    return null;
-  }
-}
-
 function userMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'The swap could not be prepared.';
+}
+
+function errorCode(cause: unknown): string | null {
+  if (typeof cause !== 'object' || cause === null) return null;
+  return typeof (cause as { readonly code?: unknown }).code === 'string'
+    ? (cause as { readonly code: string }).code
+    : null;
 }
 
 function logSwapFailure(phase: 'preparation' | 'submission', cause: unknown): void {

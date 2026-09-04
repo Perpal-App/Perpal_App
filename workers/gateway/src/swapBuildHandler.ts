@@ -9,9 +9,13 @@ const UPSTREAM_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const MAX_U64 = (1n << 64n) - 1n;
 
+type SwapSymbol = 'SOL' | 'USDC' | 'USDT';
+type SwapMode = 'legacy-stablecoin' | 'native-sol';
+
 type SwapBuildPayload = {
   readonly amount: string;
   readonly inputMint: string;
+  readonly mode: SwapMode;
   readonly outputMint: string;
   readonly taker: string;
 };
@@ -34,8 +38,7 @@ export async function handleSwapBuildRequest(input: {
   readonly outcome: 'ok' | 'error' | 'rejected';
   readonly upstreamMs?: number;
 }> {
-  const parsed = parsePayload(input.payload, input.config.stablecoinMints);
-
+  const parsed = parsePayload(input.payload, input.config);
   if (!parsed.ok) {
     return {
       response: errorResponse(
@@ -49,9 +52,7 @@ export async function handleSwapBuildRequest(input: {
   }
 
   const payload = parsed.payload;
-
-  const url = new URL('/swap/v2/build', input.config.origin);
-  url.search = new URLSearchParams({
+  const query = {
     amount: payload.amount,
     computeUnitPricePercentile: 'medium',
     inputMint: payload.inputMint,
@@ -60,8 +61,10 @@ export async function handleSwapBuildRequest(input: {
     payer: payload.taker,
     slippageBps: '50',
     taker: payload.taker,
-    wrapAndUnwrapSol: 'false',
-  }).toString();
+    wrapAndUnwrapSol: payload.mode === 'native-sol' ? 'true' : 'false',
+  };
+  const url = new URL('/swap/v2/build', input.config.origin);
+  url.search = new URLSearchParams(query).toString();
 
   const started = performance.now();
   const controller = new AbortController();
@@ -74,16 +77,15 @@ export async function handleSwapBuildRequest(input: {
     });
     const body = await response.text();
     const upstreamMs = performance.now() - started;
-
     if (!response.ok) {
-      const noRoute = response.status === 400;
+      const noRoute = response.status === 400 && isNoRouteResponse(body);
       return {
         response: errorResponse(
           noRoute ? 400 : 502,
           noRoute ? 'swap_route_unavailable' : 'swap_build_failed',
           noRoute
-            ? 'Jupiter has no route for this amount. Enter a larger amount and try again.'
-            : 'Stablecoin conversion could not be prepared.',
+            ? 'Jupiter has no route for this amount. Change the amount and try again.'
+            : 'The token swap could not be prepared.',
           input.traceId,
         ),
         outcome: noRoute ? 'rejected' : 'error',
@@ -99,7 +101,7 @@ export async function handleSwapBuildRequest(input: {
         response: errorResponse(
           502,
           'swap_build_failed',
-          'Stablecoin conversion could not be prepared.',
+          'The token swap could not be prepared.',
           input.traceId,
         ),
         outcome: 'error',
@@ -119,8 +121,8 @@ export async function handleSwapBuildRequest(input: {
         502,
         timedOut ? 'swap_build_timeout' : 'swap_build_failed',
         timedOut
-          ? 'Stablecoin conversion timed out. Try again.'
-          : 'Stablecoin conversion could not be prepared.',
+          ? 'The token swap timed out. Try again.'
+          : 'The token swap could not be prepared.',
         input.traceId,
       ),
       outcome: 'error',
@@ -133,144 +135,120 @@ export async function handleSwapBuildRequest(input: {
 
 function parsePayload(
   value: unknown,
-  allowedMints: readonly [string, string],
+  allowedMints: Pick<
+    NonNullable<GatewayConfig['jupiter']>,
+    'legacyStablecoinMints' | 'swapAssetMints'
+  >,
 ): ParsedPayload {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return rejectedPair();
   }
-
   const payload = value as Record<string, unknown>;
-
-  if (
-    typeof payload.amount !== 'string' ||
-    !/^\d+$/u.test(payload.amount)
-  ) {
-    return {
-      ok: false,
-      rejection: {
-        code: 'swap_amount_invalid',
-        message: 'Enter a valid stablecoin amount.',
-      },
-    };
+  if (typeof payload.amount !== 'string' || !/^\d+$/u.test(payload.amount)) {
+    return rejectedAmount();
   }
-
   try {
     const amount = BigInt(payload.amount);
-
-    if (amount <= 0n || amount > MAX_U64) {
-      return {
-        ok: false,
-        rejection: {
-          code: 'swap_amount_invalid',
-          message: 'Enter a valid stablecoin amount.',
-        },
-      };
-    }
+    if (amount <= 0n || amount > MAX_U64) return rejectedAmount();
   } catch {
-    return {
-      ok: false,
-      rejection: {
-        code: 'swap_amount_invalid',
-        message: 'Enter a valid stablecoin amount.',
-      },
-    };
+    return rejectedAmount();
   }
 
-  if (typeof payload.taker !== 'string') {
+  if (typeof payload.taker !== 'string' || !isPublicKey(payload.taker)) {
     return rejectedTaker();
   }
-
-  try {
-    if (base58.decode(payload.taker).length !== 32) {
-      return rejectedTaker();
-    }
-  } catch {
-    return rejectedTaker();
-  }
-
-  const pair = stablecoinPair(payload, allowedMints);
-
-  if (pair === null) {
-    return rejectedPair();
-  }
-
+  const pair = swapPair(payload, allowedMints);
+  if (pair === null) return rejectedPair();
   return {
     ok: true,
     payload: {
       amount: payload.amount,
       inputMint: pair.inputMint,
+      mode: pair.mode,
       outputMint: pair.outputMint,
       taker: payload.taker,
     },
   };
 }
 
-function stablecoinPair(
+function swapPair(
   payload: Readonly<Record<string, unknown>>,
-  [usdcMint, usdtMint]: readonly [string, string],
-): { readonly inputMint: string; readonly outputMint: string } | null {
-  const symbols = { USDC: usdcMint, USDT: usdtMint } as const;
+  mints: Pick<
+    NonNullable<GatewayConfig['jupiter']>,
+    'legacyStablecoinMints' | 'swapAssetMints'
+  >,
+): {
+  readonly inputMint: string;
+  readonly mode: SwapMode;
+  readonly outputMint: string;
+} | null {
+  const rules: readonly {
+    readonly first: SwapSymbol;
+    readonly firstMint: string;
+    readonly mode: SwapMode;
+    readonly second: SwapSymbol;
+    readonly secondMint: string;
+  }[] = [
+    {
+      first: 'USDC',
+      firstMint: mints.swapAssetMints.USDC,
+      mode: 'native-sol',
+      second: 'SOL',
+      secondMint: mints.swapAssetMints.SOL,
+    },
+    {
+      first: 'USDC',
+      firstMint: mints.legacyStablecoinMints.USDC,
+      mode: 'legacy-stablecoin',
+      second: 'USDT',
+      secondMint: mints.legacyStablecoinMints.USDT,
+    },
+  ];
 
   if (payload.inputSymbol !== undefined || payload.outputSymbol !== undefined) {
     if (
-      !isStablecoinSymbol(payload.inputSymbol) ||
-      !isStablecoinSymbol(payload.outputSymbol) ||
+      !isSwapSymbol(payload.inputSymbol) ||
+      !isSwapSymbol(payload.outputSymbol) ||
       payload.inputSymbol === payload.outputSymbol
     ) {
       return null;
     }
-
+    const rule = rules.find(({ first, second }) =>
+      (payload.inputSymbol === first && payload.outputSymbol === second) ||
+      (payload.inputSymbol === second && payload.outputSymbol === first));
+    if (rule === undefined) return null;
+    const inputMint = payload.inputSymbol === rule.first
+      ? rule.firstMint
+      : rule.secondMint;
+    const outputMint = payload.outputSymbol === rule.first
+      ? rule.firstMint
+      : rule.secondMint;
     if (
-      (payload.inputMint !== undefined && payload.inputMint !== symbols[payload.inputSymbol]) ||
-      (payload.outputMint !== undefined && payload.outputMint !== symbols[payload.outputSymbol])
+      (payload.inputMint !== undefined && payload.inputMint !== inputMint) ||
+      (payload.outputMint !== undefined && payload.outputMint !== outputMint)
     ) {
       return null;
     }
-
-    return {
-      inputMint: symbols[payload.inputSymbol],
-      outputMint: symbols[payload.outputSymbol],
-    };
+    return { inputMint, mode: rule.mode, outputMint };
   }
 
   if (
     typeof payload.inputMint !== 'string' ||
     typeof payload.outputMint !== 'string' ||
-    ![usdcMint, usdtMint].includes(payload.inputMint) ||
-    ![usdcMint, usdtMint].includes(payload.outputMint) ||
     payload.inputMint === payload.outputMint
   ) {
     return null;
   }
-
-  return {
-    inputMint: payload.inputMint,
-    outputMint: payload.outputMint,
-  };
-}
-
-function isStablecoinSymbol(value: unknown): value is 'USDC' | 'USDT' {
-  return value === 'USDC' || value === 'USDT';
-}
-
-function rejectedPair(): ParsedPayload {
-  return {
-    ok: false,
-    rejection: {
-      code: 'swap_pair_invalid',
-      message: 'Select USDC and USDT in opposite directions.',
-    },
-  };
-}
-
-function rejectedTaker(): ParsedPayload {
-  return {
-    ok: false,
-    rejection: {
-      code: 'swap_taker_invalid',
-      message: 'The selected Solana wallet is invalid.',
-    },
-  };
+  const rule = rules.find(({ firstMint, secondMint }) =>
+    (payload.inputMint === firstMint && payload.outputMint === secondMint) ||
+    (payload.inputMint === secondMint && payload.outputMint === firstMint));
+  return rule === undefined
+    ? null
+    : {
+        inputMint: payload.inputMint,
+        mode: rule.mode,
+        outputMint: payload.outputMint,
+      };
 }
 
 function validUpstreamResponse(body: string, request: SwapBuildPayload): boolean {
@@ -294,4 +272,62 @@ function validUpstreamResponse(body: string, request: SwapBuildPayload): boolean
   } catch {
     return false;
   }
+}
+
+function isNoRouteResponse(body: string): boolean {
+  try {
+    const value = JSON.parse(body) as Record<string, unknown>;
+    const code = typeof value.errorCode === 'string'
+      ? value.errorCode
+      : typeof value.code === 'string'
+        ? value.code
+        : '';
+    return code === 'COULD_NOT_FIND_ANY_ROUTE' ||
+      code === 'ROUTE_PLAN_DOES_NOT_CONSUME_ALL_THE_AMOUNT' ||
+      code === 'NO_ROUTES_FOUND';
+  } catch {
+    return false;
+  }
+}
+
+function isSwapSymbol(value: unknown): value is SwapSymbol {
+  return value === 'SOL' || value === 'USDC' || value === 'USDT';
+}
+
+function isPublicKey(value: string): boolean {
+  try {
+    return base58.decode(value).length === 32;
+  } catch {
+    return false;
+  }
+}
+
+function rejectedAmount(): ParsedPayload {
+  return {
+    ok: false,
+    rejection: {
+      code: 'swap_amount_invalid',
+      message: 'Enter a valid token amount.',
+    },
+  };
+}
+
+function rejectedPair(): ParsedPayload {
+  return {
+    ok: false,
+    rejection: {
+      code: 'swap_pair_invalid',
+      message: 'Select a supported swap pair.',
+    },
+  };
+}
+
+function rejectedTaker(): ParsedPayload {
+  return {
+    ok: false,
+    rejection: {
+      code: 'swap_taker_invalid',
+      message: 'The selected Solana wallet is invalid.',
+    },
+  };
 }

@@ -23,7 +23,7 @@ export class StablecoinSwapLookupTableError extends Error {
   readonly code = 'swap_lookup_table_invalid';
 
   constructor() {
-    super('The stablecoin conversion account map could not be verified. Request a fresh quote.');
+    super('The token-swap account map could not be verified. Request a fresh quote.');
     this.name = 'StablecoinSwapLookupTableError';
   }
 }

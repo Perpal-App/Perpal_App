@@ -311,7 +311,7 @@ export default {
           errorResponse(
             503,
             'swap_unavailable',
-            'Stablecoin conversion is unavailable.',
+                'Token swap is unavailable.',
             traceId,
           ),
           'error',
