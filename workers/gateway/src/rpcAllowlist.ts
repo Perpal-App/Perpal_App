@@ -11,6 +11,8 @@
 export type MethodClass =
   /** Idempotent and safe to hedge across providers. */
   | 'read'
+  /** Idempotent enhanced read that is available only from the Helius DAS endpoint. */
+  | 'helius-read'
   /** Idempotent but expensive; load-split without hedging. */
   | 'heavy-read'
   /** Not idempotent. Never hedged, never retried blindly. */
@@ -32,6 +34,8 @@ const METHODS: Readonly<Record<string, MethodClass>> = {
   getTransaction: 'read',
   getEpochInfo: 'read',
   getRecentPrioritizationFees: 'read',
+
+  getAssetBatch: 'helius-read',
 
   getProgramAccounts: 'heavy-read',
   simulateTransaction: 'heavy-read',

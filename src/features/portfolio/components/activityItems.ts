@@ -1,6 +1,7 @@
 import type {
   PacificaActivity,
   PacificaBalanceActivity,
+  PacificaOrderActivity,
   PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
 import { formatAmountWithCommas } from '@/domain/money/amount';
@@ -46,8 +47,12 @@ export function mergeActivity(
   const detailedTradeTimes = new Set(
     remote?.trades.map((trade) => trade.createdAtMs) ?? [],
   );
+  const filledOrderIds = new Set(remote?.trades.map((trade) => trade.orderId) ?? []);
   const items: ActivityItem[] = [
     ...(remote?.trades.map(tradeItem) ?? []),
+    ...(remote?.orders
+      .filter((order) => order.orderStatus !== 'filled' || !filledOrderIds.has(order.orderId))
+      .map(orderItem) ?? []),
     ...(remote?.balances
       .filter((item) => shouldShowBalanceEvent(item, detailedTradeTimes))
       .map(balanceItem) ?? []),
@@ -70,6 +75,16 @@ function authoritativeCorrelationKeys(
   const keys = new Set<string>();
   for (const trade of remote?.trades ?? []) {
     keys.add(correlationKey('pacifica-trade', String(trade.historyId)));
+    keys.add(correlationKey('pacifica-order', String(trade.orderId)));
+    if (trade.clientOrderId !== null) {
+      keys.add(correlationKey('pacifica-order', trade.clientOrderId));
+    }
+  }
+  for (const order of remote?.orders ?? []) {
+    keys.add(correlationKey('pacifica-order', String(order.orderId)));
+    if (order.clientOrderId !== null) {
+      keys.add(correlationKey('pacifica-order', order.clientOrderId));
+    }
   }
   for (const balance of remote?.balances ?? []) {
     keys.add(correlationKey(
@@ -81,7 +96,7 @@ function authoritativeCorrelationKeys(
 }
 
 function correlationKey(
-  namespace: 'pacifica-balance' | 'pacifica-trade',
+  namespace: 'pacifica-balance' | 'pacifica-order' | 'pacifica-trade',
   value: string,
 ): string {
   return `${namespace}:${privateIdentifier(namespace, value)}`;
@@ -123,6 +138,31 @@ function tradeItem(trade: PacificaTradeActivity): ActivityItem {
     outcome: trade.cause === 'normal' ? 'success' : 'info',
     title,
     value: opening ? null : signedUsd(trade.pnl),
+  };
+}
+
+function orderItem(order: PacificaOrderActivity): ActivityItem {
+  const side = order.side === 'bid' ? 'Buy' : 'Sell';
+  const status = words(order.orderStatus).toLowerCase();
+  const price = nonZero(order.averageFilledPrice)
+    ? `avg ${usd(order.averageFilledPrice)}`
+    : nonZero(order.initialPrice) ? usd(order.initialPrice) : 'market price';
+  const qualifiers = [
+    `${words(order.orderType)} · ${trimDecimal(order.filledAmount)} / ${trimDecimal(order.amount)} ${order.symbol} · ${price}`,
+    order.reduceOnly ? 'Reduce only' : null,
+    order.reason === null ? null : words(order.reason),
+  ].filter((value): value is string => value !== null);
+
+  return {
+    createdAtMs: order.updatedAtMs,
+    detail: qualifiers.join(' · '),
+    id: `order:${order.orderId}:${order.updatedAtMs}`,
+    kind: 'trade',
+    outcome: order.orderStatus === 'rejected'
+      ? 'error'
+      : order.orderStatus === 'filled' ? 'success' : 'info',
+    title: `${side} ${order.symbol} order ${status}`,
+    value: null,
   };
 }
 
@@ -274,6 +314,14 @@ function balanceTitle(eventType: string): string {
 
 function capitalize(value: string): string {
   return value.length === 0 ? value : `${value[0]?.toUpperCase()}${value.slice(1)}`;
+}
+
+function words(value: string): string {
+  return value.split('_').map(capitalize).join(' ');
+}
+
+function nonZero(value: string): boolean {
+  return !/^-?0+(?:\.0+)?$/u.test(value);
 }
 
 function signedUsd(value: string): string {

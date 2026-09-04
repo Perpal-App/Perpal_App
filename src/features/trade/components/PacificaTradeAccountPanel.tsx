@@ -9,6 +9,7 @@ import {
   fetchPacificaActivity,
   mergePacificaActivity,
   type PacificaActivity,
+  type PacificaOrderActivity,
   type PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
 import { publishPacificaActivitySnapshot } from '@/integrations/perps/pacifica/pacificaActivityStore';
@@ -46,7 +47,7 @@ const TABS: readonly UnderlineTabOption<AccountTab>[] = [
   { id: 'positions', label: 'Positions' },
   { id: 'balance', label: 'Balance' },
   { id: 'orders', label: 'Open orders' },
-  { id: 'history', label: 'Trade history' },
+  { id: 'history', label: 'History' },
 ];
 const REFRESH_INTERVAL_MS = 5_000;
 const MAX_RETRY_INTERVAL_MS = 60_000;
@@ -228,11 +229,22 @@ function Orders(props: {
 }
 
 function TradeHistory({ activity }: { readonly activity: PacificaActivity | null }) {
-  const trades = [...(activity?.trades ?? [])]
-    .sort((left, right) => right.createdAtMs - left.createdAtMs)
-    .slice(0, 10);
-  if (trades.length === 0) return <Empty message="No executed trades." />;
-  return <View style={styles.list}>{trades.map((trade) => <TradeRow key={trade.historyId} trade={trade} />)}</View>;
+  const fillOrderIds = new Set(activity?.trades.map((trade) => trade.orderId) ?? []);
+  const history = [
+    ...(activity?.trades.map((trade) => ({ kind: 'fill' as const, time: trade.createdAtMs, trade })) ?? []),
+    ...(activity?.orders
+      .filter((order) => order.orderStatus !== 'filled' || !fillOrderIds.has(order.orderId))
+      .map((order) => ({ kind: 'order' as const, order, time: order.updatedAtMs })) ?? []),
+  ].sort((left, right) => right.time - left.time).slice(0, 12);
+
+  if (history.length === 0) return <Empty message="No Pacifica order activity." />;
+  return (
+    <View style={styles.list}>
+      {history.map((item) => item.kind === 'fill'
+        ? <TradeRow key={`fill:${item.trade.historyId}`} trade={item.trade} />
+        : <OrderHistoryRow key={`order:${item.order.orderId}`} order={item.order} />)}
+    </View>
+  );
 }
 
 function TradeRow({ trade }: { readonly trade: PacificaTradeActivity }) {
@@ -246,6 +258,35 @@ function TradeRow({ trade }: { readonly trade: PacificaTradeActivity }) {
       <View style={styles.historyValue}>
         <Text selectable style={positive ? styles.long : styles.short}>{positive ? '+' : ''}${decimal(trade.pnl)}</Text>
         <Text style={styles.detail}>{new Date(trade.createdAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+      </View>
+    </View>
+  );
+}
+
+function OrderHistoryRow({ order }: { readonly order: PacificaOrderActivity }) {
+  const price = !zero(order.averageFilledPrice)
+    ? order.averageFilledPrice
+    : !zero(order.initialPrice) ? order.initialPrice : null;
+  const statusStyle = order.orderStatus === 'rejected'
+    ? styles.short
+    : order.orderStatus === 'filled' ? styles.long : styles.detail;
+  return (
+    <View style={styles.historyRow}>
+      <View style={styles.historyText}>
+        <Text style={styles.itemTitle}>
+          {order.symbol} · {order.side === 'bid' ? 'buy' : 'sell'} {order.orderType.split('_').join(' ')}
+        </Text>
+        <Text selectable style={styles.detail}>
+          {decimal(order.filledAmount)} / {decimal(order.amount)} filled
+          {price === null ? '' : ` at $${decimal(price)}`}
+          {order.reduceOnly ? ' · Reduce only' : ''}
+        </Text>
+      </View>
+      <View style={styles.historyValue}>
+        <Text style={statusStyle}>{order.orderStatus.split('_').join(' ')}</Text>
+        <Text style={styles.detail}>
+          {new Date(order.updatedAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </Text>
       </View>
     </View>
   );
@@ -369,6 +410,10 @@ function useTradeAccountData(apiOrigin: string, account: string | null) {
 
 function decimal(value: string): string {
   try { return formatAmountWithCommas(parseAmount(value, 10)); } catch { return value; }
+}
+
+function zero(value: string): boolean {
+  return /^-?0+(?:\.0+)?$/u.test(value);
 }
 
 const styles = StyleSheet.create({

@@ -408,7 +408,8 @@ function responseError(
 function readCacheMaxAgeMs(path: string): number {
   if (
     path === '/api/v1/trades/history' ||
-    path === '/api/v1/account/balance/history'
+    path === '/api/v1/account/balance/history' ||
+    path === '/api/v1/orders/history'
   ) return 60_000;
   if (
     path === '/api/v1/account' ||

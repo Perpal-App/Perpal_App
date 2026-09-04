@@ -93,15 +93,14 @@ export const colors = {
   glassHighlight: 'rgba(75, 47, 168, 0.34)',
   /** Chip fill on a violet panel. Lighter and denser than `glassHighlight`, which sank into it. */
   /**
-   * The halo under a raised control, and the light caught along its top edge.
+   * Contact shadow under a raised control.
    *
-   * The halo is dark, not light. On a mid-violet card a bloom has nothing to brighten against and
-   * just washes the fill it is meant to separate, where a shadow reads immediately. The inset
-   * highlight is the other half of the same effect: without it a dark pill on a dark card is a
-   * silhouette, and the two together are what make it a surface catching light from above.
+   * Near-black rather than a tinted bloom: on a mid-violet card a light halo has nothing to brighten
+   * against and washes the fill it is meant to separate. Kept dense because it is thrown tight and
+   * close — a wide, soft, offset shadow is what makes a control read as hovering, where a short one
+   * directly beneath it reads as seated on the surface.
    */
   raisedHalo: 'rgba(5, 5, 9, 0.55)',
-  raisedTopLight: 'rgba(255, 255, 255, 0.16)',
   glassSelected: '#C4B5FD',
 } as const;
 
@@ -260,6 +259,7 @@ export const gradients = {
     colors: ['#A78BFA', '#7C3AED'],
     locations: [0, 1],
   },
+
 
   /**
    * Skeleton sheen. Transparent at both ends so the highlight has no edge, and

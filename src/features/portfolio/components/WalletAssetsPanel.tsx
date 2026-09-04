@@ -8,14 +8,19 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
+import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import {
   WalletScopeSlider,
   type WalletScope,
 } from '@/features/portfolio/components/WalletScopeSlider';
 import { WalletTokenList } from '@/features/portfolio/components/WalletTokenList';
+import { TokenLogo } from '@/features/portfolio/components/TokenLogo';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
 import { colors, motion, spacing, typography } from '@/theme/tokens';
+
+const EMPTY_METADATA: TokenMetadataMap = new Map();
 
 export function WalletAssetsPanel({
   balances,
@@ -56,11 +61,17 @@ export function WalletAssetsPanel({
         {width > 0 ? (
           <Animated.View style={[styles.pages, { width: width * 2 }, pagesStyle]}>
             <View style={[styles.page, { width }]}>
-              <WalletTokenList wallet={balances?.publicWallet ?? null} />
+              <WalletTokenList
+                metadata={balances?.tokenMetadata ?? EMPTY_METADATA}
+                wallet={balances?.publicWallet ?? null}
+              />
             </View>
             <View style={[styles.page, { width }]}>
-              <PacificaBalance snapshot={snapshot} />
-              <WalletTokenList wallet={balances?.privateWallet ?? null} />
+              <PacificaBalance balances={balances} snapshot={snapshot} />
+              <WalletTokenList
+                metadata={balances?.tokenMetadata ?? EMPTY_METADATA}
+                wallet={balances?.privateWallet ?? null}
+              />
             </View>
           </Animated.View>
         ) : null}
@@ -69,9 +80,20 @@ export function WalletAssetsPanel({
   );
 }
 
-function PacificaBalance({ snapshot }: { readonly snapshot: PacificaPortfolioSnapshot | null }) {
+function PacificaBalance({
+  balances,
+  snapshot,
+}: {
+  readonly balances: WalletBalances | null;
+  readonly snapshot: PacificaPortfolioSnapshot | null;
+}) {
+  const config = readAppConfig();
+  const imageUrl = config.ok
+    ? balances?.tokenMetadata.get(config.value.perps.usdcMint)?.imageUrl ?? null
+    : null;
   return (
     <View style={styles.providerRow}>
+      <TokenLogo url={imageUrl} />
       <View style={styles.providerCopy}>
         <Text style={styles.providerLabel}>Trading equity</Text>
         <Text style={styles.providerName}>Pacifica</Text>

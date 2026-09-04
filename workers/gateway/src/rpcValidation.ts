@@ -117,8 +117,11 @@ export function validateRpcPayload(value: unknown): RpcValidationResult {
       };
     }
 
-    if (requestClass === 'write' || requestClass === 'heavy-read') {
-      methodClass = requestClass;
+    if (requestClass === 'write') methodClass = 'write';
+    else if (requestClass === 'helius-read' && methodClass !== 'write') {
+      methodClass = 'helius-read';
+    } else if (requestClass === 'heavy-read' && methodClass === 'read') {
+      methodClass = 'heavy-read';
     }
   }
 

@@ -82,6 +82,7 @@ export function GlobalActivityTracker({
     [local, remote.state.data, wallet.state.data],
   );
   const remoteBalanceCount = remote.state.data?.balances.length ?? 0;
+  const remoteOrderCount = remote.state.data?.orders.length ?? 0;
   const remoteTradeCount = remote.state.data?.trades.length ?? 0;
   useEffect(() => {
     if (!__DEV__) return;
@@ -91,6 +92,7 @@ export function GlobalActivityTracker({
       generation,
       localCount: local.length,
       mergedCount: items.length,
+      orderCount: remoteOrderCount,
       remoteStatus: remote.state.status,
       tradeCount: remoteTradeCount,
       walletCount: wallet.state.data.length,
@@ -101,6 +103,7 @@ export function GlobalActivityTracker({
     items.length,
     local.length,
     remoteBalanceCount,
+    remoteOrderCount,
     remote.state.status,
     remoteTradeCount,
     wallet.state.data.length,
@@ -232,7 +235,7 @@ function EmptyHistory() {
       </View>
       <Text accessibilityRole="header" style={styles.emptyTitle}>No activity yet</Text>
       <Text style={styles.emptyMessage}>
-        Completed trades, deposits, and withdrawals will appear here as they happen.
+        Orders, trades, deposits, and withdrawals will appear here as they happen.
       </Text>
     </View>
   );

@@ -138,6 +138,11 @@ export class ProviderRouter {
     return first;
   }
 
+  /** A currently healthy endpoint with a provider-specific capability. */
+  endpoint(id: ProviderId): ProviderEndpoint | null {
+    return this.availableEndpoints().find((endpoint) => endpoint.id === id) ?? null;
+  }
+
   /** The next distinct endpoint to hedge onto, if any. */
   hedgeTarget(exclude: ProviderId): ProviderEndpoint | null {
     return this.availableEndpoints().find((e) => e.id !== exclude) ?? null;

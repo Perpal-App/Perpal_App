@@ -19,6 +19,10 @@ import {
   fetchTokenPrices,
   type TokenPriceBatch,
 } from '@/integrations/market-data/tokenPrices';
+import {
+  fetchTokenMetadata,
+  type TokenMetadataMap,
+} from '@/integrations/solana/tokenMetadata';
 
 export type WalletValuation = {
   readonly source: 'Jupiter Price API V3';
@@ -37,8 +41,9 @@ export type WalletBalance = {
 };
 
 export type WalletBalances = {
-  readonly publicWallet: WalletBalance | null;
   readonly privateWallet: WalletBalance | null;
+  readonly publicWallet: WalletBalance | null;
+  readonly tokenMetadata: TokenMetadataMap;
 };
 
 type RawWalletBalance = Omit<WalletBalance, 'valuation'>;
@@ -63,6 +68,7 @@ export function useWalletBalances(input: {
   const hasBalances = useRef(false);
   const balancesRef = useRef<WalletBalances | null>(null);
   const pricingRef = useRef<TokenPriceBatch | null>(null);
+  const metadataRef = useRef<TokenMetadataMap>(new Map());
   const refresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
 
   useEffect(() => {
@@ -127,48 +133,73 @@ export function useWalletBalances(input: {
           if (publicWallet === null && privateWallet === null) {
             throw firstRejected(publicResult, privateResult);
           }
+          const cachedPricing = currentPricing(pricingRef.current);
 
           if (active) {
             startupFailures = 0;
             hasBalances.current = true;
-            const cachedPricing = currentPricing(pricingRef.current);
             const raw = {
               publicWallet: walletWithPricing(publicWallet, cachedPricing),
               privateWallet: walletWithPricing(privateWallet, cachedPricing),
+              tokenMetadata: metadataRef.current,
             };
             balancesRef.current = raw;
             setBalances(raw);
             setStatus('ready');
           }
 
-          const pricing = await fetchTokenPrices(
-            uniqueMints([
-              ...(publicWallet?.holdings ?? []),
-              ...(privateWallet?.holdings ?? []),
-              ...((publicWallet?.solLamports ?? 0n) === 0n &&
-                (privateWallet?.solLamports ?? 0n) === 0n
-                ? []
-                : [{ mint: NATIVE_MINT.toBase58(), baseUnits: 1n, decimals: 9 }]),
-            ]),
-            config.value.api.tokenPricesUrl,
-            controller.signal,
-          ).catch((cause) => {
-            if (active && !controller?.signal.aborted) {
-              logWalletBalanceFailure(cause, startupFailures + 1, 'pricing');
-            }
-            return null;
-          });
+          const holdings = [
+            ...(publicWallet?.holdings ?? []),
+            ...(privateWallet?.holdings ?? []),
+          ];
+          const hasNativeSol = (publicWallet?.solLamports ?? 0n) > 0n
+            || (privateWallet?.solLamports ?? 0n) > 0n;
+          const nativeMint = NATIVE_MINT.toBase58();
+          const [pricing, metadata] = await Promise.all([
+            fetchTokenPrices(
+              uniqueMints([
+                ...holdings,
+                ...(hasNativeSol
+                  ? [{ mint: nativeMint, baseUnits: 1n, decimals: 9 }]
+                  : []),
+              ]),
+              config.value.api.tokenPricesUrl,
+              controller.signal,
+            ).catch((cause) => {
+              if (active && !controller?.signal.aborted) {
+                logWalletBalanceFailure(cause, startupFailures + 1, 'pricing');
+              }
+              return null;
+            }),
+            fetchTokenMetadata(
+              uniqueMintStrings([
+                ...holdings.map((holding) => holding.mint),
+                ...(hasNativeSol ? [nativeMint] : []),
+                config.value.perps.usdcMint,
+              ]),
+              config.value.api.rpcUrl,
+              signer,
+              controller.signal,
+            ).catch((cause) => {
+              if (active && !controller?.signal.aborted) {
+                logWalletBalanceFailure(cause, startupFailures + 1, 'metadata');
+              }
+              return null;
+            }),
+          ]);
 
           if (active) {
             if (pricing !== null) {
               pricingRef.current = pricing;
-              const valued = {
-                publicWallet: walletWithPricing(publicWallet, pricing),
-                privateWallet: walletWithPricing(privateWallet, pricing),
-              };
-              balancesRef.current = valued;
-              setBalances(valued);
             }
+            if (metadata !== null) metadataRef.current = metadata;
+            const valued = {
+              publicWallet: walletWithPricing(publicWallet, pricing ?? cachedPricing),
+              privateWallet: walletWithPricing(privateWallet, pricing ?? cachedPricing),
+              tokenMetadata: metadataRef.current,
+            };
+            balancesRef.current = valued;
+            setBalances(valued);
           }
         } catch (cause) {
           if (active && !controller.signal.aborted && !hasBalances.current) {
@@ -201,7 +232,7 @@ export function useWalletBalances(input: {
 function logWalletBalanceFailure(
   cause: unknown,
   attempt: number,
-  scope: 'pricing' | 'wallets',
+  scope: 'metadata' | 'pricing' | 'wallets',
 ): void {
   if (!__DEV__) return;
   const value = typeof cause === 'object' && cause !== null
@@ -369,6 +400,10 @@ function associatedTokenAmount(
 
 function uniqueMints(holdings: readonly TokenHolding[]): readonly string[] {
   return [...new Set(holdings.map((holding) => holding.mint))];
+}
+
+function uniqueMintStrings(mints: readonly string[]): readonly string[] {
+  return [...new Set(mints)];
 }
 
 function withValuation(

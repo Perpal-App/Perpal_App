@@ -199,6 +199,12 @@ export async function dispatchRpc(
       ? attempt(router, endpoint, body)
       : attemptBatch(router, endpoint, body, batchRequests);
 
+  if (methodClass === 'helius-read') {
+    const helius = router.endpoint('helius');
+    if (helius === null) throw new AllProvidersUnavailableError();
+    return { ...(await attemptRequest(helius)), routing: 'single' };
+  }
+
   const primary = router.primary();
   const primaryAttempt = attemptRequest(primary);
 

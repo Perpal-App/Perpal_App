@@ -3,14 +3,22 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalance } from '@/features/account/hooks/useWalletBalances';
+import { TokenLogo } from '@/features/portfolio/components/TokenLogo';
 import {
   formatTokenAmount,
   listWalletTokens,
 } from '@/features/portfolio/components/withdrawalAssets';
 import { listTradingCollateralOptions } from '@/integrations/perps/providerCollateral';
+import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
 import { colors, spacing, typography } from '@/theme/tokens';
 
-export function WalletTokenList({ wallet }: { readonly wallet: WalletBalance | null }) {
+export function WalletTokenList({
+  metadata,
+  wallet,
+}: {
+  readonly metadata: TokenMetadataMap;
+  readonly wallet: WalletBalance | null;
+}) {
   const config = readAppConfig();
   const tokens = listWalletTokens(
     wallet,
@@ -39,6 +47,7 @@ export function WalletTokenList({ wallet }: { readonly wallet: WalletBalance | n
           key={token.id ?? token.asset.mint}
           style={[styles.row, index > 0 && styles.rowBorder]}
         >
+          <TokenLogo url={metadata.get(token.asset.mint)?.imageUrl ?? null} />
           <View style={styles.identity}>
             <Text numberOfLines={1} selectable style={styles.symbol}>{token.asset.symbol}</Text>
             <Text numberOfLines={1} selectable style={styles.mint}>

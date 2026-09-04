@@ -6,6 +6,7 @@ import Svg, { Path } from 'react-native-svg';
 import { EyeIcon } from '@/assets/svg/EyeIcon';
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { RaisedChip } from '@/components/ui/RaisedChip';
 import {
   money,
   percent,
@@ -14,21 +15,23 @@ import {
   unrealizedPnl,
   unrealizedRate,
   walletFunds,
-  walletLabel,
 } from '@/domain/portfolio/accountFigures';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
+import { BalanceTiles } from '@/features/portfolio/components/BalanceTiles';
 import {
   FundingActions,
   type FundingAction,
 } from '@/features/portfolio/components/FundingActions';
 import { PortfolioActivityRow } from '@/features/portfolio/components/PortfolioActivityRow';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
+import { colors, fonts, gradients, radii, spacing, typography } from '@/theme/tokens';
 
 /** Stands in for every figure while balances are hidden. */
 const MASK = '••••••';
 /** Invisible box around the eye. With `hitSlop` on top it clears the 48pt minimum target. */
 const REVEAL_SIZE = 34;
+/** Matched to the eye's box, so the two controls beside the label read as one cluster. */
+const ASSETS_HEIGHT = 34;
 
 /**
  * The balance, what it is made of, and what to do with it.
@@ -46,10 +49,12 @@ const REVEAL_SIZE = 34;
 export function PortfolioSummaryCard({
   balances,
   onAction,
+  onViewAssets,
   portfolio,
 }: {
   readonly balances: WalletBalances | null;
   readonly onAction: (action: FundingAction) => void;
+  readonly onViewAssets: () => void;
   readonly portfolio: PacificaPortfolioSnapshot | null;
 }) {
   // Session-scoped on purpose: this exists for the moment someone is standing behind you, not as a
@@ -79,28 +84,26 @@ export function PortfolioSummaryCard({
           style={StyleSheet.absoluteFill}
         />
 
+        {/* Both controls ride the label's line rather than the figure's. Beside the figure they would
+            have been competing with it for the same row: a balance in the tens of thousands is close
+            to 200pt of display type, and `numberOfLines={1}` would have ellipsised the number to keep
+            them — truncating the one thing the card exists to show. Up here the figure below gets the
+            card's full width at any magnitude. */}
         <View style={styles.heroRow}>
-          <View style={styles.heroCopy}>
-            <Text style={styles.label}>Total balance</Text>
+          <Text style={styles.label}>Total balance</Text>
 
-            <View style={styles.valueRow}>
-              {total === null ? (
-                <View style={styles.heroPending}>
-                  <SkeletonText role="display" width={188} />
-                </View>
-              ) : (
-                <Text
-                  accessibilityLiveRegion="polite"
-                  numberOfLines={1}
-                  selectable={!hidden}
-                  style={styles.hero}
-                >
-                  {hidden ? MASK : money(total)}
-                </Text>
-              )}
-              <TrendPill hidden={hidden} value={rate} />
-            </View>
-          </View>
+          <RaisedChip
+            accessibilityHint="Opens public and private token balances"
+            accessibilityLabel="View assets"
+            contentStyle={styles.assetsContent}
+            onPress={onViewAssets}
+            style={styles.assets}
+          >
+            <Text maxFontSizeMultiplier={1.2} numberOfLines={1} style={styles.assetsText}>
+              Assets
+            </Text>
+            <ChevronIcon />
+          </RaisedChip>
 
           <PressableScale
             accessibilityHint="Hides every balance on this screen until tapped again"
@@ -115,55 +118,30 @@ export function PortfolioSummaryCard({
           </PressableScale>
         </View>
 
-        {/* One panel again, split by a rule — but stripped of the two things that made it look boxy
-            rather than of the panel itself. The hairline rim is gone, so the shape ends where its fill
-            ends instead of being outlined, and the corner is `radii.lg` to match the card's own rather
-            than the tighter `radii.md` it had. Figures range left, which is what lets the rule read as
-            a column separator instead of as decoration between two centred blocks. */}
-        <View style={styles.funds}>
-          <Figure
-            hidden={hidden}
-            label={walletLabel('Public funds', balances?.publicWallet ?? null)}
-            value={money(publicBalance)}
-          />
-          <View style={styles.fundsRule} />
-          <Figure
-            hidden={hidden}
-            label={walletLabel('Private funds', balances?.privateWallet ?? null)}
-            value={money(privateBalance)}
-          />
+        <View style={styles.valueRow}>
+          {total === null ? (
+            <View style={styles.heroPending}>
+              <SkeletonText role="display" width={188} />
+            </View>
+          ) : (
+            <Text
+              accessibilityLiveRegion="polite"
+              numberOfLines={1}
+              selectable={!hidden}
+              style={styles.hero}
+            >
+              {hidden ? MASK : money(total)}
+            </Text>
+          )}
+          <TrendPill hidden={hidden} value={rate} />
         </View>
+
+        <BalanceTiles balances={balances} hidden={hidden} portfolio={portfolio} />
 
         <FundingActions onAction={onAction} />
       </LinearGradient>
 
       <PortfolioActivityRow hidden={hidden} portfolio={portfolio} />
-    </View>
-  );
-}
-
-/** One of the two balances the total is made of. */
-function Figure({
-  hidden,
-  label,
-  value,
-}: {
-  readonly hidden: boolean;
-  readonly label: string;
-  readonly value: string | null;
-}) {
-  return (
-    <View style={styles.figure}>
-      <Text maxFontSizeMultiplier={1.3} numberOfLines={2} style={styles.figureLabel}>
-        {label}
-      </Text>
-      {value === null ? (
-        <SkeletonText role="label" width={64} />
-      ) : (
-        <Text numberOfLines={1} selectable={!hidden} style={styles.figureValue}>
-          {hidden ? MASK : value}
-        </Text>
-      )}
     </View>
   );
 }
@@ -209,6 +187,21 @@ function TrendArrow({ color, down }: { readonly color: string; readonly down: bo
   );
 }
 
+function ChevronIcon() {
+  return (
+    <Svg height={13} viewBox="0 0 24 24" width={13}>
+      <Path
+        d="m9 6 6 6-6 6"
+        fill="none"
+        stroke={colors.textPrimary}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.6}
+      />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
   stack: { gap: spacing.sm },
   card: {
@@ -220,9 +213,17 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderCurve: 'continuous',
   },
-  heroRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  heroCopy: { flex: 1, minWidth: 0, gap: 2 },
-  label: { ...typography.caption, color: colors.textSecondary },
+  heroRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  label: { ...typography.caption, flex: 1, minWidth: 0, color: colors.textSecondary },
+  // Short of the 48pt minimum; `RaisedChip` carries the `hitSlop` that covers the rest. Sized to the
+  // eye beside it so the two controls read as one cluster rather than as two unrelated affordances.
+  assets: { height: ASSETS_HEIGHT, flexShrink: 0 },
+  assetsContent: { paddingHorizontal: spacing.sm },
+  assetsText: {
+    ...typography.caption,
+    fontFamily: fonts.semiBold,
+    color: colors.textPrimary,
+  },
   valueRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -260,24 +261,4 @@ const styles = StyleSheet.create({
   // rounded, clipped View is the case Android is least reliable about clipping.
   pillTint: { opacity: 0.18, borderRadius: radii.pill },
   pillText: { ...typography.caption, fontVariant: ['tabular-nums'] },
-  // No rim, and the card's own corner. A tint rather than the graphite the action chips below are cut
-  // from: this panel covers roughly four times a chip's area, and a fill dark enough to read as its own
-  // surface at that size would divide the card in two instead of grouping two figures inside it.
-  funds: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radii.lg,
-    borderCurve: 'continuous',
-    backgroundColor: colors.glassHighlight,
-  },
-  fundsRule: { width: StyleSheet.hairlineWidth, backgroundColor: colors.glassRim },
-  figure: { flex: 1, minWidth: 0, gap: 2 },
-  figureLabel: { ...typography.caption, color: colors.textSecondary },
-  figureValue: {
-    ...typography.label,
-    color: colors.textPrimary,
-    fontVariant: ['tabular-nums'],
-  },
 });
