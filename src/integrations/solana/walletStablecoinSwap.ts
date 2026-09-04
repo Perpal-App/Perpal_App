@@ -8,6 +8,7 @@ import {
   writePendingTradeAction,
 } from '@/integrations/perps/tradeActionStorage';
 import {
+  assertStablecoinSwapTransactionUnchanged,
   prepareStablecoinSwap,
   readTokenBalance,
   type StablecoinSwapPlan,
@@ -77,7 +78,9 @@ export async function prepareWalletStablecoinSwap(input: {
     swap: await prepareStablecoinSwap({
       amountBaseUnits: input.amountBaseUnits,
       inputMint,
+      inputSymbol: input.from,
       outputMint,
+      outputSymbol: to,
       owner: input.owner,
       rpcUrl: input.rpcUrl,
       signal: input.signal,
@@ -100,6 +103,7 @@ export async function submitWalletStablecoinSwap(input: {
     throw new Error('The swap quote expired. Review a fresh quote.');
   }
 
+  assertStablecoinSwapTransactionUnchanged(plan.swap);
   assertAuthority(plan, input.requestSigner, input.transactionAuthority);
   const [sourceBalanceBaseUnits, solBalance] = await Promise.all([
     readTokenBalance({

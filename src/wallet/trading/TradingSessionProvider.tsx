@@ -73,8 +73,11 @@ export function TradingSessionProvider({
   readonly children: ReactNode;
 }) {
   const wallet = useEmbeddedSolanaWallet();
+  const primaryWallet = isConnected(wallet)
+    ? wallet.wallets.find((candidate) => candidate.walletIndex === 0)
+    : undefined;
   const mainWalletAddress = isConnected(wallet)
-    ? (wallet.wallets[0]?.address ?? null)
+    ? (primaryWallet?.address ?? null)
     : null;
   const [status, setStatus] = useState<TradingSessionStatus>(
     mainWalletAddress === null ? 'waiting-for-wallet' : 'restoring',
@@ -208,7 +211,9 @@ export function TradingSessionProvider({
       return;
     }
 
-    const embeddedWallet = wallet.wallets[0];
+    const embeddedWallet = wallet.wallets.find(
+      (candidate) => candidate.walletIndex === 0,
+    );
 
     if (embeddedWallet === undefined) {
       setError('Privy wallet M is unavailable.');

@@ -77,7 +77,10 @@ export async function fetchPacificaPortfolio(
   } catch (cause) {
     if (
       cause instanceof PacificaApiError &&
-      (cause.status === 404 || /account not found/iu.test(cause.message))
+      (
+        (cause.status === 404 && cause.requestPath === '/api/v1/account') ||
+        /account not found/iu.test(cause.message)
+      )
     ) {
       return emptyPortfolio();
     }

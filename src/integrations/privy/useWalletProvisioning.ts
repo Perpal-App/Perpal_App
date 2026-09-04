@@ -146,7 +146,8 @@ function useWalletProvisioningState(): WalletProvisioning {
         walletStatus: wallet.status,
       }),
       isProvisioning: provisioning || isCreating(wallet),
-      embeddedWalletAddress: wallet.wallets?.[0]?.address ?? null,
+      embeddedWalletAddress:
+        wallet.wallets?.find((candidate) => candidate.walletIndex === 0)?.address ?? null,
       retry,
     }),
     [failed, isAuthenticated, provisioning, retry, wallet],

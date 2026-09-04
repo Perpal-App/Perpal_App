@@ -10,7 +10,6 @@ import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/a
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
 import {
-  formatTokenAmount,
   parseTokenAmount,
   type WithdrawableToken,
 } from '@/features/portfolio/components/withdrawalAssets';
@@ -245,6 +244,7 @@ function readWithdrawable(
   }
 
   const wallet = balances.privateWallet;
+  if (wallet === null) return [];
   const supported = new Set(getSupportedMints('mainnet').map(String));
   const known = new Map(configured.map((asset) => [asset.mint, asset]));
   const nativeMint = NATIVE_MINT.toBase58();

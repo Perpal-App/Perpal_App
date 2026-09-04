@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ActionButton } from '@/components/ui/ActionButton';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { readAppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
@@ -28,7 +28,7 @@ import {
   creditedUmbraAmount,
   minimumUmbraInputForCredit,
 } from '@/integrations/umbra/privateFundingFees';
-import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 const SOL_DECIMALS = 9;
 const FIELD_MIN_HEIGHT = layout.minTouchTarget;
 const MINIMUM_PUBLIC_USDC_BASE_UNITS = minimumUmbraInputForCredit(
@@ -37,10 +37,14 @@ const MINIMUM_PUBLIC_USDC_BASE_UNITS = minimumUmbraInputForCredit(
 
 export function PrivateFundingPanel({
   balances,
+  onBalancesChanged,
+  onPacificaRefresh,
   tradingReady,
 }: {
   /** The public wallet is where funds come from, so its balances are what bound the choice. */
   readonly balances: WalletBalances | null;
+  readonly onBalancesChanged: () => void;
+  readonly onPacificaRefresh: () => void;
   readonly tradingReady: boolean;
 }) {
   const funding = usePrivateFunding();
@@ -48,14 +52,15 @@ export function PrivateFundingPanel({
   const [feeReserve, setFeeReserve] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<PrivateFundingConfirmation | null>(null);
+  const refreshedCompletion = useRef<string | null>(null);
 
   const collateral = useMemo<ProviderCollateral | null>(() => {
     const config = readAppConfig();
     return config.ok ? pacificaCollateral(config.value.perps.usdcMint) : null;
   }, []);
   const symbol = collateral?.symbol ?? 'USDC';
-  const selectedBalance = balances?.publicWallet.usdcBaseUnits ?? null;
-  const solLamports = balances?.publicWallet.solLamports ?? null;
+  const selectedBalance = balances?.publicWallet?.usdcBaseUnits ?? null;
+  const solLamports = balances?.publicWallet?.solLamports ?? null;
 
   const pending = funding.record?.phase === 'complete' ? null : funding.record;
   const shownSymbol = pending?.symbol ?? symbol;
@@ -68,6 +73,23 @@ export function PrivateFundingPanel({
     && (funding.preflight.missingCollateralBaseUnits > 0n
       || funding.preflight.missingSolLamports > 0n);
   const locked = funding.isRunning || !tradingReady;
+
+  useEffect(() => {
+    const record = funding.record;
+    if (record?.phase !== 'complete') return;
+
+    const completion = `${record.updatedAtMs}:${record.claimSignature ?? ''}:${record.feeFundingSignature ?? ''}`;
+    if (refreshedCompletion.current === completion) return;
+    refreshedCompletion.current = completion;
+    onBalancesChanged();
+    onPacificaRefresh();
+  }, [funding.record, onBalancesChanged, onPacificaRefresh]);
+
+  const useMaximum = () => {
+    if (selectedBalance === null) return;
+    setAmount(formatAmount(amountFromBaseUnits(selectedBalance, 6)));
+    setInputError(null);
+  };
 
   const confirmStart = async () => {
     if (collateral === null) {
@@ -224,21 +246,16 @@ export function PrivateFundingPanel({
 
       {pending === null ? (
         <>
-          <View style={styles.requirements}>
-            <RequirementRow label="Provider" value="Pacifica" />
-            <RequirementRow label="Accepted collateral" value="USDC" />
-            <RequirementRow label="Minimum credited" value="10 USDC" />
+          <View style={styles.summary}>
+            <Text numberOfLines={1} style={styles.summaryProvider}>Pacifica · USDC</Text>
+            <Text numberOfLines={1} style={styles.summaryMinimum}>Min 10 USDC credited</Text>
           </View>
-          <Text style={styles.note}>
-            Enter at least {minimumPublicUsdc()} USDC. The difference covers the
-            Umbra fee before funds are credited to Pacifica.
-          </Text>
           <View style={styles.field}>
             <FieldHead
               available={selectedBalance === null
                 ? null
-                : `${formatAmount(amountFromBaseUnits(selectedBalance, 6))} available`}
-              label="AMOUNT"
+                : `Spendable ${formatAmount(amountFromBaseUnits(selectedBalance, 6))} USDC`}
+              label="Amount"
             />
             <View style={styles.row}>
               <TextInput
@@ -252,8 +269,20 @@ export function PrivateFundingPanel({
                 style={[styles.input, styles.amountInput]}
                 value={amount}
               />
+              <PressableScale
+                accessibilityLabel="Use maximum USDC balance"
+                accessibilityRole="button"
+                disabled={locked || selectedBalance === null}
+                onPress={useMaximum}
+                style={styles.maxButton}
+              >
+                <Text style={styles.maxLabel}>Max</Text>
+              </PressableScale>
               <TokenTag label="USDC" />
             </View>
+            <Text numberOfLines={1} style={styles.hint}>
+              Min {minimumPublicUsdc()} USDC including privacy fee
+            </Text>
           </View>
         </>
       ) : null}
@@ -263,8 +292,8 @@ export function PrivateFundingPanel({
           <FieldHead
             available={solLamports === null
               ? null
-              : `${formatAmount(amountFromBaseUnits(solLamports, SOL_DECIMALS))} available`}
-            label="FEE RESERVE"
+              : `Available ${formatAmount(amountFromBaseUnits(solLamports, SOL_DECIMALS))} SOL`}
+            label="Fee reserve"
           />
           <View style={styles.row}>
             <TextInput
@@ -340,36 +369,11 @@ function FieldHead({
   );
 }
 
-function RequirementRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.requirementRow}>
-      <Text style={styles.requirementLabel}>{label}</Text>
-      <Text numberOfLines={1} style={styles.requirementValue}>{value}</Text>
-    </View>
-  );
-}
-
 function TokenTag({ label }: { readonly label: string }) {
   return (
     <View accessibilityElementsHidden style={styles.token}>
-      <TokenSurface>
-        <Text numberOfLines={1} style={styles.tokenLabel}>{label}</Text>
-      </TokenSurface>
+      <Text numberOfLines={1} style={styles.tokenLabel}>{label}</Text>
     </View>
-  );
-}
-
-function TokenSurface({ children }: { readonly children: ReactNode }) {
-  return (
-    <LinearGradient
-      colors={gradients.surfaceRaise.colors}
-      end={{ x: 0.5, y: 1 }}
-      locations={gradients.surfaceRaise.locations}
-      start={{ x: 0.5, y: 0 }}
-      style={styles.tokenFill}
-    >
-      {children}
-    </LinearGradient>
   );
 }
 
@@ -382,24 +386,25 @@ const styles = StyleSheet.create({
   title: { ...typography.heading, color: colors.textPrimary },
   note: { ...typography.bodyCompact, color: colors.textSecondary },
   status: { ...typography.label, color: colors.accentSoft },
-  requirements: {
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  requirementRow: {
+  summary: {
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.md,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
-  requirementLabel: { ...typography.bodyCompact, color: colors.textSecondary },
-  requirementValue: {
+  summaryProvider: {
     ...typography.label,
     flexShrink: 1,
     color: colors.textPrimary,
+  },
+  summaryMinimum: {
+    ...typography.caption,
+    flexShrink: 1,
+    color: colors.textSecondary,
     textAlign: 'right',
     fontVariant: ['tabular-nums'],
   },
@@ -410,7 +415,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
-  fieldLabel: { ...typography.eyebrow, letterSpacing: 0.5, color: colors.textMuted },
+  fieldLabel: { ...typography.label, color: colors.textSecondary },
   fieldAvailable: {
     ...typography.caption,
     flexShrink: 1,
@@ -429,21 +434,30 @@ const styles = StyleSheet.create({
     ...typography.bodyCompact,
   },
   amountInput: { flex: 1, minWidth: 0 },
+  maxButton: {
+    minWidth: 56,
+    minHeight: FIELD_MIN_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceElevated,
+  },
+  maxLabel: { ...typography.label, color: colors.textPrimary },
   token: {
     minHeight: FIELD_MIN_HEIGHT,
     flexShrink: 0,
-    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.sm,
-  },
-  tokenFill: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xxs,
-    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.surfaceElevated,
   },
   tokenLabel: { ...typography.label, color: colors.textPrimary },
+  hint: { ...typography.caption, color: colors.textMuted },
   error: { ...typography.bodyCompact, color: colors.negative },
 });

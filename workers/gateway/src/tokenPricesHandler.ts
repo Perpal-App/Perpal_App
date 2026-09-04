@@ -8,7 +8,19 @@ export const TOKEN_PRICES_PATH = '/v1/token-prices';
 
 const MAX_IDS = 50;
 const MAX_RESPONSE_BYTES = 128 * 1024;
-const UPSTREAM_TIMEOUT_MS = 5_000;
+const UPSTREAM_ATTEMPTS = 2;
+const UPSTREAM_RETRY_DELAY_MS = 200;
+const UPSTREAM_TIMEOUT_MS = 3_000;
+
+class TokenPriceUpstreamError extends Error {
+  constructor(
+    readonly code: string,
+    readonly retryable: boolean,
+  ) {
+    super(code);
+    this.name = 'TokenPriceUpstreamError';
+  }
+}
 
 export async function handleTokenPricesRequest(
   request: Request,
@@ -30,14 +42,20 @@ export async function handleTokenPricesRequest(
     return result(errorResponse(400, 'token_ids_invalid', 'Token mint list is invalid.', traceId), 'rejected');
   }
 
-  const rateLimit = await env.GLOBAL_RATE_LIMITER.limit({ key: `mainnet:${TOKEN_PRICES_PATH}` });
+  let rateLimit: { readonly success: boolean };
+  try {
+    rateLimit = await env.GLOBAL_RATE_LIMITER.limit({ key: `mainnet:${TOKEN_PRICES_PATH}` });
+  } catch {
+    return result(
+      errorResponse(503, 'rate_limit_unavailable', 'Token prices are unavailable.', traceId),
+      'error',
+    );
+  }
   if (!rateLimit.success) {
     return result(errorResponse(429, 'rate_limited', 'Too many requests.', traceId), 'rejected');
   }
 
   const started = performance.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 
   try {
     const config = resolveConfig(env).jupiter;
@@ -45,16 +63,7 @@ export async function handleTokenPricesRequest(
 
     const url = new URL('/price/v3', config.origin);
     url.searchParams.set('ids', ids.join(','));
-    const response = await fetch(url, {
-      headers: { accept: 'application/json', 'x-api-key': config.apiKey },
-      signal: controller.signal,
-    });
-    const body = await response.text();
-    if (!response.ok || new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) {
-      throw new Error('Jupiter price request failed.');
-    }
-
-    const prices = parsePrices(JSON.parse(body), ids);
+    const prices = await requestJupiterPrices(url, config.apiKey, ids);
     return result(
       new Response(JSON.stringify({
         prices,
@@ -69,15 +78,85 @@ export async function handleTokenPricesRequest(
     );
   } catch (cause) {
     const misconfigured = cause instanceof ConfigurationError;
+    const code = misconfigured
+      ? 'gateway_misconfigured'
+      : cause instanceof TokenPriceUpstreamError
+        ? cause.code
+        : 'token_prices_unavailable';
     return result(
       errorResponse(
         misconfigured ? 503 : 502,
-        misconfigured ? 'gateway_misconfigured' : 'token_prices_unavailable',
+        code,
         'Token prices are unavailable.',
         traceId,
       ),
       'error',
       performance.now() - started,
+    );
+  }
+}
+
+async function requestJupiterPrices(
+  url: URL,
+  apiKey: string,
+  ids: readonly string[],
+): Promise<Readonly<Record<string, string>>> {
+  let failure: unknown;
+
+  for (let attempt = 1; attempt <= UPSTREAM_ATTEMPTS; attempt += 1) {
+    try {
+      return await requestJupiterPricesOnce(url, apiKey, ids);
+    } catch (cause) {
+      failure = cause;
+      if (
+        attempt === UPSTREAM_ATTEMPTS ||
+        (cause instanceof TokenPriceUpstreamError && !cause.retryable)
+      ) {
+        throw cause;
+      }
+      await new Promise((resolve) => setTimeout(resolve, UPSTREAM_RETRY_DELAY_MS));
+    }
+  }
+
+  throw failure;
+}
+
+async function requestJupiterPricesOnce(
+  url: URL,
+  apiKey: string,
+  ids: readonly string[],
+): Promise<Readonly<Record<string, string>>> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      headers: { accept: 'application/json', 'x-api-key': apiKey },
+      signal: controller.signal,
+    });
+    const body = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      throw new TokenPriceUpstreamError('token_prices_upstream_auth_failed', false);
+    }
+    if (!response.ok) {
+      throw new TokenPriceUpstreamError('token_prices_upstream_rejected', true);
+    }
+    if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) {
+      throw new TokenPriceUpstreamError('token_prices_response_too_large', false);
+    }
+
+    try {
+      return parsePrices(JSON.parse(body), ids);
+    } catch {
+      throw new TokenPriceUpstreamError('token_prices_response_invalid', true);
+    }
+  } catch (cause) {
+    if (cause instanceof TokenPriceUpstreamError) throw cause;
+    throw new TokenPriceUpstreamError(
+      controller.signal.aborted
+        ? 'token_prices_upstream_timeout'
+        : 'token_prices_upstream_unreachable',
+      true,
     );
   } finally {
     clearTimeout(timeout);

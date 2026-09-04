@@ -76,7 +76,8 @@ export function PrivateFundingProvider({
 }) {
   const wallet = useEmbeddedSolanaWallet();
   const tradingSession = useTradingSession();
-  const mainWalletAddress = wallet.wallets?.[0]?.address ?? null;
+  const mainWalletAddress = wallet.wallets
+    ?.find((candidate) => candidate.walletIndex === 0)?.address ?? null;
   const [record, setRecord] = useState<PrivateFundingRecord | null>(null);
   const [preflight, setPreflight] = useState<PrivateFundingPreflight | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
@@ -286,7 +287,9 @@ export function PrivateFundingProvider({
       );
     }
 
-    const embedded = wallet.wallets[0];
+    const embedded = wallet.wallets.find(
+      (candidate) => candidate.walletIndex === 0,
+    );
 
     if (embedded === undefined) {
       throw new PrivateFundingError('Privy wallet is unavailable.', 'wallet_unavailable');

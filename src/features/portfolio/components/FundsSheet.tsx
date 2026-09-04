@@ -24,12 +24,17 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
 import { WalletSwapPanel } from '@/features/portfolio/components/WalletSwapPanel';
-import { ProviderFundsPanel } from '@/features/portfolio/components/ProviderFundsPanel';
+import { DirectWithdrawPanel } from '@/features/portfolio/components/DirectWithdrawPanel';
 import { WithdrawPanel } from '@/features/portfolio/components/WithdrawPanel';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, layout, motion, radii, spacing } from '@/theme/tokens';
+import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
-export type FundsMode = 'deposit' | 'providers' | 'swap' | 'withdraw';
+export type FundsRequest =
+  | { readonly mode: 'deposit' }
+  | { readonly mode: 'private-withdraw' }
+  | { readonly mode: 'public-send' }
+  | { readonly mode: 'swap'; readonly scope: 'private' | 'public' };
 
 /**
  * Share of the sheet's own height a release must be heading past for it to close.
@@ -81,7 +86,7 @@ const SCRIM_OPACITY = 0.72;
  */
 export function FundsSheet({
   balances,
-  mode,
+  request,
   onClose,
   onBalancesChanged,
   onPacificaRefresh,
@@ -89,16 +94,18 @@ export function FundsSheet({
 }: {
   /** Forwarded so the withdraw panel lists the tokens actually held, not every supported one. */
   readonly balances: WalletBalances | null;
-  readonly mode: FundsMode | null;
+  readonly request: FundsRequest | null;
   readonly onClose: () => void;
   readonly onBalancesChanged: () => void;
   readonly onPacificaRefresh: () => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
 }) {
   const reduceMotion = useReducedMotion();
+  const session = useTradingSession();
   // `mounted` keeps the modal in the tree; `offset` is where the sheet sits. A dismissal has to finish
   // travelling before the modal can unmount, so one boolean cannot express both.
   const [mounted, setMounted] = useState(false);
+  const [displayedRequest, setDisplayedRequest] = useState<FundsRequest | null>(null);
   const [measured, setMeasured] = useState(0);
   const presented = useRef(false);
   /** The sheet's own measured height. Every position is relative to it, never to the viewport. */
@@ -107,19 +114,26 @@ export function FundsSheet({
   const offset = useSharedValue(0);
   const dragStart = useSharedValue(0);
 
-  const visible = mode !== null;
+  const visible = request !== null;
   // Held invisible for the one frame between mount and measurement. It replaces the guessed height
   // this used to slide in from: the travel is the sheet's own height, so there is nothing to animate
   // from until that is known, and a placeholder distance would start the slide in the wrong place.
   const ready = measured > 0;
 
   useEffect(() => {
-    if (visible) {
+    if (request !== null) {
+      setDisplayedRequest(request);
       setMounted(true);
       return;
     }
     presented.current = false;
-  }, [visible]);
+  }, [request]);
+
+  const finishDismissal = useCallback(() => {
+    setMounted(false);
+    setDisplayedRequest(null);
+    setMeasured(0);
+  }, []);
 
   // Presentation waits for the measurement, because the travel is the sheet's own height: sliding in
   // from a fallback would settle at the wrong place and then correct itself once the real number
@@ -139,7 +153,7 @@ export function FundsSheet({
     if (visible || !mounted) return;
 
     if (reduceMotion) {
-      setMounted(false);
+      finishDismissal();
       return;
     }
 
@@ -148,9 +162,9 @@ export function FundsSheet({
     // formally finished.
     offset.set(withSpring(height.value, motion.sheetDismiss, (finished) => {
       'worklet';
-      if (finished === true) runOnJS(setMounted)(false);
+      if (finished === true) runOnJS(finishDismissal)();
     }));
-  }, [height, mounted, offset, reduceMotion, visible]);
+  }, [finishDismissal, height, mounted, offset, reduceMotion, visible]);
 
   const requestClose = useCallback(() => onClose(), [onClose]);
 
@@ -258,27 +272,35 @@ export function FundsSheet({
                   showsVerticalScrollIndicator={false}
                   style={styles.scroll}
                 >
-                  {mode === 'deposit' ? (
-                    <PrivateFundingPanel balances={balances} tradingReady />
+                  {displayedRequest?.mode === 'deposit' ? (
+                    <PrivateFundingPanel
+                      balances={balances}
+                      onBalancesChanged={onBalancesChanged}
+                      onPacificaRefresh={onPacificaRefresh}
+                      tradingReady
+                    />
                   ) : null}
-                  {mode === 'withdraw' ? (
+                  {displayedRequest?.mode === 'private-withdraw' ? (
                     <WithdrawPanel
                       balances={balances}
                       onBalancesChanged={onBalancesChanged}
+                      onPacificaRefresh={onPacificaRefresh}
                       snapshot={snapshot}
                     />
                   ) : null}
-                  {mode === 'swap' ? (
-                    <WalletSwapPanel
+                  {displayedRequest?.mode === 'public-send' ? (
+                    <DirectWithdrawPanel
                       balances={balances}
+                      mainWalletAddress={session.mainWalletAddress}
                       onBalancesChanged={onBalancesChanged}
+                      source="public"
                     />
                   ) : null}
-                  {mode === 'providers' ? (
-                    <ProviderFundsPanel
+                  {displayedRequest?.mode === 'swap' ? (
+                    <WalletSwapPanel
+                      balances={balances}
+                      initialScope={displayedRequest.scope}
                       onBalancesChanged={onBalancesChanged}
-                      onPacificaRefresh={onPacificaRefresh}
-                      pacifica={snapshot}
                     />
                   ) : null}
                 </ScrollView>

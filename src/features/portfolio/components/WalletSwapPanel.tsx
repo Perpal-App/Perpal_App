@@ -27,15 +27,17 @@ import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 export function WalletSwapPanel({
   balances,
+  initialScope = 'public',
   onBalancesChanged,
 }: {
   readonly balances: WalletBalances | null;
+  readonly initialScope?: WalletSwapScope;
   readonly onBalancesChanged: () => void;
 }) {
   const config = readAppConfig();
   const embeddedWallet = useEmbeddedSolanaWallet();
   const session = useTradingSession();
-  const [scope, setScope] = useState<WalletSwapScope>('public');
+  const [scope, setScope] = useState<WalletSwapScope>(initialScope);
   const [from, setFrom] = useState<Stablecoin>('USDC');
   const [amount, setAmount] = useState('');
   const [plan, setPlan] = useState<WalletStablecoinSwapPlan | null>(null);
@@ -341,7 +343,9 @@ async function publicTransactionAuthority(
     throw new Error('The public wallet is not connected.');
   }
 
-  const publicWallet = wallet.wallets[0];
+  const publicWallet = wallet.wallets.find(
+    (candidate) => candidate.walletIndex === 0,
+  );
 
   if (
     publicWallet === undefined ||

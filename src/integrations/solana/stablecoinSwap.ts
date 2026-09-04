@@ -1,18 +1,12 @@
 import { base58, base64 } from '@scure/base';
 import { Buffer } from 'buffer';
+import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
-  TOKEN_2022_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
-import {
-  AddressLookupTableAccount,
   ComputeBudgetProgram,
   PublicKey,
-  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
+  type AddressLookupTableAccount,
   VersionedTransaction,
 } from '@solana/web3.js';
 
@@ -21,11 +15,14 @@ import {
   type GatewayRequestSigner,
 } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
+import { validateStablecoinSwapInstructions } from '@/integrations/solana/stablecoinSwapInstructionValidation';
+import { readVerifiedStablecoinSwapLookupTables } from '@/integrations/solana/stablecoinSwapLookupTables';
 
 const JUPITER_PROGRAM_ID = new PublicKey(
   'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
 );
 const MAX_COMPUTE_UNITS = 1_400_000;
+const MAX_NETWORK_FEE_LAMPORTS = 2_000_000;
 const TOKEN_ACCOUNT_BYTES = 165;
 
 type EncodedInstruction = {
@@ -78,6 +75,7 @@ export type StablecoinSwapPlan = {
   readonly minimumOutputBaseUnits: bigint;
   readonly outputTokenAccount: string;
   readonly rentLamports: bigint;
+  readonly reviewedMessage: Uint8Array;
   readonly requiredSolLamports: bigint;
   readonly solBalanceLamports: bigint;
   readonly transaction: VersionedTransaction;
@@ -93,7 +91,9 @@ export class StablecoinSwapError extends Error {
 export async function prepareStablecoinSwap(input: {
   readonly amountBaseUnits: bigint;
   readonly inputMint: string;
+  readonly inputSymbol: 'USDC' | 'USDT';
   readonly outputMint: string;
+  readonly outputSymbol: 'USDC' | 'USDT';
   readonly owner: string;
   readonly rpcUrl: string;
   readonly signal?: AbortSignal;
@@ -113,7 +113,9 @@ export async function prepareStablecoinSwap(input: {
     body: {
       amount: input.amountBaseUnits.toString(),
       inputMint: input.inputMint,
+      inputSymbol: input.inputSymbol,
       outputMint: input.outputMint,
+      outputSymbol: input.outputSymbol,
       taker: input.owner,
     },
     cluster: 'mainnet',
@@ -124,8 +126,15 @@ export async function prepareStablecoinSwap(input: {
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const decoded = decodeBuildResponse(response, input, owner);
+  const lookupTables = await readVerifiedStablecoinSwapLookupTables({
+    mappings: response.addressesByLookupTableAddress,
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
   const simulationTransaction = buildTransaction(
     decoded,
+    lookupTables,
     owner,
     MAX_COMPUTE_UNITS,
   );
@@ -195,7 +204,7 @@ export async function prepareStablecoinSwap(input: {
     Math.ceil(simulation.value.unitsConsumed * 1.15),
   );
 
-  const transaction = buildTransaction(decoded, owner, computeUnits);
+  const transaction = buildTransaction(decoded, lookupTables, owner, computeUnits);
   const fee = await signedSolanaRpc<{ readonly value: number | null }>({
     method: 'getFeeForMessage',
     params: [base64.encode(transaction.message.serialize()), { commitment: 'confirmed' }],
@@ -216,10 +225,26 @@ export async function prepareStablecoinSwap(input: {
     minimumOutputBaseUnits: decoded.minimumOutputBaseUnits,
     outputTokenAccount: decoded.outputTokenAccount.toBase58(),
     rentLamports: BigInt(tokenAccountRent),
+    reviewedMessage: transaction.message.serialize(),
     requiredSolLamports,
     solBalanceLamports: BigInt(solBalance.value),
     transaction,
   };
+}
+
+export function assertStablecoinSwapTransactionUnchanged(
+  plan: StablecoinSwapPlan,
+): void {
+  if (
+    !Buffer.from(plan.transaction.message.serialize()).equals(
+      Buffer.from(plan.reviewedMessage),
+    )
+  ) {
+    throw new StablecoinSwapError(
+      'The stablecoin conversion changed after review. Request a fresh quote.',
+      'transaction_mismatch',
+    );
+  }
 }
 
 export function assertStablecoinSwapSolFunding(
@@ -231,6 +256,7 @@ export function assertStablecoinSwapSolFunding(
     feeLamports === null ||
     !Number.isSafeInteger(feeLamports) ||
     feeLamports < 0 ||
+    feeLamports > MAX_NETWORK_FEE_LAMPORTS ||
     !Number.isSafeInteger(solBalanceLamports) ||
     solBalanceLamports < 0 ||
     !Number.isSafeInteger(rentLamports) ||
@@ -314,7 +340,6 @@ type DecodedBuild = {
   readonly createsTokenAccount: boolean;
   readonly expectedOutputBaseUnits: bigint;
   readonly instructions: readonly TransactionInstruction[];
-  readonly lookupTables: readonly AddressLookupTableAccount[];
   readonly minimumOutputBaseUnits: bigint;
   readonly outputTokenAccount: PublicKey;
 };
@@ -328,6 +353,21 @@ function decodeBuildResponse(
   },
   owner: PublicKey,
 ): DecodedBuild {
+  if (
+    !Array.isArray(response.routePlan) ||
+    !Array.isArray(response.computeBudgetInstructions) ||
+    !Array.isArray(response.setupInstructions) ||
+    !Array.isArray(response.otherInstructions) ||
+    response.swapInstruction === null ||
+    typeof response.swapInstruction !== 'object' ||
+    response.blockhashWithMetadata === null ||
+    typeof response.blockhashWithMetadata !== 'object' ||
+    !Number.isSafeInteger(response.blockhashWithMetadata.lastValidBlockHeight) ||
+    response.blockhashWithMetadata.lastValidBlockHeight <= 0
+  ) {
+    throw invalidPlan();
+  }
+
   const expected = unsignedAmount(response.outAmount);
   const minimum = unsignedAmount(response.otherAmountThreshold);
 
@@ -348,51 +388,34 @@ function decodeBuildResponse(
     throw invalidPlan();
   }
 
-  const inputTokenAccount = getAssociatedTokenAddressSync(
-    new PublicKey(input.inputMint),
-    owner,
-  );
-  const outputTokenAccount = getAssociatedTokenAddressSync(
-    new PublicKey(input.outputMint),
-    owner,
-  );
+  const inputMint = new PublicKey(input.inputMint);
+  const outputMint = new PublicKey(input.outputMint);
+  const inputTokenAccount = getAssociatedTokenAddressSync(inputMint, owner);
+  const outputTokenAccount = getAssociatedTokenAddressSync(outputMint, owner);
   const compute = response.computeBudgetInstructions.map(toInstruction);
   const setup = response.setupInstructions.map(toInstruction);
   const swap = toInstruction(response.swapInstruction);
-  const allowedSetupPrograms = [
-    ASSOCIATED_TOKEN_PROGRAM_ID,
-    SystemProgram.programId,
-    TOKEN_PROGRAM_ID,
-    TOKEN_2022_PROGRAM_ID,
-  ];
-
-  if (
-    compute.some((instruction) =>
-      !instruction.programId.equals(ComputeBudgetProgram.programId),
-    ) ||
-    setup.some((instruction) =>
-      !allowedSetupPrograms.some((program) => instruction.programId.equals(program)),
-    ) ||
-    !swap.programId.equals(JUPITER_PROGRAM_ID) ||
-    ![...compute, ...setup, swap].every((instruction) =>
-      instruction.keys.every(
-        (account) => !account.isSigner || account.pubkey.equals(owner),
-      ),
-    ) ||
-    !swap.keys.some((account) => account.pubkey.equals(inputTokenAccount)) ||
-    !swap.keys.some((account) => account.pubkey.equals(outputTokenAccount))
-  ) {
-    throw invalidPlan();
-  }
+  const validation = validateStablecoinSwapInstructions({
+    amountBaseUnits: input.amountBaseUnits,
+    computeInstructions: compute,
+    expectedOutputBaseUnits: expected,
+    inputMint,
+    inputTokenAccount,
+    jupiterProgramId: JUPITER_PROGRAM_ID,
+    minimumOutputBaseUnits: minimum,
+    outputMint,
+    outputTokenAccount,
+    owner,
+    setupInstructions: setup,
+    slippageBps: response.slippageBps,
+    swapInstruction: swap,
+  });
 
   return {
     blockhash: decodeBlockhash(response.blockhashWithMetadata.blockhash),
-    createsTokenAccount: setup.some((instruction) =>
-      instruction.keys.some((account) => account.pubkey.equals(outputTokenAccount)),
-    ),
+    createsTokenAccount: validation.createsTokenAccount,
     expectedOutputBaseUnits: expected,
     instructions: [...compute, ...setup, swap],
-    lookupTables: decodeLookupTables(response.addressesByLookupTableAddress),
     minimumOutputBaseUnits: minimum,
     outputTokenAccount,
   };
@@ -400,6 +423,7 @@ function decodeBuildResponse(
 
 function buildTransaction(
   build: DecodedBuild,
+  lookupTables: readonly AddressLookupTableAccount[],
   owner: PublicKey,
   computeUnits: number,
 ): VersionedTransaction {
@@ -411,7 +435,7 @@ function buildTransaction(
     instructions,
     payerKey: owner,
     recentBlockhash: build.blockhash,
-  }).compileToV0Message([...build.lookupTables]);
+  }).compileToV0Message([...lookupTables]);
   return new VersionedTransaction(message);
 }
 
@@ -426,31 +450,6 @@ function toInstruction(value: EncodedInstruction): TransactionInstruction {
       })),
       programId: new PublicKey(value.programId),
     });
-  } catch {
-    throw invalidPlan();
-  }
-}
-
-function decodeLookupTables(
-  value: SwapBuildResponse['addressesByLookupTableAddress'],
-): readonly AddressLookupTableAccount[] {
-  if (value === null) {
-    return [];
-  }
-
-  try {
-    return Object.entries(value).map(
-      ([table, addresses]) =>
-        new AddressLookupTableAccount({
-          key: new PublicKey(table),
-          state: {
-            addresses: addresses.map((entry) => new PublicKey(entry)),
-            deactivationSlot: BigInt('18446744073709551615'),
-            lastExtendedSlot: 0,
-            lastExtendedSlotStartIndex: 0,
-          },
-        }),
-    );
   } catch {
     throw invalidPlan();
   }

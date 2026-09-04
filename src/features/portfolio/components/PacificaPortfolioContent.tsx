@@ -2,16 +2,16 @@ import { useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
-import { ActionButton } from '@/components/ui/ActionButton';
 import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { AccountOverviewCard } from '@/features/home/components/AccountOverviewCard';
-import { FundsSheet, type FundsMode } from '@/features/portfolio/components/FundsSheet';
+import { FundsSheet, type FundsRequest } from '@/features/portfolio/components/FundsSheet';
 import { GlobalActivityTracker } from '@/features/portfolio/components/GlobalActivityTracker';
 import {
   OrderCard,
   PositionCard,
 } from '@/features/portfolio/components/PortfolioCards';
+import { WalletAccountSection } from '@/features/portfolio/components/WalletAccountSection';
 import { cancelPacificaOrder } from '@/integrations/perps/pacifica/pacificaOrder';
 import type {
   PacificaOpenOrder,
@@ -39,6 +39,7 @@ export function PacificaPortfolioContent({
   const session = useTradingSession();
   const positions = snapshot?.positions ?? [];
   const orders = snapshot?.orders ?? [];
+  const [fundsRequest, setFundsRequest] = useState<FundsRequest | null>(null);
   const hasPositions = positions.length > 0;
   const hasOrders = orders.length > 0;
 
@@ -85,6 +86,12 @@ export function PacificaPortfolioContent({
 
       <AccountOverviewCard balances={balances} portfolio={snapshot} />
 
+      <WalletAccountSection
+        balances={balances}
+        onRequest={setFundsRequest}
+        snapshot={snapshot}
+      />
+
       {hasPositions ? (
         <View style={styles.section}>
           <Text accessibilityRole="header" style={styles.heading}>Open positions</Text>
@@ -107,77 +114,20 @@ export function PacificaPortfolioContent({
         </View>
       ) : null}
 
-      <View style={styles.section}>
-        <Text accessibilityRole="header" style={styles.heading}>Funds</Text>
-        <Funds
-          balances={balances}
-          onBalancesChanged={onBalancesChanged}
-          onPacificaRefresh={onPacificaRefresh}
-          snapshot={snapshot}
-        />
-      </View>
-
       <GlobalActivityTracker
         account={session.address ?? ''}
         apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
       />
-    </AppScreen>
-  );
-}
 
-function Funds({
-  balances,
-  onBalancesChanged,
-  onPacificaRefresh,
-  snapshot,
-}: {
-  readonly balances: WalletBalances | null;
-  readonly onBalancesChanged: () => void;
-  readonly onPacificaRefresh: () => void;
-  readonly snapshot: PacificaPortfolioSnapshot | null;
-}) {
-  const [mode, setMode] = useState<FundsMode | null>(null);
-
-  return (
-    <>
-      <View style={styles.actions}>
-        <ActionButton
-          accessibilityHint="Opens the private funding panel"
-          label="Deposit"
-          onPress={() => setMode('deposit')}
-          style={styles.action}
-        />
-        <ActionButton
-          accessibilityHint="Opens the private balance swap panel"
-          label="Swap"
-          onPress={() => setMode('swap')}
-          style={styles.action}
-          tone="neutral"
-        />
-        <ActionButton
-          accessibilityHint="Returns available provider collateral to your private balance"
-          label="Return"
-          onPress={() => setMode('providers')}
-          style={styles.action}
-          tone="neutral"
-        />
-        <ActionButton
-          accessibilityHint="Opens the withdrawal panel"
-          label="Withdraw"
-          onPress={() => setMode('withdraw')}
-          style={styles.action}
-          tone="neutral"
-        />
-      </View>
       <FundsSheet
         balances={balances}
-        mode={mode}
-        onClose={() => setMode(null)}
         onBalancesChanged={onBalancesChanged}
+        onClose={() => setFundsRequest(null)}
         onPacificaRefresh={onPacificaRefresh}
+        request={fundsRequest}
         snapshot={snapshot}
       />
-    </>
+    </AppScreen>
   );
 }
 
@@ -195,6 +145,4 @@ const styles = StyleSheet.create({
   title: { ...typography.title, color: colors.textPrimary },
   section: { gap: spacing.sm },
   heading: { ...typography.label, color: colors.textPrimary },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  action: { flexGrow: 1, flexBasis: '42%' },
 });

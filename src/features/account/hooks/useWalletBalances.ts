@@ -1,8 +1,10 @@
 import {
+  getAssociatedTokenAddressSync,
   NATIVE_MINT,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
+import { PublicKey } from '@solana/web3.js';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -13,6 +15,10 @@ import {
 } from '@/domain/money/tokenValuation';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
+import {
+  fetchTokenPrices,
+  type TokenPriceBatch,
+} from '@/integrations/market-data/tokenPrices';
 
 export type WalletValuation = {
   readonly source: 'Jupiter Price API V3';
@@ -24,26 +30,25 @@ export type WalletValuation = {
 export type WalletBalance = {
   readonly holdings: readonly TokenHolding[];
   readonly solLamports: bigint;
+  /** Spendable balance in the wallet's canonical token account. Full holdings remain in `holdings`. */
   readonly usdcBaseUnits: bigint;
   readonly usdtBaseUnits: bigint;
   readonly valuation: WalletValuation | null;
 };
 
 export type WalletBalances = {
-  readonly publicWallet: WalletBalance;
-  readonly privateWallet: WalletBalance;
+  readonly publicWallet: WalletBalance | null;
+  readonly privateWallet: WalletBalance | null;
 };
 
 type RawWalletBalance = Omit<WalletBalance, 'valuation'>;
-
-type BalanceStatus = 'idle' | 'loading' | 'ready' | 'error';
-type PriceBatch = {
-  readonly prices: ReadonlyMap<string, string>;
-  readonly timestampMs: number;
+type TokenAccountHolding = TokenHolding & {
+  readonly address: string;
 };
 
-const PRICE_BATCH_SIZE = 50;
+type BalanceStatus = 'idle' | 'loading' | 'ready' | 'error';
 const REFRESH_INTERVAL_MS = 30_000;
+const PRICE_CACHE_MAX_AGE_MS = 120_000;
 const STARTUP_RETRY_LIMIT = 3;
 const STARTUP_RETRY_MS = 1_000;
 
@@ -56,15 +61,16 @@ export function useWalletBalances(input: {
   const [status, setStatus] = useState<BalanceStatus>('idle');
   const [refreshRevision, setRefreshRevision] = useState(0);
   const hasBalances = useRef(false);
+  const balancesRef = useRef<WalletBalances | null>(null);
+  const pricingRef = useRef<TokenPriceBatch | null>(null);
   const refresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
 
   useEffect(() => {
     hasBalances.current = false;
+    balancesRef.current = null;
     setBalances(null);
     setStatus(
-      input.privateAddress !== null &&
-      input.publicAddress !== null &&
-      input.signer !== null
+      (input.privateAddress !== null || input.publicAddress !== null) && input.signer !== null
         ? 'loading'
         : 'idle',
     );
@@ -73,11 +79,11 @@ export function useWalletBalances(input: {
   useFocusEffect(
     useCallback(() => {
       const config = readAppConfig();
+      const signer = input.signer;
       if (
         !config.ok ||
-        input.privateAddress === null ||
-        input.publicAddress === null ||
-        input.signer === null
+        (input.privateAddress === null && input.publicAddress === null) ||
+        signer === null
       ) {
         return undefined;
       }
@@ -93,51 +99,82 @@ export function useWalletBalances(input: {
         if (!hasBalances.current) setStatus('loading');
 
         try {
-          const [publicWallet, privateWallet] = await Promise.all([
-            readWalletBalance(
-              input.publicAddress!,
-              input.signer!,
-              config.value.api.rpcUrl,
-              config.value.perps.usdcMint,
-              config.value.perps.usdtMint,
-              controller.signal,
-            ),
-            readWalletBalance(
-              input.privateAddress!,
-              input.signer!,
-              config.value.api.rpcUrl,
-              config.value.perps.usdcMint,
-              config.value.perps.usdtMint,
-              controller.signal,
-            ),
+          const [publicResult, privateResult] = await Promise.allSettled([
+            input.publicAddress === null
+              ? Promise.resolve(null)
+              : readWalletBalance(
+                  input.publicAddress,
+                  signer,
+                  config.value.api.rpcUrl,
+                  config.value.perps.usdcMint,
+                  config.value.perps.usdtMint,
+                  controller.signal,
+                ),
+            input.privateAddress === null
+              ? Promise.resolve(null)
+              : readWalletBalance(
+                  input.privateAddress,
+                  signer,
+                  config.value.api.rpcUrl,
+                  config.value.perps.usdcMint,
+                  config.value.perps.usdtMint,
+                  controller.signal,
+                ),
           ]);
+          const previous = balancesRef.current;
+          const publicWallet = resolvedWallet(publicResult, previous?.publicWallet ?? null);
+          const privateWallet = resolvedWallet(privateResult, previous?.privateWallet ?? null);
+          if (publicWallet === null && privateWallet === null) {
+            throw firstRejected(publicResult, privateResult);
+          }
+
+          if (active) {
+            startupFailures = 0;
+            hasBalances.current = true;
+            const cachedPricing = currentPricing(pricingRef.current);
+            const raw = {
+              publicWallet: walletWithPricing(publicWallet, cachedPricing),
+              privateWallet: walletWithPricing(privateWallet, cachedPricing),
+            };
+            balancesRef.current = raw;
+            setBalances(raw);
+            setStatus('ready');
+          }
 
           const pricing = await fetchTokenPrices(
             uniqueMints([
-              ...publicWallet.holdings,
-              ...privateWallet.holdings,
-              ...(publicWallet.solLamports === 0n && privateWallet.solLamports === 0n
+              ...(publicWallet?.holdings ?? []),
+              ...(privateWallet?.holdings ?? []),
+              ...((publicWallet?.solLamports ?? 0n) === 0n &&
+                (privateWallet?.solLamports ?? 0n) === 0n
                 ? []
                 : [{ mint: NATIVE_MINT.toBase58(), baseUnits: 1n, decimals: 9 }]),
             ]),
             config.value.api.tokenPricesUrl,
             controller.signal,
-          );
+          ).catch((cause) => {
+            if (active && !controller?.signal.aborted) {
+              logWalletBalanceFailure(cause, startupFailures + 1, 'pricing');
+            }
+            return null;
+          });
 
           if (active) {
-            startupFailures = 0;
-            hasBalances.current = true;
-            setBalances({
-              publicWallet: withValuation(publicWallet, pricing),
-              privateWallet: withValuation(privateWallet, pricing),
-            });
-            setStatus('ready');
+            if (pricing !== null) {
+              pricingRef.current = pricing;
+              const valued = {
+                publicWallet: walletWithPricing(publicWallet, pricing),
+                privateWallet: walletWithPricing(privateWallet, pricing),
+              };
+              balancesRef.current = valued;
+              setBalances(valued);
+            }
           }
         } catch (cause) {
           if (active && !controller.signal.aborted && !hasBalances.current) {
             startupFailures += 1;
             setStatus(startupFailures >= STARTUP_RETRY_LIMIT ? 'error' : 'loading');
-            logWalletBalanceFailure(cause, startupFailures);
+            logWalletBalanceFailure(cause, startupFailures, 'wallets');
           }
         } finally {
           if (active) {
@@ -161,16 +198,44 @@ export function useWalletBalances(input: {
   return { balances, refresh, status };
 }
 
-function logWalletBalanceFailure(cause: unknown, attempt: number): void {
+function logWalletBalanceFailure(
+  cause: unknown,
+  attempt: number,
+  scope: 'pricing' | 'wallets',
+): void {
   if (!__DEV__) return;
   const value = typeof cause === 'object' && cause !== null
-    ? cause as { readonly code?: unknown; readonly name?: unknown }
+    ? cause as {
+        readonly code?: unknown;
+        readonly name?: unknown;
+        readonly status?: unknown;
+        readonly traceId?: unknown;
+      }
     : null;
   console.warn('[Perpal wallet balances failed]', {
     attempt,
+    scope,
     errorCode: typeof value?.code === 'string' ? value.code : 'unknown',
     errorName: cause instanceof Error ? cause.name : typeof value?.name === 'string' ? value.name : typeof cause,
+    ...(typeof value?.status === 'number' && Number.isInteger(value.status)
+      ? { status: value.status }
+      : {}),
+    ...(typeof value?.traceId === 'string' ? { traceId: value.traceId } : {}),
   });
+}
+
+function resolvedWallet(
+  result: PromiseSettledResult<RawWalletBalance | null>,
+  previous: WalletBalance | null,
+): RawWalletBalance | WalletBalance | null {
+  return result.status === 'fulfilled' ? result.value : previous;
+}
+
+function firstRejected(
+  ...results: readonly PromiseSettledResult<RawWalletBalance | null>[]
+): unknown {
+  return results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    ?.reason ?? new Error('Wallet balances are unavailable.');
 }
 
 async function readWalletBalance(
@@ -197,13 +262,14 @@ async function readWalletBalance(
   }
 
   const solLamports = BigInt(sol.value);
-  const holdings = mergeHoldings([...legacy, ...token2022]);
+  const tokenAccounts = [...legacy, ...token2022];
+  const holdings = mergeHoldings(tokenAccounts);
 
   return {
     holdings,
     solLamports,
-    usdcBaseUnits: holdingAmount(holdings, usdcMint),
-    usdtBaseUnits: holdingAmount(holdings, usdtMint),
+    usdcBaseUnits: associatedTokenAmount(tokenAccounts, owner, usdcMint),
+    usdtBaseUnits: associatedTokenAmount(tokenAccounts, owner, usdtMint),
   };
 }
 
@@ -213,9 +279,12 @@ async function readTokenHoldings(
   rpcUrl: string,
   signer: GatewayRequestSigner,
   signal: AbortSignal,
-): Promise<readonly TokenHolding[]> {
+): Promise<readonly TokenAccountHolding[]> {
   const result = await signedSolanaRpc<{
-    readonly value: readonly { readonly account: { readonly data: unknown } }[];
+    readonly value: readonly {
+      readonly pubkey: string;
+      readonly account: { readonly data: unknown };
+    }[];
   }>({
     method: 'getTokenAccountsByOwner',
     params: [owner, { programId }, { commitment: 'confirmed', encoding: 'jsonParsed' }],
@@ -224,7 +293,10 @@ async function readTokenHoldings(
     signer,
   });
 
-  return result.value.map((entry) => parseTokenHolding(entry.account.data, owner));
+  return result.value.map((entry) => ({
+    ...parseTokenHolding(entry.account.data, owner),
+    address: new PublicKey(entry.pubkey).toBase58(),
+  }));
 }
 
 function parseTokenHolding(value: unknown, owner: string): TokenHolding {
@@ -276,71 +348,32 @@ function mergeHoldings(holdings: readonly TokenHolding[]): readonly TokenHolding
   return [...merged.values()];
 }
 
-function holdingAmount(holdings: readonly TokenHolding[], mint: string): bigint {
-  return holdings.find((holding) => holding.mint === mint)?.baseUnits ?? 0n;
+function associatedTokenAmount(
+  accounts: readonly TokenAccountHolding[],
+  owner: string,
+  mint: string,
+): bigint {
+  const ownerKey = new PublicKey(owner);
+  const mintKey = new PublicKey(mint);
+  const addresses = new Set([
+    getAssociatedTokenAddressSync(mintKey, ownerKey, false, TOKEN_PROGRAM_ID).toBase58(),
+    getAssociatedTokenAddressSync(mintKey, ownerKey, false, TOKEN_2022_PROGRAM_ID).toBase58(),
+  ]);
+  return accounts.reduce(
+    (total, account) => account.mint === mint && addresses.has(account.address)
+      ? total + account.baseUnits
+      : total,
+    0n,
+  );
 }
 
 function uniqueMints(holdings: readonly TokenHolding[]): readonly string[] {
   return [...new Set(holdings.map((holding) => holding.mint))];
 }
 
-async function fetchTokenPrices(
-  mints: readonly string[],
-  tokenPricesUrl: string,
-  signal: AbortSignal,
-): Promise<PriceBatch> {
-  if (mints.length === 0) return { prices: new Map(), timestampMs: Date.now() };
-
-  const chunks = Array.from(
-    { length: Math.ceil(mints.length / PRICE_BATCH_SIZE) },
-    (_, index) => mints.slice(index * PRICE_BATCH_SIZE, (index + 1) * PRICE_BATCH_SIZE),
-  );
-  const batches = await Promise.all(
-    chunks.map((ids) => fetchPriceBatch(ids, tokenPricesUrl, signal)),
-  );
-
-  return {
-    prices: new Map(batches.flatMap((batch) => [...batch.prices.entries()])),
-    timestampMs: Math.min(...batches.map((batch) => batch.timestampMs)),
-  };
-}
-
-async function fetchPriceBatch(
-  ids: readonly string[],
-  tokenPricesUrl: string,
-  signal: AbortSignal,
-): Promise<PriceBatch> {
-  const url = new URL(tokenPricesUrl);
-  url.searchParams.set('ids', ids.join(','));
-  const response = await fetch(url, { headers: { accept: 'application/json' }, signal });
-  const payload = await response.json().catch(() => null) as unknown;
-  const body = object(payload);
-  const rawPrices = object(body.prices);
-
-  if (
-    !response.ok ||
-    body.source !== 'Jupiter Price API V3' ||
-    !Number.isSafeInteger(body.timestampMs) ||
-    (body.timestampMs as number) <= 0
-  ) {
-    throw new Error('Token prices are invalid.');
-  }
-
-  const allowed = new Set(ids);
-  const prices = new Map<string, string>();
-  for (const [mint, price] of Object.entries(rawPrices)) {
-    if (!allowed.has(mint) || typeof price !== 'string' || !/^\d+(?:\.\d{1,18})?$/u.test(price)) {
-      throw new Error('Token prices are invalid.');
-    }
-    prices.set(mint, price);
-  }
-
-  return { prices, timestampMs: body.timestampMs as number };
-}
-
 function withValuation(
   wallet: RawWalletBalance,
-  pricing: PriceBatch,
+  pricing: TokenPriceBatch,
 ): WalletBalance {
   const valuation = valueTokenHoldingsUsd(
     mergeHoldings([
@@ -359,4 +392,19 @@ function withValuation(
       timestampMs: pricing.timestampMs,
     },
   };
+}
+
+function walletWithPricing(
+  wallet: RawWalletBalance | WalletBalance | null,
+  pricing: TokenPriceBatch | null,
+): WalletBalance | null {
+  if (wallet === null) return null;
+  if (pricing !== null) return withValuation(wallet, pricing);
+  return { ...wallet, valuation: null };
+}
+
+function currentPricing(pricing: TokenPriceBatch | null): TokenPriceBatch | null {
+  return pricing !== null && Date.now() - pricing.timestampMs <= PRICE_CACHE_MAX_AGE_MS
+    ? pricing
+    : null;
 }

@@ -32,7 +32,6 @@ export type LegacyTransactionAuthority = {
 export async function readSubmittedTransactionStatus(input: {
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
-  readonly transactionAuthority?: LegacyTransactionAuthority;
   readonly signature: string;
   readonly signal?: AbortSignal;
 }): Promise<SubmittedTransactionStatus> {
@@ -78,6 +77,7 @@ export async function signAndSubmitLegacyTransaction(input: {
   readonly owner: string;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
+  readonly transactionAuthority?: LegacyTransactionAuthority;
   readonly unsignedTransaction: Uint8Array;
   readonly onSigned?: (
     signature: string,
@@ -269,7 +269,7 @@ export async function submitSignedLegacyTransaction(input: {
     !ed25519.verify(
       ownerSignature.signature,
       transaction.serializeMessage(),
-      input.signer.publicKey,
+      owner.toBytes(),
     )
   ) {
     throw new TransactionSigningError(

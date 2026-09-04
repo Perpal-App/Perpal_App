@@ -166,6 +166,7 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
           rpcUrl: input.config.api.rpcUrl,
           signer: input.gatewaySigner,
           withdrawalFeeBaseUnits: input.config.perps.pacificaWithdrawalFeeBaseUnits,
+          wsOrigin: input.config.perps.pacificaWsOrigin,
         });
       }
 

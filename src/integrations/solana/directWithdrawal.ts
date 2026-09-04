@@ -1,5 +1,4 @@
 import * as Crypto from 'expo-crypto';
-import { base64 } from '@scure/base';
 import { Buffer } from 'buffer';
 import {
   createAssociatedTokenAccountIdempotentInstruction,
@@ -9,14 +8,11 @@ import {
   getAssociatedTokenAddressSync,
   getExtensionTypes,
   NATIVE_MINT,
-  TOKEN_2022_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
   unpackMint,
 } from '@solana/spl-token';
-import { PublicKey, SystemProgram, Transaction, type AccountInfo } from '@solana/web3.js';
+import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
-import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import {
   removePendingTradeAction,
   writePendingTradeAction,
@@ -24,8 +20,25 @@ import {
 import {
   signAndSubmitLegacyTransaction,
   TransactionSigningError,
+  type LegacyTransactionAuthority,
   type SubmittedTransactionResult,
 } from '@/integrations/solana/signedLegacyTransaction';
+import {
+  accountInfo,
+  latestBlockhash,
+  minimumRent,
+  publicKey,
+  readAccount,
+  readOwnedTokenAccounts,
+  readSolBalance,
+  readTokenBalance,
+  simulate,
+  tokenProgram,
+  transactionFee,
+} from '@/integrations/solana/directWithdrawalRpc';
+import { DirectWithdrawalError } from '@/integrations/solana/directWithdrawalError';
+
+export { DirectWithdrawalError } from '@/integrations/solana/directWithdrawalError';
 
 const PLAN_LIFETIME_MS = 45_000;
 const UNSUPPORTED_TOKEN_2022_EXTENSIONS = new Set([
@@ -34,14 +47,6 @@ const UNSUPPORTED_TOKEN_2022_EXTENSIONS = new Set([
   ExtensionType.TransferFeeConfig,
   ExtensionType.TransferHook,
 ]);
-
-type RpcAccount = {
-  readonly data: readonly [string, 'base64'];
-  readonly executable: boolean;
-  readonly lamports: number;
-  readonly owner: string;
-  readonly rentEpoch?: number;
-};
 
 export type DirectWithdrawalPlan = {
   readonly amountBaseUnits: bigint;
@@ -55,19 +60,15 @@ export type DirectWithdrawalPlan = {
   readonly mint: string;
   readonly owner: string;
   readonly rentLamports: bigint;
-  readonly sourceTokenAccount: string | null;
+  readonly sourceTokenAccounts: readonly {
+    readonly address: string;
+    readonly amountBaseUnits: bigint;
+  }[];
   readonly symbol: string;
   readonly tokenAccountRentLamports: bigint;
   readonly tokenProgramId: string | null;
   readonly unsignedTransaction: Uint8Array;
 };
-
-export class DirectWithdrawalError extends Error {
-  constructor(message: string, readonly code: string) {
-    super(message);
-    this.name = 'DirectWithdrawalError';
-  }
-}
 
 export async function prepareDirectWithdrawal(input: {
   readonly amountBaseUnits: bigint | 'max';
@@ -80,14 +81,15 @@ export async function prepareDirectWithdrawal(input: {
   readonly signal?: AbortSignal;
   readonly signer: GatewayRequestSigner;
   readonly symbol: string;
+  readonly transactionAuthorityPublicKey?: Uint8Array;
 }): Promise<DirectWithdrawalPlan> {
-  const owner = publicKey(input.owner, 'Private wallet T');
+  const owner = publicKey(input.owner, 'Source wallet');
   const destination = publicKey(input.destinationAddress, 'Destination wallet');
   if (
     (input.amountBaseUnits !== 'max' && input.amountBaseUnits <= 0n) ||
     owner.equals(destination) ||
     !PublicKey.isOnCurve(destination.toBytes()) ||
-    !new PublicKey(input.signer.publicKey).equals(owner)
+    !new PublicKey(input.transactionAuthorityPublicKey ?? input.signer.publicKey).equals(owner)
   ) {
     throw new DirectWithdrawalError('Review the amount and destination wallet.', 'plan_invalid');
   }
@@ -102,7 +104,7 @@ export async function prepareDirectWithdrawal(input: {
     : input.amountBaseUnits;
   let destinationTokenAccount: string | null = null;
   let rentLamports = 0n;
-  let sourceTokenAccount: string | null = null;
+  let sourceTokenAccounts: DirectWithdrawalPlan['sourceTokenAccounts'] = [];
   let tokenAccountRentLamports = 0n;
   let tokenProgramId: string | null = null;
 
@@ -136,62 +138,66 @@ export async function prepareDirectWithdrawal(input: {
       );
     }
 
-    const source = getAssociatedTokenAddressSync(mint, owner, false, programId);
     const destinationAccount = getAssociatedTokenAddressSync(mint, destination, false, programId);
-    const [sourceAccount, targetAccount, accountRent] = await Promise.all([
-      readAccount(source.toBase58(), input),
+    const [ownedAccounts, targetAccount, accountRent] = await Promise.all([
+      readOwnedTokenAccounts(owner.toBase58(), mint.toBase58(), input),
       readAccount(destinationAccount.toBase58(), input),
       minimumRent(getAccountLenForMint(mintState), input),
     ]);
-    if (sourceAccount?.owner !== programId.toBase58()) {
-      throw new DirectWithdrawalError(`Private wallet T does not hold ${input.symbol}.`, 'balance_invalid');
+    const usableAccounts = ownedAccounts.filter((account) => account.amount > 0n);
+    if (usableAccounts.some(
+      (account) => account.programId !== programId.toBase58() || account.decimals !== input.decimals,
+    )) {
+      throw new DirectWithdrawalError('A source token account changed.', 'balance_invalid');
+    }
+    const sourceBalance = usableAccounts.reduce((total, account) => total + account.amount, 0n);
+    if (sourceBalance === 0n) {
+      throw new DirectWithdrawalError(`This wallet does not hold ${input.symbol}.`, 'balance_invalid');
     }
     if (targetAccount !== null && targetAccount.owner !== programId.toBase58()) {
       throw new DirectWithdrawalError('The destination token account is invalid.', 'destination_invalid');
     }
-    const sourceBalance = await readTokenBalance(source.toBase58(), input);
-    if (input.amountBaseUnits === 'max') amountBaseUnits = sourceBalance.amount;
+    if (input.amountBaseUnits === 'max') amountBaseUnits = sourceBalance;
     if (
       amountBaseUnits <= 0n ||
-      sourceBalance.amount < amountBaseUnits ||
-      sourceBalance.decimals !== input.decimals
+      sourceBalance < amountBaseUnits
     ) {
       throw new DirectWithdrawalError(
-        `Private wallet T does not hold enough ${input.symbol}.`,
+        `This wallet does not hold enough ${input.symbol}.`,
         'insufficient_token',
       );
     }
 
     tokenAccountRentLamports = accountRent;
     rentLamports = targetAccount === null ? accountRent : 0n;
-    sourceTokenAccount = source.toBase58();
+    sourceTokenAccounts = allocateTokenSources(usableAccounts, amountBaseUnits);
     destinationTokenAccount = destinationAccount.toBase58();
-    transaction.add(
-      createAssociatedTokenAccountIdempotentInstruction(
-        owner,
-        destinationAccount,
-        destination,
+    transaction.add(createAssociatedTokenAccountIdempotentInstruction(
+      owner,
+      destinationAccount,
+      destination,
+      mint,
+      programId,
+    ));
+    for (const source of sourceTokenAccounts) {
+      transaction.add(createTransferCheckedInstruction(
+        new PublicKey(source.address),
         mint,
-        programId,
-      ),
-      createTransferCheckedInstruction(
-        source,
-        mint,
         destinationAccount,
         owner,
-        amountBaseUnits,
+        source.amountBaseUnits,
         input.decimals,
         [],
         programId,
-      ),
-    );
+      ));
+    }
   }
 
   const feeLamports = await transactionFee(transaction, input);
   if (input.kind === 'native' && input.amountBaseUnits === 'max') {
     if (solBalance <= feeLamports) {
       throw new DirectWithdrawalError(
-        'Private wallet T does not have enough SOL to cover the network fee.',
+        'This wallet does not have enough SOL to cover the network fee.',
         'insufficient_sol',
       );
     }
@@ -207,8 +213,8 @@ export async function prepareDirectWithdrawal(input: {
   if (solBalance < requiredSolLamports) {
     throw new DirectWithdrawalError(
       input.kind === 'native'
-        ? 'Private wallet T needs enough SOL for the amount and network fee.'
-        : 'Private wallet T needs more SOL for the network fee and destination token-account rent.',
+        ? 'This wallet needs enough SOL for the amount and network fee.'
+        : 'This wallet needs more SOL for the network fee and destination token-account rent.',
       'insufficient_sol',
     );
   }
@@ -226,21 +232,35 @@ export async function prepareDirectWithdrawal(input: {
     mint: input.mint,
     owner: owner.toBase58(),
     rentLamports,
-    sourceTokenAccount,
+    sourceTokenAccounts,
     symbol: input.symbol,
     tokenAccountRentLamports,
     tokenProgramId,
-    unsignedTransaction: transaction.serialize({
+    unsignedTransaction: serializeWithdrawal(transaction, sourceTokenAccounts.length > 1),
+  };
+}
+
+function serializeWithdrawal(transaction: Transaction, splitAcrossAccounts: boolean): Uint8Array {
+  try {
+    return transaction.serialize({
       requireAllSignatures: false,
       verifySignatures: false,
-    }),
-  };
+    });
+  } catch {
+    throw new DirectWithdrawalError(
+      splitAcrossAccounts
+        ? 'This token is spread across too many accounts to send in one transaction.'
+        : 'The withdrawal transaction could not be prepared safely.',
+      splitAcrossAccounts ? 'transaction_too_large' : 'transaction_invalid',
+    );
+  }
 }
 
 export async function submitDirectWithdrawal(input: {
   readonly plan: DirectWithdrawalPlan;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
+  readonly transactionAuthority?: LegacyTransactionAuthority;
 }): Promise<SubmittedTransactionResult> {
   if (Date.now() >= input.plan.expiresAtMs) {
     throw new DirectWithdrawalError('The withdrawal preview expired. Review it again.', 'plan_expired');
@@ -250,11 +270,11 @@ export async function submitDirectWithdrawal(input: {
   const destinationExists = input.plan.destinationTokenAccount === null
     ? true
     : await readAccount(input.plan.destinationTokenAccount, input) !== null;
-  const [solBalance, tokenBalance] = await Promise.all([
+  const [solBalance, tokenBalances] = await Promise.all([
     readSolBalance(input.plan.owner, input),
-    input.plan.sourceTokenAccount === null
-      ? Promise.resolve(null)
-      : readTokenBalance(input.plan.sourceTokenAccount, input),
+    Promise.all(input.plan.sourceTokenAccounts.map((source) =>
+      readTokenBalance(source.address, input),
+    )),
   ]);
   const requiredSol = input.plan.feeLamports +
     (destinationExists ? 0n : input.plan.tokenAccountRentLamports) +
@@ -262,10 +282,10 @@ export async function submitDirectWithdrawal(input: {
   if (solBalance < requiredSol) {
     throw new DirectWithdrawalError('The SOL balance changed. Review a fresh withdrawal.', 'balance_changed');
   }
-  if (tokenBalance !== null && (
-    tokenBalance.amount < input.plan.amountBaseUnits ||
-    tokenBalance.decimals !== input.plan.decimals
-  )) {
+  if (tokenBalances.some((balance, index) => (
+    balance.amount < input.plan.sourceTokenAccounts[index]!.amountBaseUnits ||
+    balance.decimals !== input.plan.decimals
+  ))) {
     throw new DirectWithdrawalError(
       `The ${input.plan.symbol} balance changed. Review a fresh withdrawal.`,
       'balance_changed',
@@ -295,6 +315,9 @@ export async function submitDirectWithdrawal(input: {
       owner: input.plan.owner,
       rpcUrl: input.rpcUrl,
       signer: input.signer,
+      ...(input.transactionAuthority === undefined
+        ? {}
+        : { transactionAuthority: input.transactionAuthority }),
       unsignedTransaction: input.plan.unsignedTransaction,
     });
     if (result.status === 'confirmed') {
@@ -328,7 +351,7 @@ function assertReviewedTransaction(plan: DirectWithdrawalPlan): void {
     }));
   } else {
     if (
-      plan.sourceTokenAccount === null ||
+      plan.sourceTokenAccounts.length === 0 ||
       plan.destinationTokenAccount === null ||
       plan.tokenProgramId === null
     ) {
@@ -336,27 +359,26 @@ function assertReviewedTransaction(plan: DirectWithdrawalPlan): void {
     }
     const mint = new PublicKey(plan.mint);
     const programId = new PublicKey(plan.tokenProgramId);
-    const source = new PublicKey(plan.sourceTokenAccount);
     const destinationAccount = new PublicKey(plan.destinationTokenAccount);
-    expected.add(
-      createAssociatedTokenAccountIdempotentInstruction(
-        owner,
-        destinationAccount,
-        destination,
+    expected.add(createAssociatedTokenAccountIdempotentInstruction(
+      owner,
+      destinationAccount,
+      destination,
+      mint,
+      programId,
+    ));
+    for (const source of plan.sourceTokenAccounts) {
+      expected.add(createTransferCheckedInstruction(
+        new PublicKey(source.address),
         mint,
-        programId,
-      ),
-      createTransferCheckedInstruction(
-        source,
-        mint,
         destinationAccount,
         owner,
-        plan.amountBaseUnits,
+        source.amountBaseUnits,
         plan.decimals,
         [],
         programId,
-      ),
-    );
+      ));
+    }
   }
 
   if (!Buffer.from(actual.serializeMessage()).equals(Buffer.from(expected.serializeMessage()))) {
@@ -367,126 +389,20 @@ function assertReviewedTransaction(plan: DirectWithdrawalPlan): void {
   }
 }
 
-async function latestBlockhash(input: RpcInput): Promise<string> {
-  const response = await rpc<{ readonly value: { readonly blockhash: string } }>(
-    input,
-    'getLatestBlockhash',
-    [{ commitment: 'confirmed' }],
-  );
-  return response.value.blockhash;
-}
-
-async function readSolBalance(owner: string, input: RpcInput): Promise<bigint> {
-  const response = await rpc<{ readonly value: number }>(
-    input,
-    'getBalance',
-    [owner, { commitment: 'confirmed' }],
-  );
-  return integer(response.value, 'SOL balance');
-}
-
-async function readAccount(address: string, input: RpcInput): Promise<RpcAccount | null> {
-  const response = await rpc<{ readonly value: RpcAccount | null }>(
-    input,
-    'getAccountInfo',
-    [address, { commitment: 'confirmed', encoding: 'base64' }],
-  );
-  return response.value;
-}
-
-async function readTokenBalance(
-  tokenAccount: string,
-  input: RpcInput,
-): Promise<{ readonly amount: bigint; readonly decimals: number }> {
-  const response = await rpc<{
-    readonly value: { readonly amount: string; readonly decimals: number };
-  }>(input, 'getTokenAccountBalance', [tokenAccount, { commitment: 'confirmed' }]);
-  if (!/^\d+$/u.test(response.value.amount) || !Number.isInteger(response.value.decimals)) {
-    throw new DirectWithdrawalError('The token balance is invalid.', 'balance_invalid');
+function allocateTokenSources(
+  accounts: readonly { readonly address: string; readonly amount: bigint }[],
+  amount: bigint,
+): DirectWithdrawalPlan['sourceTokenAccounts'] {
+  let remaining = amount;
+  const sources: { address: string; amountBaseUnits: bigint }[] = [];
+  for (const account of accounts) {
+    if (remaining === 0n) break;
+    const next = account.amount < remaining ? account.amount : remaining;
+    if (next > 0n) sources.push({ address: account.address, amountBaseUnits: next });
+    remaining -= next;
   }
-  return { amount: BigInt(response.value.amount), decimals: response.value.decimals };
-}
-
-async function minimumRent(bytes: number, input: RpcInput): Promise<bigint> {
-  return integer(await rpc<number>(
-    input,
-    'getMinimumBalanceForRentExemption',
-    [bytes, { commitment: 'confirmed' }],
-  ), 'token-account rent');
-}
-
-async function transactionFee(transaction: Transaction, input: RpcInput): Promise<bigint> {
-  const response = await rpc<{ readonly value: number | null }>(
-    input,
-    'getFeeForMessage',
-    [base64.encode(transaction.serializeMessage()), { commitment: 'confirmed' }],
-  );
-  if (response.value === null) {
-    throw new DirectWithdrawalError('The network fee could not be verified.', 'fee_invalid');
+  if (remaining !== 0n) {
+    throw new DirectWithdrawalError('The token balance changed. Review a fresh withdrawal.', 'balance_changed');
   }
-  return integer(response.value, 'network fee');
-}
-
-async function simulate(transaction: Transaction, input: RpcInput): Promise<void> {
-  const response = await rpc<{ readonly value: { readonly err: unknown } }>(
-    input,
-    'simulateTransaction',
-    [
-      base64.encode(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })),
-      { commitment: 'confirmed', encoding: 'base64', sigVerify: false },
-    ],
-  );
-  if (response.value.err !== null) {
-    throw new DirectWithdrawalError(
-      'The direct withdrawal preview failed. No funds were moved.',
-      'simulation_failed',
-    );
-  }
-}
-
-type RpcInput = {
-  readonly rpcUrl: string;
-  readonly signal?: AbortSignal;
-  readonly signer: GatewayRequestSigner;
-};
-
-async function rpc<T>(input: RpcInput, method: string, params: unknown): Promise<T> {
-  return signedSolanaRpc<T>({
-    method,
-    params,
-    rpcUrl: input.rpcUrl,
-    signer: input.signer,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
-}
-
-function tokenProgram(owner: string): PublicKey {
-  if (owner === TOKEN_PROGRAM_ID.toBase58()) return TOKEN_PROGRAM_ID;
-  if (owner === TOKEN_2022_PROGRAM_ID.toBase58()) return TOKEN_2022_PROGRAM_ID;
-  throw new DirectWithdrawalError('The selected mint is not an SPL token.', 'mint_invalid');
-}
-
-function accountInfo(value: RpcAccount): AccountInfo<Buffer> {
-  return {
-    data: Buffer.from(base64.decode(value.data[0])),
-    executable: value.executable,
-    lamports: Number(integer(value.lamports, 'mint account balance')),
-    owner: new PublicKey(value.owner),
-    ...(value.rentEpoch === undefined ? {} : { rentEpoch: value.rentEpoch }),
-  };
-}
-
-function integer(value: number, label: string): bigint {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new DirectWithdrawalError(`Solana returned an invalid ${label}.`, 'rpc_invalid');
-  }
-  return BigInt(value);
-}
-
-function publicKey(value: string, label: string): PublicKey {
-  try {
-    return new PublicKey(value);
-  } catch {
-    throw new DirectWithdrawalError(`${label} is invalid.`, 'address_invalid');
-  }
+  return sources;
 }

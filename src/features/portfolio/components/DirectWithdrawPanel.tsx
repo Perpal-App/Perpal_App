@@ -1,28 +1,45 @@
+import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Text, TextInput, View } from 'react-native';
 import { PublicKey } from '@solana/web3.js';
 
 import { ActionButton } from '@/components/ui/ActionButton';
 import { readAppConfig } from '@/config/appConfig';
+import { directWithdrawPanelStyles as styles } from '@/features/portfolio/components/directWithdrawPanelStyles';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
 import {
   formatTokenAmount,
-  listWalletTokens,
   parseTokenAmount,
 } from '@/features/portfolio/components/withdrawalAssets';
-import { listTradingCollateralOptions } from '@/integrations/perps/providerCollateral';
+import {
+  directErrorMessage,
+  directWithdrawalTokens,
+  maxCostMessage,
+  pacificaReleaseRequirement,
+  publicTransactionAuthority,
+  shortAddress,
+  sol,
+  walletAssetBalance,
+  type DirectWithdrawalSource,
+  type PacificaReleaseRequirement,
+} from '@/features/portfolio/components/directWithdrawPanelSupport';
+import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import { showPacificaReleaseConfirmation } from '@/features/portfolio/components/pacificaReleaseConfirmation';
+import {
+  ensurePacificaCollateralInWallet,
+  pendingPacificaWithdrawalBaseUnits,
+  resumePacificaCollateralWithdrawalToWallet,
+} from '@/integrations/perps/pacifica/pacificaWithdrawal';
 import { reconcilePendingTradeAction } from '@/integrations/perps/tradeActionRecovery';
 import {
-  DirectWithdrawalError,
   prepareDirectWithdrawal,
   submitDirectWithdrawal,
   type DirectWithdrawalPlan,
 } from '@/integrations/solana/directWithdrawal';
-import { TransactionSigningError } from '@/integrations/solana/signedLegacyTransaction';
 import { publishInAppNotification } from '@/storage/inAppNotifications';
 import { showAppToast } from '@/storage/appToast';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Phase = 'idle' | 'quoting' | 'preparing' | 'reviewing' | 'submitting' | 'pending';
@@ -31,33 +48,46 @@ export function DirectWithdrawPanel({
   balances,
   mainWalletAddress,
   onBalancesChanged,
+  onPacificaRefresh,
+  snapshot = null,
+  source = 'private',
 }: {
   readonly balances: WalletBalances | null;
   readonly mainWalletAddress: string | null;
-  readonly onBalancesChanged: () => void;
+  readonly onBalancesChanged: () => void | Promise<void>;
+  readonly onPacificaRefresh?: () => void | Promise<void>;
+  readonly snapshot?: PacificaPortfolioSnapshot | null;
+  readonly source?: DirectWithdrawalSource;
 }) {
   const config = readAppConfig();
+  const embeddedWallet = useEmbeddedSolanaWallet();
   const session = useTradingSession();
   const [amount, setAmount] = useState('');
   const [chosenId, setChosenId] = useState('');
-  const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>('privy');
+  const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>(
+    source === 'public' ? 'external' : 'privy',
+  );
   const [externalAddress, setExternalAddress] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [withdrawMaximum, setWithdrawMaximum] = useState(false);
   const controller = useRef<AbortController | null>(null);
-  const tokens = useMemo(() => directTokens(balances), [balances]);
+  const tokens = useMemo(
+    () => directWithdrawalTokens(balances, source, snapshot),
+    [balances, snapshot, source],
+  );
   const selected = tokens.find((token) => token.id === chosenId) ?? tokens[0] ?? null;
   const asset = selected?.asset ?? null;
   const availableBaseUnits = selected?.baseUnits ?? null;
   const running = phase !== 'idle';
+  const owner = source === 'public' ? mainWalletAddress : session.address;
 
   useEffect(() => () => controller.current?.abort(), []);
 
   useEffect(() => {
-    if (!config.ok || session.address === null || session.signer === null) return;
+    if (!config.ok || owner === null || session.signer === null) return;
     const abort = new AbortController();
     void reconcilePendingTradeAction({
-      owner: session.address,
+      owner,
       provider: 'wallet-withdrawal',
       rpcUrl: config.value.api.rpcUrl,
       signal: abort.signal,
@@ -81,7 +111,7 @@ export function DirectWithdrawPanel({
         setPhase('idle');
         showAppToast({
           outcome: 'info', title: 'Withdrawal not confirmed',
-          message: 'The signed transfer expired. The amount remains in your private balance.',
+          message: 'The signed transfer expired. The amount remains in the source wallet.',
         });
       }
     }).catch((cause) => {
@@ -94,7 +124,90 @@ export function DirectWithdrawPanel({
       });
     });
     return () => abort.abort();
-  }, [config, onBalancesChanged, session.address, session.signer]);
+  }, [config, onBalancesChanged, owner, session.signer]);
+
+  const buildSolanaReview = async (input: {
+    readonly amountBaseUnits: bigint | 'max';
+    readonly destinationAddress: string;
+    readonly quoteOnly: boolean;
+    readonly signal: AbortSignal;
+  }) => {
+    if (!config.ok || owner === null || session.signer === null || asset === null) {
+      throw new Error('Withdrawal services are still loading.');
+    }
+    const plan = await prepareDirectWithdrawal({
+      amountBaseUnits: input.amountBaseUnits,
+      decimals: asset.decimals,
+      destinationAddress: input.destinationAddress,
+      kind: asset.kind,
+      mint: asset.mint,
+      owner,
+      rpcUrl: config.value.api.rpcUrl,
+      signal: input.signal,
+      signer: session.signer,
+      symbol: asset.symbol,
+      ...(source === 'public'
+        ? { transactionAuthorityPublicKey: new PublicKey(owner).toBytes() }
+        : {}),
+    });
+    if (input.signal.aborted) return;
+    if (input.quoteOnly) {
+      setAmount(formatTokenAmount(plan.amountBaseUnits, plan.decimals));
+      setWithdrawMaximum(true);
+      setPhase('idle');
+      showAppToast({ outcome: 'info', title: 'Maximum calculated', message: maxCostMessage(plan) });
+      return;
+    }
+    review(plan);
+  };
+
+  const releasePacificaAndContinue = async (input: {
+    readonly amountBaseUnits: bigint | 'max';
+    readonly destinationAddress: string;
+    readonly quoteOnly: boolean;
+    readonly release: PacificaReleaseRequirement;
+    readonly signal: AbortSignal;
+  }) => {
+    if (!config.ok || session.address === null || session.signer === null) return;
+    setPhase('preparing');
+    const withdrawalInput = {
+      account: session.address,
+      apiOrigin: config.value.perps.pacificaApiOrigin,
+      mint: config.value.perps.usdcMint,
+      rpcUrl: config.value.api.rpcUrl,
+      signer: session.signer,
+      signal: input.signal,
+      withdrawalFeeBaseUnits: config.value.perps.pacificaWithdrawalFeeBaseUnits,
+      wsOrigin: config.value.perps.pacificaWsOrigin,
+    };
+    try {
+      if (input.release.kind === 'resume') {
+        await resumePacificaCollateralWithdrawalToWallet(withdrawalInput);
+      } else {
+        await ensurePacificaCollateralInWallet(
+          input.release.targetWalletBalanceBaseUnits,
+          withdrawalInput,
+        );
+      }
+      if (input.signal.aborted) return;
+      await Promise.all([
+        onBalancesChanged(),
+        onPacificaRefresh?.(),
+      ]);
+      await buildSolanaReview(input);
+    } catch (cause) {
+      if (!input.signal.aborted) {
+        setPhase('idle');
+        onBalancesChanged();
+        onPacificaRefresh?.();
+        showAppToast({
+          outcome: 'error',
+          title: 'Withdrawal unavailable',
+          message: directErrorMessage(cause),
+        });
+      }
+    }
+  };
 
   const prepare = async (
     quoteOnly = false,
@@ -103,14 +216,15 @@ export function DirectWithdrawPanel({
     if (
       !config.ok ||
       session.status !== 'ready' ||
-      session.address === null ||
+      owner === null ||
       session.signer === null ||
+      selected === null ||
       asset === null ||
       availableBaseUnits === null
     ) {
       showAppToast({
         outcome: 'error', title: 'Withdrawal unavailable',
-        message: 'Private wallet balances are still loading.',
+        message: `${source === 'public' ? 'Public wallet' : 'Private'} balances are still loading.`,
       });
       return;
     }
@@ -135,13 +249,27 @@ export function DirectWithdrawPanel({
       return;
     }
 
+    const privateUsdc = source === 'private' && asset.kind === 'spl' &&
+      asset.mint === config.value.perps.usdcMint;
+    if (quoteOnly && privateUsdc) {
+      setAmount(formatTokenAmount(availableBaseUnits, asset.decimals));
+      setWithdrawMaximum(false);
+      setPhase('idle');
+      showAppToast({
+        outcome: 'info',
+        title: 'Maximum selected',
+        message: `${formatTokenAmount(availableBaseUnits, asset.decimals)} USDC includes withdrawable Pacifica funds. Fees are reviewed before either step.`,
+      });
+      return;
+    }
+
     controller.current?.abort();
     const abort = new AbortController();
     controller.current = abort;
     setPhase(quoteOnly ? 'quoting' : 'preparing');
     try {
       const pending = await reconcilePendingTradeAction({
-        owner: session.address,
+        owner,
         provider: 'wallet-withdrawal',
         rpcUrl: config.value.api.rpcUrl,
         signal: abort.signal,
@@ -165,31 +293,44 @@ export function DirectWithdrawPanel({
         return;
       }
 
-      const plan = await prepareDirectWithdrawal({
-        amountBaseUnits,
-        decimals: asset.decimals,
-        destinationAddress,
-        kind: asset.kind,
-        mint: asset.mint,
-        owner: session.address,
-        rpcUrl: config.value.api.rpcUrl,
-        signal: abort.signal,
-        signer: session.signer,
-        symbol: asset.symbol,
-      });
-      if (abort.signal.aborted) return;
-      if (quoteOnly) {
-        setAmount(formatTokenAmount(plan.amountBaseUnits, plan.decimals));
-        setWithdrawMaximum(true);
-        setPhase('idle');
-        showAppToast({
-          outcome: 'info',
-          title: 'Maximum calculated',
-          message: maxCostMessage(plan),
+      if (privateUsdc && session.address !== null) {
+        const pendingProviderAmount = await pendingPacificaWithdrawalBaseUnits(session.address);
+        const targetWalletBalanceBaseUnits = amountBaseUnits === 'max'
+          ? availableBaseUnits
+          : amountBaseUnits;
+        const release = pacificaReleaseRequirement({
+          feeBaseUnits: config.value.perps.pacificaWithdrawalFeeBaseUnits,
+          pendingBaseUnits: pendingProviderAmount,
+          targetWalletBalanceBaseUnits,
+          walletBaseUnits: walletAssetBalance(balances?.privateWallet, selected),
         });
-        return;
+        if (release !== null) {
+          setPhase('reviewing');
+          showPacificaReleaseConfirmation({
+            feeBaseUnits: config.value.perps.pacificaWithdrawalFeeBaseUnits,
+            release,
+            onCancel: () => {
+              abort.abort();
+              setPhase('idle');
+            },
+            onConfirm: () => void releasePacificaAndContinue({
+              amountBaseUnits,
+              destinationAddress,
+              quoteOnly,
+              release,
+              signal: abort.signal,
+            }),
+          });
+          return;
+        }
       }
-      review(plan);
+
+      await buildSolanaReview({
+        amountBaseUnits,
+        destinationAddress,
+        quoteOnly,
+        signal: abort.signal,
+      });
     } catch (cause) {
       if (!abort.signal.aborted) {
         setPhase('idle');
@@ -207,7 +348,7 @@ export function DirectWithdrawPanel({
     Alert.alert(
       `Send ${plan.symbol} directly?`,
       `Amount: ${formatTokenAmount(plan.amountBaseUnits, plan.decimals)} ${plan.symbol}\n` +
-      `Destination: ${short(plan.destinationAddress)}\n` +
+      `Destination: ${shortAddress(plan.destinationAddress)}\n` +
       `Network fee: ${sol(plan.feeLamports)}${rent}\n` +
       'This public route is visible on Solana and does not use Umbra or charge an Umbra registration fee. The transfer is atomic: if it fails, the amount remains available.',
       [
@@ -222,10 +363,14 @@ export function DirectWithdrawPanel({
     if (!config.ok || session.signer === null) return;
     setPhase('submitting');
     try {
+      const transactionAuthority = source === 'public'
+        ? await publicTransactionAuthority(plan.owner, embeddedWallet)
+        : undefined;
       const result = await submitDirectWithdrawal({
         plan,
         rpcUrl: config.value.api.rpcUrl,
         signer: session.signer,
+        ...(transactionAuthority === undefined ? {} : { transactionAuthority }),
       });
       onBalancesChanged();
       if (result.status === 'confirmed') {
@@ -234,7 +379,7 @@ export function DirectWithdrawPanel({
         setPhase('idle');
         publishInAppNotification({
           kind: 'withdrawal', outcome: 'success', title: 'Direct withdrawal confirmed',
-          message: `${formatTokenAmount(plan.amountBaseUnits, plan.decimals)} ${plan.symbol} reached ${short(plan.destinationAddress)}.`,
+          message: `${formatTokenAmount(plan.amountBaseUnits, plan.decimals)} ${plan.symbol} reached ${shortAddress(plan.destinationAddress)}.`,
         });
       } else {
         setPhase('pending');
@@ -255,12 +400,17 @@ export function DirectWithdrawPanel({
 
   return (
     <View style={styles.panel}>
-      <Text accessibilityRole="header" style={styles.title}>Direct withdrawal</Text>
-      <Text style={styles.note}>
-        Sends directly from your private balance. Return provider funds first. Failed transfers keep the amount available; Solana may still charge a network fee.
+      <Text accessibilityRole="header" style={styles.title}>
+        {source === 'public' ? 'Send' : 'Direct withdrawal'}
       </Text>
-      <View style={styles.buttons}>
+      <Text style={styles.note}>
+        {source === 'public'
+          ? 'Send supported tokens. Fees and account rent are shown before approval.'
+          : 'Pacifica USDC is released automatically when needed.'}
+      </Text>
+      {source === 'private' ? <View style={styles.buttons}>
         <ActionButton
+          disabled={running}
           label="Public wallet"
           onPress={() => setDestinationMode('privy')}
           selected={destinationMode === 'privy'}
@@ -268,13 +418,14 @@ export function DirectWithdrawPanel({
           tone={destinationMode === 'privy' ? 'accent' : 'neutral'}
         />
         <ActionButton
+          disabled={running}
           label="Other wallet"
           onPress={() => setDestinationMode('external')}
           selected={destinationMode === 'external'}
           style={styles.button}
           tone={destinationMode === 'external' ? 'accent' : 'neutral'}
         />
-      </View>
+      </View> : null}
       <View style={styles.amountRow}>
         <TextInput
           accessibilityLabel={`${asset?.symbol ?? 'Token'} withdrawal amount`}
@@ -311,7 +462,7 @@ export function DirectWithdrawPanel({
           tone="neutral"
         />
       </View>
-      {destinationMode === 'external' ? (
+      {source === 'public' || destinationMode === 'external' ? (
         <TextInput
           accessibilityLabel="Destination Solana wallet"
           autoCapitalize="none"
@@ -335,72 +486,10 @@ export function DirectWithdrawPanel({
             ? 'Checking fees'
             : phase === 'submitting'
               ? 'Submitting withdrawal'
-              : 'Review direct withdrawal'}
+              : source === 'public' ? 'Review send' : 'Review direct withdrawal'}
         loading={phase === 'preparing' || phase === 'submitting'}
         onPress={() => void prepare()}
       />
     </View>
   );
 }
-
-function directTokens(balances: WalletBalances | null) {
-  const config = readAppConfig();
-  return listWalletTokens(
-    balances?.privateWallet ?? null,
-    config.ok
-      ? listTradingCollateralOptions(config.value.perps.usdcMint, config.value.perps.usdtMint)
-      : [],
-  );
-}
-
-function directErrorMessage(cause: unknown): string {
-  if (cause instanceof DirectWithdrawalError) return cause.message;
-  if (cause instanceof TransactionSigningError) {
-    if (cause.code === 'transaction_failed') {
-      return 'The transfer failed on-chain. The amount remains available; Solana may still charge a network fee.';
-    }
-    if (cause.code === 'submission_rejected') {
-      return 'Solana rejected the transfer before submission. The amount remains available.';
-    }
-    if (cause.code === 'blockhash_expired') return 'The withdrawal preview expired. Review it again.';
-    if (cause.code.includes('signature')) return 'The withdrawal was not approved. No funds were moved.';
-  }
-  return 'The direct withdrawal did not complete. Wallet balances were refreshed from Solana.';
-}
-
-function sol(lamports: bigint): string {
-  return `${formatTokenAmount(lamports, 9)} SOL`;
-}
-
-function maxCostMessage(plan: DirectWithdrawalPlan): string {
-  const rent = plan.rentLamports > 0n
-    ? ` Recipient token-account rent: ${sol(plan.rentLamports)}.`
-    : '';
-  return `Max: ${formatTokenAmount(plan.amountBaseUnits, plan.decimals)} ${plan.symbol}. ` +
-    `Network fee: ${sol(plan.feeLamports)}.${rent} Costs are checked again before signing.`;
-}
-
-function short(address: string): string {
-  return `${address.slice(0, 5)}…${address.slice(-5)}`;
-}
-
-const styles = StyleSheet.create({
-  panel: { gap: spacing.md },
-  title: { ...typography.heading, color: colors.textPrimary },
-  note: { ...typography.bodyCompact, color: colors.textSecondary },
-  buttons: { flexDirection: 'row', gap: spacing.sm },
-  button: { flex: 1 },
-  amountRow: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs },
-  input: {
-    minHeight: layout.minTouchTarget,
-    paddingHorizontal: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.sm,
-    color: colors.textPrimary,
-    backgroundColor: colors.background,
-    ...typography.bodyCompact,
-  },
-  amountInput: { flex: 1, minWidth: 0 },
-  max: { minWidth: 64 },
-});

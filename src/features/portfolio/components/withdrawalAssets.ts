@@ -17,6 +17,7 @@ export function listWalletTokens(
   if (wallet === null) return [];
 
   const known = new Map(configured.map((asset) => [asset.mint, asset]));
+  const rank = new Map(configured.map((asset, index) => [asset.mint, index]));
   const nativeMint = NATIVE_MINT.toBase58();
   const tokens = wallet.holdings.flatMap((holding): WithdrawableToken[] => {
     if (holding.baseUnits <= 0n) return [];
@@ -43,7 +44,15 @@ export function listWalletTokens(
     });
   }
 
-  return tokens;
+  return tokens.sort((left, right) => {
+    if (left.asset.kind === 'native') return right.asset.kind === 'native' ? 0 : -1;
+    if (right.asset.kind === 'native') return 1;
+    const leftRank = rank.get(left.asset.mint) ?? configured.length;
+    const rightRank = rank.get(right.asset.mint) ?? configured.length;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return left.asset.symbol.localeCompare(right.asset.symbol) ||
+      left.asset.mint.localeCompare(right.asset.mint);
+  });
 }
 
 export function parseTokenAmount(value: string, decimals: number): bigint {

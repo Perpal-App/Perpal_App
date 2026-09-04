@@ -1,7 +1,8 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58 } from '@scure/base';
-import { PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 
+import type { LegacyTransactionAuthority } from '@/integrations/solana/signedLegacyTransaction';
 import type { VersionedTransactionAuthority } from '@/integrations/solana/signedVersionedTransaction';
 
 export type PrivySolanaTransactionProvider = {
@@ -9,6 +10,13 @@ export type PrivySolanaTransactionProvider = {
     readonly method: 'signTransaction';
     readonly params: { readonly transaction: VersionedTransaction };
   }): Promise<{ readonly signedTransaction: VersionedTransaction }>;
+};
+
+export type PrivySolanaLegacyTransactionProvider = {
+  request(input: {
+    readonly method: 'signTransaction';
+    readonly params: { readonly transaction: Transaction };
+  }): Promise<{ readonly signedTransaction: Transaction }>;
 };
 
 /**
@@ -45,6 +53,48 @@ export function createPrivyVersionedTransactionAuthority(input: {
 
       if (
         !equalBytes(signedTransaction.message.serialize(), message) ||
+        signature === undefined ||
+        signature.length !== 64 ||
+        !ed25519.verify(signature, message, publicKeyBytes)
+      ) {
+        throw new Error('Privy returned an invalid public-wallet transaction signature.');
+      }
+
+      return signedTransaction;
+    },
+  };
+}
+
+export function createPrivyLegacyTransactionAuthority(input: {
+  readonly address: string;
+  readonly provider: PrivySolanaLegacyTransactionProvider;
+}): LegacyTransactionAuthority {
+  const publicKey = new PublicKey(input.address);
+  const publicKeyBytes = publicKey.toBytes();
+
+  return {
+    publicKey: publicKeyBytes,
+    signTransaction: async (transaction) => {
+      const message = transaction.serializeMessage();
+      if (
+        transaction.signatures.length !== 1 ||
+        !transaction.signatures[0]?.publicKey.equals(publicKey)
+      ) {
+        throw new Error('The public-wallet transfer requested an unexpected signer.');
+      }
+
+      const { signedTransaction } = await input.provider.request({
+        method: 'signTransaction',
+        params: { transaction },
+      });
+      const signature = signedTransaction.signatures.find(
+        (entry) => entry.publicKey.equals(publicKey),
+      )?.signature;
+
+      if (
+        !equalBytes(signedTransaction.serializeMessage(), message) ||
+        signedTransaction.signatures.length !== 1 ||
+        signature === null ||
         signature === undefined ||
         signature.length !== 64 ||
         !ed25519.verify(signature, message, publicKeyBytes)
