@@ -1,4 +1,5 @@
 import type { PerpsProviderId } from '@/config/appConfig';
+import { recordClientTelemetry } from '@/integrations/observability/clientTelemetry';
 
 export function logTradeError(
   provider: PerpsProviderId,
@@ -19,4 +20,10 @@ export function logTradeError(
       .replace(/https?:\/\/\S+/giu, '[url]')
       .replace(/\b[1-9A-HJ-NP-Za-km-z]{32,88}\b/gu, '[address]'),
   }));
+  recordClientTelemetry({
+    durationMs: 0,
+    errorCode: code,
+    operation: `trade.${provider}.${phase}`,
+    outcome: 'error',
+  });
 }

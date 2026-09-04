@@ -23,18 +23,17 @@ import { AppToastHost } from '@/components/feedback/AppToastHost';
 import { PressableScale } from '@/components/ui/PressableScale';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { PrivateFundingPanel } from '@/features/account/private-funding';
+import { WalletAssetsPanel } from '@/features/portfolio/components/WalletAssetsPanel';
 import { WalletSwapPanel } from '@/features/portfolio/components/WalletSwapPanel';
-import { DirectWithdrawPanel } from '@/features/portfolio/components/DirectWithdrawPanel';
-import { WithdrawPanel } from '@/features/portfolio/components/WithdrawPanel';
+import { WalletWithdrawPanel } from '@/features/portfolio/components/WalletWithdrawPanel';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, layout, motion, radii, spacing } from '@/theme/tokens';
-import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 export type FundsRequest =
+  | { readonly mode: 'assets' }
   | { readonly mode: 'deposit' }
-  | { readonly mode: 'private-withdraw' }
-  | { readonly mode: 'public-send' }
-  | { readonly mode: 'swap'; readonly scope: 'private' | 'public' };
+  | { readonly mode: 'swap' }
+  | { readonly mode: 'withdraw' };
 
 /**
  * Share of the sheet's own height a release must be heading past for it to close.
@@ -68,7 +67,7 @@ const BACKDROP_GAP = spacing.xxl;
 const SCRIM_OPACITY = 0.72;
 
 /**
- * The deposit and withdraw panels, in a sheet that can be dragged down to close.
+ * Portfolio actions and asset balances, in a sheet that can be dragged down to close.
  *
  * Dragging did nothing before, and it took two fixes rather than one. There was no pan gesture at all
  * — the grabber was a decoration — and installing one would still have received no events: a React
@@ -101,7 +100,6 @@ export function FundsSheet({
   readonly snapshot: PacificaPortfolioSnapshot | null;
 }) {
   const reduceMotion = useReducedMotion();
-  const session = useTradingSession();
   // `mounted` keeps the modal in the tree; `offset` is where the sheet sits. A dismissal has to finish
   // travelling before the modal can unmount, so one boolean cannot express both.
   const [mounted, setMounted] = useState(false);
@@ -228,7 +226,7 @@ export function FundsSheet({
       <GestureHandlerRootView style={styles.root}>
         <Animated.View style={[styles.scrim, scrimStyle]}>
           <Pressable
-            accessibilityLabel="Close funds panel"
+            accessibilityLabel="Close portfolio panel"
             accessibilityRole="button"
             onPress={requestClose}
             style={StyleSheet.absoluteFill}
@@ -280,28 +278,22 @@ export function FundsSheet({
                       tradingReady
                     />
                   ) : null}
-                  {displayedRequest?.mode === 'private-withdraw' ? (
-                    <WithdrawPanel
+                  {displayedRequest?.mode === 'withdraw' ? (
+                    <WalletWithdrawPanel
                       balances={balances}
                       onBalancesChanged={onBalancesChanged}
                       onPacificaRefresh={onPacificaRefresh}
                       snapshot={snapshot}
                     />
                   ) : null}
-                  {displayedRequest?.mode === 'public-send' ? (
-                    <DirectWithdrawPanel
-                      balances={balances}
-                      mainWalletAddress={session.mainWalletAddress}
-                      onBalancesChanged={onBalancesChanged}
-                      source="public"
-                    />
-                  ) : null}
                   {displayedRequest?.mode === 'swap' ? (
                     <WalletSwapPanel
                       balances={balances}
-                      initialScope={displayedRequest.scope}
                       onBalancesChanged={onBalancesChanged}
                     />
+                  ) : null}
+                  {displayedRequest?.mode === 'assets' ? (
+                    <WalletAssetsPanel balances={balances} snapshot={snapshot} />
                   ) : null}
                 </ScrollView>
               </View>

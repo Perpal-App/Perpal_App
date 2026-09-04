@@ -1,24 +1,27 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
 
+import { EyeIcon } from '@/assets/svg/EyeIcon';
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { PressableScale } from '@/components/ui/PressableScale';
 import {
-  addAmounts,
-  amountFromBaseUnits,
-  formatDetailedUsd,
-  parseAmount,
-  subtractAmounts,
-  type Amount,
-} from '@/domain/money/amount';
+  amountTone,
+  money,
+  percent,
+  privateFunds,
+  signedMoney,
+  sumAmounts,
+  unrealizedPnl,
+  unrealizedRate,
+  walletFunds,
+  walletLabel,
+} from '@/domain/portfolio/accountFigures';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 /** Stands in for every figure while balances are hidden. */
 const MASK = '••••••';
-const EYE_SIZE = 22;
 /** Invisible box around the eye. With `hitSlop` on top it clears the 48pt minimum target. */
 const REVEAL_SIZE = 34;
 
@@ -55,7 +58,7 @@ export function AccountOverviewCard({
 
   const publicBalance = walletFunds(balances?.publicWallet ?? null);
   const privateBalance = privateFunds(balances, portfolio);
-  const total = sum(publicBalance, privateBalance);
+  const total = sumAmounts(publicBalance, privateBalance);
   const pnl = unrealizedPnl(portfolio);
   const pnlRate = unrealizedRate(portfolio, pnl);
 
@@ -143,7 +146,7 @@ export function AccountOverviewCard({
         <Part
           hidden={hidden}
           label="PnL"
-          tone={pnl === null || pnl.baseUnits === 0n ? 'plain' : pnl.baseUnits > 0n ? 'positive' : 'negative'}
+          tone={amountTone(pnl)}
           value={signedMoney(pnl)}
         />
       </View>
@@ -215,136 +218,6 @@ function Part({
       )}
     </View>
   );
-}
-
-/**
- * A rounded eye: an almond outline, a filled pupil, and a stroke across both when hidden.
- *
- * The outline is two mirrored cubics rather than the flatter quadratic lens it replaced, opened
- * taller so the shape reads as a rounded eye rather than as a slit. Round caps and joins take the
- * hard point off the two corners where the curves meet.
- */
-function EyeIcon({ hidden }: { readonly hidden: boolean }) {
-  return (
-    <Svg height={EYE_SIZE} viewBox="0 0 24 24" width={EYE_SIZE}>
-      <Path
-        d="M3 12C7 6 17 6 21 12C17 18 7 18 3 12Z"
-        fill="none"
-        stroke={colors.textSecondary}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.7}
-      />
-      {/* Filled, not stroked. A ring this small collapses into a smudge, while a solid pupil stays
-          a pupil — and it gives the glyph one weighted point, which is what keeps an outline of
-          this size from reading as an empty shape. */}
-      <Path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill={colors.textSecondary} />
-      {hidden ? (
-        <Path
-          d="M4.4 19.6 19.6 4.4"
-          fill="none"
-          stroke={colors.textSecondary}
-          strokeLinecap="round"
-          strokeWidth={1.7}
-        />
-      ) : null}
-    </Svg>
-  );
-}
-
-function walletFunds(
-  wallet: WalletBalances['publicWallet'] | null,
-): Amount | null {
-  return wallet?.valuation === null || wallet === null
-    ? null
-    : amountFromBaseUnits(wallet.valuation.usdBaseUnits, 6);
-}
-
-function privateFunds(
-  balances: WalletBalances | null,
-  portfolio: PacificaPortfolioSnapshot | null,
-): Amount | null {
-  if (balances === null || portfolio === null) return null;
-
-  const wallet = walletFunds(balances.privateWallet);
-  if (wallet === null) return null;
-
-  try {
-    return addAmounts(wallet, parseAmount(portfolio.accountEquity, 6));
-  } catch {
-    return null;
-  }
-}
-
-function walletLabel(
-  label: string,
-  wallet: WalletBalances['publicWallet'] | null,
-): string {
-  const count = wallet?.valuation?.unpricedAssetCount ?? 0;
-  return count === 0 ? label : `${label} · ${count} unpriced`;
-}
-
-function unrealizedPnl(portfolio: PacificaPortfolioSnapshot | null): Amount | null {
-  if (portfolio === null) return null;
-
-  try {
-    return subtractAmounts(
-      parseAmount(portfolio.accountEquity, 6),
-      parseAmount(portfolio.balance, 6),
-    );
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The move as basis points of the deposited balance it was earned on.
- *
- * Integer maths on base units throughout: converting to a float first to divide would put rounding
- * error into a figure the reader will compare against the amount beside it.
- */
-function unrealizedRate(
-  portfolio: PacificaPortfolioSnapshot | null,
-  pnl: Amount | null,
-): number | null {
-  if (portfolio === null || pnl === null) return null;
-
-  try {
-    const base = parseAmount(portfolio.balance, 6);
-    if (base.baseUnits === 0n) return null;
-
-    return Number((pnl.baseUnits * 10_000n) / base.baseUnits);
-  } catch {
-    return null;
-  }
-}
-
-/** Null unless both parts are known: a total missing one of its halves is a wrong number. */
-function sum(left: Amount | null, right: Amount | null): Amount | null {
-  if (left === null || right === null) return null;
-
-  try {
-    return addAmounts(left, right);
-  } catch {
-    return null;
-  }
-}
-
-function money(value: Amount | null): string | null {
-  return value === null ? null : formatDetailedUsd(value);
-}
-
-function signedMoney(value: Amount | null): string | null {
-  const formatted = money(value);
-  return formatted === null || value === null || value.baseUnits <= 0n
-    ? formatted
-    : `+${formatted}`;
-}
-
-function percent(basisPoints: number): string {
-  const absolute = Math.abs(basisPoints);
-  const sign = basisPoints > 0 ? '+' : basisPoints < 0 ? '-' : '';
-  return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}%`;
 }
 
 const styles = StyleSheet.create({

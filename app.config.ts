@@ -1,4 +1,7 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Perpal — private, non-custodial perpetuals client.
@@ -15,6 +18,44 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 const IOS_BUNDLE_IDENTIFIER = 'com.perpal.app';
 const ANDROID_PACKAGE = 'com.perpal.app';
 const URL_SCHEME = 'perpal';
+
+/**
+ * OTA compatibility must follow the native inputs uploaded to EAS, not the local
+ * `node_modules` tree. Expo's generic fingerprint included patched/autolinked package
+ * directories whose hashes differed after a clean EAS install. Hashing the lockfile,
+ * native config, config plugins and native patches gives local and EAS the same result
+ * while still changing whenever the binary contract can change.
+ */
+function nativeRuntimeVersion(): string {
+  const root = process.cwd();
+  const hash = createHash('sha256');
+  const files = [
+    'package.json',
+    'package-lock.json',
+    'app.config.ts',
+    ...filesIn(root, 'plugins'),
+    ...filesIn(root, 'patches'),
+  ].sort();
+
+  for (const relativePath of files) {
+    hash.update(relativePath);
+    hash.update('\0');
+    hash.update(readFileSync(join(root, relativePath)));
+    hash.update('\0');
+  }
+
+  return `native-${hash.digest('hex').slice(0, 32)}`;
+}
+
+function filesIn(root: string, directory: string): string[] {
+  const absolute = join(root, directory);
+  if (!existsSync(absolute)) return [];
+
+  return readdirSync(absolute, { withFileTypes: true }).flatMap((entry) => {
+    const relative = join(directory, entry.name);
+    return entry.isDirectory() ? filesIn(root, relative) : [relative];
+  });
+}
 
 // Surface-level brand colors only. Semantic design tokens live in the app.
 const BACKGROUND = '#0B0D10';
@@ -91,9 +132,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   updates: {
     url: 'https://u.expo.dev/0eadd12d-2151-4907-931e-774656309e72',
   },
-  runtimeVersion: {
-    policy: 'appVersion',
-  },
+  runtimeVersion: nativeRuntimeVersion(),
   plugins: [
     'expo-router',
     'expo-asset',

@@ -46,6 +46,7 @@ export type AppConfig = {
     readonly marketBriefingUrl: string;
     readonly tokenPricesUrl: string;
     readonly swapBuildUrl: string;
+    readonly telemetryUrl: string;
   };
   readonly telemetry: {
     readonly enabled: boolean;
@@ -390,6 +391,7 @@ export function parseAppConfig(raw: RawAppEnv): AppConfigResult {
         marketBriefingUrl: `${origin}${marketBriefingPath}`,
         tokenPricesUrl: `${origin}${tokenPricesPath}`,
         swapBuildUrl: `${origin}${swapBuildPath}`,
+        telemetryUrl: `${origin}/v1/telemetry`,
       },
       telemetry: {
         enabled: raw.telemetryEnabled === 'true',

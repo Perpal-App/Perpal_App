@@ -4,14 +4,13 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
-import { AccountOverviewCard } from '@/features/home/components/AccountOverviewCard';
 import { FundsSheet, type FundsRequest } from '@/features/portfolio/components/FundsSheet';
 import { GlobalActivityTracker } from '@/features/portfolio/components/GlobalActivityTracker';
+import { PortfolioSummaryCard } from '@/features/portfolio/components/PortfolioSummaryCard';
 import {
   OrderCard,
   PositionCard,
 } from '@/features/portfolio/components/PortfolioCards';
-import { WalletAccountSection } from '@/features/portfolio/components/WalletAccountSection';
 import { cancelPacificaOrder } from '@/integrations/perps/pacifica/pacificaOrder';
 import type {
   PacificaOpenOrder,
@@ -84,12 +83,11 @@ export function PacificaPortfolioContent({
     <AppScreen contentContainerStyle={styles.container}>
       <Text accessibilityRole="header" style={styles.title}>Portfolio</Text>
 
-      <AccountOverviewCard balances={balances} portfolio={snapshot} />
-
-      <WalletAccountSection
+      <PortfolioSummaryCard
         balances={balances}
-        onRequest={setFundsRequest}
-        snapshot={snapshot}
+        onAction={(action) => setFundsRequest({ mode: action })}
+        onViewAssets={() => setFundsRequest({ mode: 'assets' })}
+        portfolio={snapshot}
       />
 
       {hasPositions ? (
