@@ -23,7 +23,10 @@ import {
   type PrivateExitRecord,
 } from '@/integrations/umbra/privateExitStorage';
 import { PrivateFundingError } from '@/integrations/umbra/privateFundingErrors';
-import { publishInAppNotification } from '@/storage/inAppNotifications';
+import {
+  captureInAppNotificationScope,
+  publishInAppNotification,
+} from '@/storage/inAppNotifications';
 import { showAppToast } from '@/storage/appToast';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
@@ -99,6 +102,7 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
   ) => {
     if (runningRef.current) return;
     runningRef.current = true;
+    const notificationScope = captureInAppNotificationScope();
     setIsRunning(true);
     setError(null);
     try {
@@ -106,8 +110,11 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
       setRecord(next);
       if (next.phase === 'complete') {
         publishInAppNotification({
+          correlations: [{ namespace: 'umbra-request', value: next.id }],
           kind: 'withdrawal',
           outcome: 'success',
+          scopeToken: notificationScope,
+          status: 'settled',
           title: successTitle,
           message: successMessage,
         });
@@ -118,8 +125,13 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
         : 'Private withdrawal did not complete. Progress is saved for a safe retry.';
       setError(message);
       publishInAppNotification({
+        ...(record === null
+          ? {}
+          : { correlations: [{ namespace: 'umbra-request' as const, value: record.id }] }),
         kind: 'withdrawal',
         outcome: 'error',
+        scopeToken: notificationScope,
+        status: 'failed',
         title: 'Private withdrawal needs attention',
         message,
       });
@@ -127,7 +139,7 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
       runningRef.current = false;
       setIsRunning(false);
     }
-  }, []);
+  }, [record]);
 
   /**
    * Withdraws one collateral token privately.

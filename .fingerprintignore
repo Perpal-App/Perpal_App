@@ -1,0 +1,7 @@
+# These two packages produce different rncoreAutolinkingAndroid directory hashes
+# between an existing local install and EAS's clean npm install even when the
+# package-lock and patch inputs are identical. Their locked versions and the
+# Umbra patch file remain fingerprint inputs; only the generated package trees
+# that caused the verified local/EAS mismatch are excluded.
+node_modules/@react-native-masked-view/masked-view/**/*
+node_modules/@umbra-privacy/rn-zk-prover/**/*

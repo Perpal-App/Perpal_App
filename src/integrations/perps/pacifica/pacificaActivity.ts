@@ -1,4 +1,5 @@
 import {
+  isPacificaRateLimited,
   PacificaApiError,
   pacificaGetPage,
   type PacificaPage,
@@ -33,6 +34,10 @@ export type PacificaActivity = {
 const HISTORY_LIMIT = '100';
 const MAX_HISTORY_PAGES = 10;
 const MAX_HISTORY_ITEMS = 1_000;
+const DIAGNOSTIC_REPEAT_AFTER_MS = 30_000;
+
+let lastDiagnostic = '';
+let lastDiagnosticAtMs = 0;
 
 type HistoryResult<T> = {
   readonly items: readonly T[];
@@ -49,6 +54,7 @@ export async function fetchPacificaActivity(
   account: string,
   signal?: AbortSignal,
   mode: 'backfill' | 'latest' = 'latest',
+  freshness: 'cached' | 'network' = 'cached',
 ): Promise<PacificaActivity> {
   const maxPages = mode === 'backfill' ? MAX_HISTORY_PAGES : 1;
   const [trades, balances] = await Promise.all([
@@ -58,19 +64,27 @@ export async function fetchPacificaActivity(
       maxPages,
       parse: parsePacificaTradeActivity,
       path: '/trades/history',
+      freshness,
       ...(signal === undefined ? {} : { signal }),
     })),
     settle(fetchHistory({
       account,
       apiOrigin,
+      includeTrades: true,
       maxPages,
       parse: parsePacificaBalanceActivity,
       path: '/account/balance/history',
+      freshness,
       ...(signal === undefined ? {} : { signal }),
     })),
   ]);
 
-  if (trades.data === null && balances.data === null) throw trades.error ?? balances.error;
+  logActivityDiagnostic({ balances, freshness, mode, trades });
+
+  if (trades.data === null && balances.data === null) {
+    const rateLimit = [trades.error, balances.error].find(isPacificaRateLimited);
+    throw rateLimit ?? trades.error ?? balances.error;
+  }
 
   return {
     balances: balances.data?.items ?? [],
@@ -107,7 +121,9 @@ export function mergePacificaActivity(
 async function fetchHistory<T>(input: {
   readonly account: string;
   readonly apiOrigin: string;
+  readonly includeTrades?: boolean;
   readonly maxPages: number;
+  readonly freshness: 'cached' | 'network';
   readonly parse: (value: unknown) => readonly T[];
   readonly path: string;
   readonly signal?: AbortSignal;
@@ -119,9 +135,11 @@ async function fetchHistory<T>(input: {
     for (let pageNumber = 0; pageNumber < input.maxPages; pageNumber += 1) {
       const page: PacificaPage<unknown> = await pacificaGetPage<unknown>({
         apiOrigin: input.apiOrigin,
+        freshness: input.freshness,
         path: input.path,
         query: {
           account: input.account,
+          ...(input.includeTrades === true ? { include_trades: 'true' } : {}),
           limit: HISTORY_LIMIT,
           ...(cursor === null ? {} : { cursor }),
         },
@@ -143,6 +161,46 @@ async function fetchHistory<T>(input: {
     }
     throw cause;
   }
+}
+
+function logActivityDiagnostic(input: {
+  readonly balances: Settled<HistoryResult<PacificaBalanceActivity>>;
+  readonly freshness: 'cached' | 'network';
+  readonly mode: 'backfill' | 'latest';
+  readonly trades: Settled<HistoryResult<PacificaTradeActivity>>;
+}): void {
+  if (!__DEV__) return;
+  const diagnostic = JSON.stringify({
+    balanceCount: input.balances.data?.items.length ?? 0,
+    balanceError: diagnosticError(input.balances.error),
+    event: 'history_result',
+    freshness: input.freshness,
+    includeTrades: true,
+    incomplete: input.balances.data === null || input.trades.data === null,
+    mode: input.mode,
+    tradeCount: input.trades.data?.items.length ?? 0,
+    tradeError: diagnosticError(input.trades.error),
+    truncated: input.balances.data?.truncated === true || input.trades.data?.truncated === true,
+  });
+  const now = Date.now();
+  if (diagnostic === lastDiagnostic && now - lastDiagnosticAtMs < DIAGNOSTIC_REPEAT_AFTER_MS) {
+    return;
+  }
+  lastDiagnostic = diagnostic;
+  lastDiagnosticAtMs = now;
+  console.info('[Perpal Pacifica activity]', diagnostic);
+}
+
+function diagnosticError(cause: unknown): Readonly<Record<string, unknown>> | null {
+  if (cause === null || cause === undefined) return null;
+  return cause instanceof PacificaApiError
+    ? {
+        code: cause.code,
+        name: cause.name,
+        requestPath: cause.requestPath,
+        status: cause.status,
+      }
+    : { name: cause instanceof Error ? cause.name : typeof cause };
 }
 
 async function settle<T>(promise: Promise<T>): Promise<Settled<T>> {

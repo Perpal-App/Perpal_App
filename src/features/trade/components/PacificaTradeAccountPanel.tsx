@@ -11,14 +11,27 @@ import {
   type PacificaActivity,
   type PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
-import { cancelPacificaOrder } from '@/integrations/perps/pacifica/pacificaOrder';
+import { publishPacificaActivitySnapshot } from '@/integrations/perps/pacifica/pacificaActivityStore';
 import {
+  isPacificaRateLimited,
+  pacificaRetryDelay,
+  PacificaApiError,
+} from '@/integrations/perps/pacifica/pacificaApi';
+import {
+  cancelPacificaOrder,
+  PacificaCommandPendingError,
+} from '@/integrations/perps/pacifica/pacificaOrder';
+import {
+  fetchFreshPacificaPortfolio,
   fetchPacificaPortfolio,
   type PacificaOpenOrder,
   type PacificaPortfolioSnapshot,
   type PacificaPosition,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { publishInAppNotification } from '@/storage/inAppNotifications';
+import {
+  captureInAppNotificationScope,
+  publishInAppNotification,
+} from '@/storage/inAppNotifications';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
@@ -36,6 +49,7 @@ const TABS: readonly UnderlineTabOption<AccountTab>[] = [
   { id: 'history', label: 'Trade history' },
 ];
 const REFRESH_INTERVAL_MS = 5_000;
+const MAX_RETRY_INTERVAL_MS = 60_000;
 
 export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: string }) {
   const session = useTradingSession();
@@ -55,17 +69,51 @@ export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: s
         style: 'destructive',
         onPress: () => {
           if (account === null || session.signer === null) return;
+          const scopeToken = captureInAppNotificationScope();
           setCancelling(order.orderId);
           void cancelPacificaOrder({
             account,
             apiOrigin,
+            clientOrderId: order.clientOrderId,
             orderId: order.orderId,
             signer: session.signer,
             symbol: order.symbol,
-          }).then(() => {
+          }).then((result) => {
             publishInAppNotification({
-              kind: 'trade', outcome: 'success', title: 'Order cancelled',
-              message: `${order.symbol} order was cancelled.`,
+              correlations: [{
+                namespace: 'pacifica-order',
+                value: order.clientOrderId ?? String(order.orderId),
+              }],
+              kind: 'trade',
+              outcome: result.status === 'cancelled'
+                ? 'success'
+                : result.status === 'not_cancelled'
+                  ? 'error'
+                  : 'info',
+              scopeToken,
+              status: result.status === 'cancelled'
+                ? 'cancelled'
+                : result.status === 'pending'
+                  ? 'submitted'
+                  : result.status === 'not_cancelled'
+                    ? 'accepted'
+                    : result.orderStatus === 'filled'
+                      ? 'filled'
+                      : 'failed',
+              title: result.status === 'cancelled'
+                ? 'Order cancelled'
+                : result.status === 'pending'
+                  ? 'Cancellation reconciling'
+                  : result.status === 'not_cancelled'
+                    ? 'Cancellation not confirmed'
+                    : 'Order already closed',
+              message: result.status === 'cancelled'
+                ? `${order.symbol} order was cancelled.`
+                : result.status === 'pending'
+                  ? 'Pacifica may have received the cancellation. Do not submit it again.'
+                  : result.status === 'not_cancelled'
+                    ? `${order.symbol} order remains open. Refresh and retry the cancellation.`
+                    : `${order.symbol} order is already ${result.orderStatus?.replace('_', ' ')}.`,
             });
             accountData.refresh();
           }).catch((cause) => {
@@ -73,8 +121,18 @@ export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: s
               error: cause instanceof Error ? cause.message : typeof cause,
             });
             publishInAppNotification({
-              kind: 'trade', outcome: 'error', title: 'Cancellation failed',
-              message: `${order.symbol} order remains open.`,
+              correlations: [{
+                namespace: 'pacifica-order',
+                value: order.clientOrderId ?? String(order.orderId),
+              }],
+              kind: 'trade',
+              outcome: cause instanceof PacificaCommandPendingError ? 'info' : 'error',
+              scopeToken,
+              status: cause instanceof PacificaCommandPendingError ? 'submitted' : 'failed',
+              title: cause instanceof PacificaCommandPendingError
+                ? 'Command still reconciling'
+                : 'Cancellation not accepted',
+              message: cause instanceof Error ? cause.message : 'Refresh the order before retrying.',
             });
           }).finally(() => setCancelling(null));
         },
@@ -202,7 +260,11 @@ function useTradeAccountData(apiOrigin: string, account: string | null) {
   const [refreshKey, setRefreshKey] = useState(0);
   const hasData = useRef(false);
   const activityData = useRef<PacificaActivity | null>(null);
-  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
+  const forceNetwork = useRef(false);
+  const refresh = useCallback(() => {
+    forceNetwork.current = true;
+    setRefreshKey((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     hasData.current = false;
@@ -215,26 +277,49 @@ function useTradeAccountData(apiOrigin: string, account: string | null) {
     let active = true;
     let controller: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let consecutiveFailures = 0;
     const load = async () => {
       controller?.abort();
       controller = new AbortController();
+      let nextRefreshMs = REFRESH_INTERVAL_MS;
       try {
         const previousActivity = activityData.current;
+        const network = forceNetwork.current;
+        forceNetwork.current = false;
         const [portfolio, activity] = await Promise.all([
-          fetchPacificaPortfolio(apiOrigin, account, controller.signal),
+          (network ? fetchFreshPacificaPortfolio : fetchPacificaPortfolio)(
+            apiOrigin,
+            account,
+            controller.signal,
+          ),
           fetchPacificaActivity(
             apiOrigin,
             account,
             controller.signal,
             previousActivity === null || previousActivity.incomplete ? 'backfill' : 'latest',
+            network ? 'network' : 'cached',
           ),
         ]);
         if (active) {
           const mergedActivity = previousActivity === null
             ? activity
             : mergePacificaActivity(previousActivity, activity);
+          consecutiveFailures = mergedActivity.incomplete ? consecutiveFailures + 1 : 0;
+          if (mergedActivity.incomplete) {
+            nextRefreshMs = pacificaRetryDelay(
+              null,
+              consecutiveFailures,
+              REFRESH_INTERVAL_MS,
+              MAX_RETRY_INTERVAL_MS,
+            );
+          }
           hasData.current = true;
           activityData.current = mergedActivity;
+          publishPacificaActivitySnapshot({
+            account,
+            activity: mergedActivity,
+            apiOrigin,
+          });
           setState({
             activity: mergedActivity,
             portfolio,
@@ -243,13 +328,32 @@ function useTradeAccountData(apiOrigin: string, account: string | null) {
         }
       } catch (cause) {
         if (active && !controller.signal.aborted) {
-          if (__DEV__) console.error('[Perpal Pacifica trade account failed]', {
-            error: cause instanceof Error ? cause.message : typeof cause,
-          });
-          setState((current) => ({ ...current, status: hasData.current ? 'stale' : 'error' }));
+          consecutiveFailures += 1;
+          nextRefreshMs = pacificaRetryDelay(
+            cause,
+            consecutiveFailures,
+            REFRESH_INTERVAL_MS,
+            MAX_RETRY_INTERVAL_MS,
+          );
+          if (__DEV__ && !isPacificaRateLimited(cause)) {
+            console.warn('[Perpal Pacifica trade account refresh failed]',
+              cause instanceof PacificaApiError
+                ? {
+                    errorCode: cause.code,
+                    errorName: cause.name,
+                    requestPath: cause.requestPath,
+                    status: cause.status,
+                  }
+                : { errorName: cause instanceof Error ? cause.name : typeof cause },
+            );
+          }
+          setState((current) => ({
+            ...current,
+            status: hasData.current ? 'stale' : isPacificaRateLimited(cause) ? 'loading' : 'error',
+          }));
         }
       } finally {
-        if (active) timer = setTimeout(() => void load(), REFRESH_INTERVAL_MS);
+        if (active) timer = setTimeout(() => void load(), nextRefreshMs);
       }
     };
     void load();

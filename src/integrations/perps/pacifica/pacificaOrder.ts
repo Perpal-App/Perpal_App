@@ -1,16 +1,17 @@
 import * as Crypto from 'expo-crypto';
 
-import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
-  pacificaGet,
-  pacificaPostSigned,
-  type PacificaOperation,
-} from '@/integrations/perps/pacifica/pacificaApi';
-import {
-  parsePacificaPrices,
   type PacificaMarket,
   type PacificaMarketSnapshot,
 } from '@/integrations/perps/pacifica/pacificaMarketData';
+import {
+  fetchPacificaMarketSetting,
+  type PacificaMarketSetting,
+} from '@/integrations/perps/pacifica/pacificaOrderReconciliation';
+import {
+  projectPacificaOpeningRisk,
+  type PacificaProjectedRisk,
+} from '@/integrations/perps/pacifica/pacificaOrderRisk';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import {
   formatDecimal,
@@ -19,13 +20,12 @@ import {
   parseDecimal,
   PacificaOrderValidationError,
   signedSide,
-  validateStopDirection,
   validateTriggerPrice,
   type PacificaOrderAction,
   type PacificaOrderSide,
   type PacificaOrderType,
 } from '@/integrations/perps/pacifica/pacificaOrderValidation';
-import { logTradeTiming } from '@/integrations/observability/tradeTiming';
+import { newTraceId } from '@/integrations/observability/clientTelemetry';
 
 export {
   PacificaOrderValidationError,
@@ -58,10 +58,13 @@ export type PacificaOrderPlan = {
   readonly leverage: number;
   readonly marginMode: PacificaMarginMode;
   readonly markPrice: string;
+  readonly maxLeverage: number;
   readonly notionalBaseUnits: bigint;
   readonly orderPrice: string | null;
   readonly orderType: PacificaOrderType;
   readonly reduceOnly: boolean;
+  readonly reviewedSetting: PacificaMarketSetting | null;
+  readonly risk: PacificaProjectedRisk | null;
   readonly side: PacificaOrderSide;
   readonly signedSide: 'bid' | 'ask';
   readonly slippagePercent: string;
@@ -69,10 +72,13 @@ export type PacificaOrderPlan = {
   readonly triggerPrice: string | null;
   readonly stopLoss: PacificaTriggerOrder | null;
   readonly takeProfit: PacificaTriggerOrder | null;
+  readonly traceId: string;
 };
 
 export async function preparePacificaOrder(input: {
+  readonly account: string;
   readonly action: PacificaOrderAction;
+  readonly apiOrigin: string;
   readonly collateralBaseUnits: bigint;
   readonly leverage: number;
   readonly marginMode: PacificaMarginMode;
@@ -82,6 +88,7 @@ export async function preparePacificaOrder(input: {
   readonly portfolio: PacificaPortfolioSnapshot;
   readonly side: PacificaOrderSide;
   readonly snapshot: PacificaMarketSnapshot;
+  readonly signal?: AbortSignal | undefined;
   readonly stopLossPrice?: string;
   readonly takeProfitPrice?: string;
   readonly triggerPrice: string | undefined;
@@ -175,21 +182,60 @@ export async function preparePacificaOrder(input: {
     );
   }
   const feeRate = parseRate(input.portfolio.takerFee);
+  const estimatedFeeBaseUnits = (
+    notionalBaseUnits * feeRate + 99_999_999n
+  ) / 100_000_000n;
+  const reviewedSetting = input.action === 'open'
+    ? await fetchPacificaMarketSetting({
+        account: input.account,
+        apiOrigin: input.apiOrigin,
+        maxLeverage: input.market.maxLeverage,
+        signal: input.signal,
+        symbol: input.market.venueRef,
+      })
+    : null;
+  if (reviewedSetting !== null) {
+    validateSettingChange({
+      leverage,
+      marginMode: input.marginMode,
+      portfolio: input.portfolio,
+      reviewedSetting,
+      symbol: input.market.venueRef,
+    });
+  }
+  const risk = input.action === 'open'
+    ? projectPacificaOpeningRisk({
+        amountBaseUnits: roundedAmount,
+        estimatedFeeBaseUnits,
+        leverage,
+        marginMode: input.marginMode,
+        maxLeverage: input.market.maxLeverage,
+        notionalBaseUnits,
+        portfolio: input.portfolio,
+        side: input.side,
+        sizingPriceBaseUnits: sizingPrice,
+        snapshot: input.snapshot,
+        symbol: input.market.venueRef,
+      })
+    : null;
 
   return {
     action: input.action,
     amount: formatDecimal(roundedAmount, SIZE_DECIMALS),
     clientOrderId: Crypto.randomUUID(),
     collateralBaseUnits: input.collateralBaseUnits,
-    estimatedFeeBaseUnits: (notionalBaseUnits * feeRate) / 100_000_000n,
+    estimatedFeeBaseUnits,
     expiresAtMs: Date.now() + PLAN_LIFETIME_MS,
     leverage,
     marginMode: input.action === 'open' ? input.marginMode : position!.marginMode,
     markPrice: formatDecimal(markBaseUnits, input.snapshot.price.decimals),
+    maxLeverage: input.market.maxLeverage,
     notionalBaseUnits,
     orderPrice: prices.orderPrice,
     orderType: input.orderType,
     reduceOnly: input.action === 'close',
+    reviewedSetting,
+    risk,
     side: input.side,
     signedSide: signedSide(input.action, input.side),
     slippagePercent: SLIPPAGE_PERCENT,
@@ -197,158 +243,17 @@ export async function preparePacificaOrder(input: {
     triggerPrice: prices.triggerPrice,
     stopLoss,
     takeProfit,
+    traceId: newTraceId(),
   };
 }
 
-export async function submitPacificaOrder(input: {
-  readonly account: string;
-  readonly apiOrigin: string;
-  readonly intentStartedAtMs: number;
-  readonly plan: PacificaOrderPlan;
-  readonly signer: GatewayRequestSigner;
-  readonly signal?: AbortSignal;
-}): Promise<{ readonly orderId: number }> {
-  if (Date.now() >= input.plan.expiresAtMs) {
-    throw new Error('Pacifica order preview expired. Review a new quote.');
-  }
-  const prices = parsePacificaPrices(await pacificaGet<readonly unknown[]>({
-    apiOrigin: input.apiOrigin,
-    path: '/info/prices',
-    signal: input.signal,
-  }));
-  const latest = prices.find((price) => price.venueRef === input.plan.symbol);
-  if (latest === undefined || latest.priceStale) {
-    throw new Error('Pacifica price is stale. Review the order again.');
-  }
-  if (input.plan.orderType === 'market' && outsideSlippage(input.plan.markPrice, latest)) {
-    throw new Error('Pacifica price moved beyond the confirmed slippage limit. Review again.');
-  }
-  if (isStopOrder(input.plan.orderType)) {
-    if (input.plan.triggerPrice === null) {
-      throw new Error('Pacifica stop order is missing its confirmed trigger price.');
-    }
-    validateStopDirection(
-      parseDecimal(input.plan.triggerPrice, latest.price.decimals),
-      latest.price.baseUnits,
-      input.plan.signedSide,
-    );
-  }
-
-  if (input.plan.action === 'open') {
-    await pacificaPostSigned<unknown>({
-      account: input.account,
-      apiOrigin: input.apiOrigin,
-      operation: 'update_margin_mode',
-      payload: { is_isolated: input.plan.marginMode === 'isolated', symbol: input.plan.symbol },
-      signer: input.signer,
-      signal: input.signal,
-    });
-    await pacificaPostSigned<unknown>({
-      account: input.account,
-      apiOrigin: input.apiOrigin,
-      operation: 'update_leverage',
-      payload: { leverage: input.plan.leverage, symbol: input.plan.symbol },
-      signer: input.signer,
-      signal: input.signal,
-    });
-  }
-  const submittedAt = performance.now();
-  logTradeTiming(
-    { intentStartedAtMs: input.intentStartedAtMs, provider: 'pacifica', action: input.plan.action },
-    'intent_to_submission',
-    input.intentStartedAtMs,
-    'ok',
-  );
-  const request = orderRequest(input.plan);
-  const result = await pacificaPostSigned<unknown>({
-    account: input.account,
-    apiOrigin: input.apiOrigin,
-    operation: request.operation,
-    payload: request.payload,
-    signer: input.signer,
-    signal: input.signal,
-  });
-  logTradeTiming(
-    { intentStartedAtMs: input.intentStartedAtMs, provider: 'pacifica', action: input.plan.action },
-    'submission_to_acknowledgement',
-    submittedAt,
-    'ok',
-  );
-  const response = object(result);
-  const orderId = typeof response.order_id === 'string'
-    ? Number(response.order_id)
-    : response.order_id;
-  if (typeof orderId !== 'number' || !Number.isSafeInteger(orderId)) {
-    throw new Error('Pacifica returned an invalid order identifier.');
-  }
-  return { orderId };
-}
-
-function orderRequest(plan: PacificaOrderPlan): {
-  readonly operation: PacificaOperation;
-  readonly payload: Readonly<Record<string, unknown>>;
-} {
-  const targets = {
-    ...(plan.stopLoss === null ? {} : {
-      stop_loss: { client_order_id: plan.stopLoss.clientOrderId, stop_price: plan.stopLoss.stopPrice },
-    }),
-    ...(plan.takeProfit === null ? {} : {
-      take_profit: { client_order_id: plan.takeProfit.clientOrderId, stop_price: plan.takeProfit.stopPrice },
-    }),
-  };
-  const common = {
-    amount: plan.amount,
-    client_order_id: plan.clientOrderId,
-    reduce_only: plan.reduceOnly,
-    side: plan.signedSide,
-    symbol: plan.symbol,
-  };
-  if (plan.orderType === 'market') {
-    return {
-      operation: 'create_market_order',
-      payload: { ...common, slippage_percent: plan.slippagePercent, ...targets },
-    };
-  }
-  if (plan.orderType === 'limit') {
-    return {
-      operation: 'create_order',
-      payload: { ...common, price: plan.orderPrice, tif: 'GTC', ...targets },
-    };
-  }
-  return {
-    operation: 'create_stop_order',
-    payload: {
-      reduce_only: plan.reduceOnly,
-      side: plan.signedSide,
-      symbol: plan.symbol,
-      stop_order: {
-        amount: plan.amount,
-        client_order_id: plan.clientOrderId,
-        stop_price: plan.triggerPrice,
-        trigger_price_type: 'mark_price',
-        ...(plan.orderType === 'stop-limit' ? { limit_price: plan.orderPrice } : {}),
-      },
-    },
-  };
-}
-
-export async function cancelPacificaOrder(input: {
-  readonly account: string;
-  readonly apiOrigin: string;
-  readonly orderId: number;
-  readonly signer: GatewayRequestSigner;
-  readonly symbol: string;
-  readonly signal?: AbortSignal;
-}): Promise<void> {
-  await pacificaPostSigned({
-    account: input.account,
-    apiOrigin: input.apiOrigin,
-    operation: 'cancel_order',
-    payload: { order_id: input.orderId, symbol: input.symbol },
-    signer: input.signer,
-    signal: input.signal,
-  });
-}
+export {
+  cancelPacificaOrder,
+  PacificaCommandPendingError,
+  submitPacificaOrder,
+  type PacificaCancellationResult,
+  type PacificaOrderSubmission,
+} from '@/integrations/perps/pacifica/pacificaOrderLifecycle';
 
 function triggerOrder(
   value: string | undefined,
@@ -366,14 +271,6 @@ function triggerOrder(
   };
 }
 
-function outsideSlippage(mark: string, latest: PacificaMarketSnapshot): boolean {
-  const confirmed = parseDecimal(mark, latest.price.decimals);
-  const difference = latest.price.baseUnits > confirmed
-    ? latest.price.baseUnits - confirmed
-    : confirmed - latest.price.baseUnits;
-  return confirmed <= 0n || difference * 10_000n > confirmed * 50n;
-}
-
 function usdNotional(amount: string, priceBaseUnits: bigint): bigint {
   return (parseDecimal(amount, SIZE_DECIMALS) * priceBaseUnits) / 10n ** 14n;
 }
@@ -384,9 +281,24 @@ function parseRate(value: string): bigint {
   return rate;
 }
 
-function object(value: unknown): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Pacifica returned an invalid order response.');
+function validateSettingChange(input: {
+  readonly leverage: number;
+  readonly marginMode: PacificaMarginMode;
+  readonly portfolio: PacificaPortfolioSnapshot;
+  readonly reviewedSetting: PacificaMarketSetting;
+  readonly symbol: string;
+}): void {
+  const hasExposure = input.portfolio.positions.some(
+    (position) => position.symbol === input.symbol,
+  ) || input.portfolio.orders.some((order) => order.symbol === input.symbol);
+  if (!hasExposure) return;
+  if (
+    input.reviewedSetting.marginMode !== input.marginMode ||
+    input.reviewedSetting.leverage !== input.leverage
+  ) {
+    throw new PacificaOrderValidationError(
+      `Existing ${input.symbol} exposure uses ${input.reviewedSetting.marginMode} margin at ` +
+      `${input.reviewedSetting.leverage}×. Use those settings or close/cancel it first.`,
+    );
   }
-  return value as Record<string, unknown>;
 }

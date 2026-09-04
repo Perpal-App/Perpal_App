@@ -24,6 +24,10 @@ import {
   type DirectWithdrawalSource,
   type PacificaReleaseRequirement,
 } from '@/features/portfolio/components/directWithdrawPanelSupport';
+import {
+  useDirectWithdrawalRecovery,
+  type DirectWithdrawalPhase,
+} from '@/features/portfolio/hooks/useDirectWithdrawalRecovery';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { showPacificaReleaseConfirmation } from '@/features/portfolio/components/pacificaReleaseConfirmation';
 import {
@@ -37,12 +41,13 @@ import {
   submitDirectWithdrawal,
   type DirectWithdrawalPlan,
 } from '@/integrations/solana/directWithdrawal';
-import { publishInAppNotification } from '@/storage/inAppNotifications';
+import {
+  captureInAppNotificationScope,
+  publishInAppNotification,
+} from '@/storage/inAppNotifications';
 import { showAppToast } from '@/storage/appToast';
 import { colors } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
-
-type Phase = 'idle' | 'quoting' | 'preparing' | 'reviewing' | 'submitting' | 'pending';
 
 export function DirectWithdrawPanel({
   balances,
@@ -68,7 +73,7 @@ export function DirectWithdrawPanel({
     source === 'public' ? 'external' : 'privy',
   );
   const [externalAddress, setExternalAddress] = useState('');
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhase] = useState<DirectWithdrawalPhase>('idle');
   const [withdrawMaximum, setWithdrawMaximum] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const tokens = useMemo(
@@ -83,48 +88,13 @@ export function DirectWithdrawPanel({
 
   useEffect(() => () => controller.current?.abort(), []);
 
-  useEffect(() => {
-    if (!config.ok || owner === null || session.signer === null) return;
-    const abort = new AbortController();
-    void reconcilePendingTradeAction({
-      owner,
-      provider: 'wallet-withdrawal',
-      rpcUrl: config.value.api.rpcUrl,
-      signal: abort.signal,
-      signer: session.signer,
-    }).then((status) => {
-      if (abort.signal.aborted || status === 'none') return;
-      onBalancesChanged();
-      if (status === 'confirmed') {
-        setPhase('idle');
-        publishInAppNotification({
-          kind: 'withdrawal', outcome: 'success', title: 'Direct withdrawal confirmed',
-          message: 'The destination received the transfer and wallet balances were refreshed.',
-        });
-      } else if (status === 'pending') {
-        setPhase('pending');
-        showAppToast({
-          outcome: 'info', title: 'Withdrawal confirming',
-          message: 'No balance is hidden or deducted locally while Solana confirms the transfer.',
-        });
-      } else {
-        setPhase('idle');
-        showAppToast({
-          outcome: 'info', title: 'Withdrawal not confirmed',
-          message: 'The signed transfer expired. The amount remains in the source wallet.',
-        });
-      }
-    }).catch((cause) => {
-      if (abort.signal.aborted) return;
-      setPhase('idle');
-      onBalancesChanged();
-      publishInAppNotification({
-        kind: 'withdrawal', outcome: 'error', title: 'Direct withdrawal failed',
-        message: directErrorMessage(cause),
-      });
-    });
-    return () => abort.abort();
-  }, [config, onBalancesChanged, owner, session.signer]);
+  useDirectWithdrawalRecovery({
+    onBalancesChanged,
+    owner,
+    rpcUrl: config.ok ? config.value.api.rpcUrl : null,
+    setPhase,
+    signer: session.signer,
+  });
 
   const buildSolanaReview = async (input: {
     readonly amountBaseUnits: bigint | 'max';
@@ -361,6 +331,7 @@ export function DirectWithdrawPanel({
 
   const submit = async (plan: DirectWithdrawalPlan) => {
     if (!config.ok || session.signer === null) return;
+    const notificationScope = captureInAppNotificationScope();
     setPhase('submitting');
     try {
       const transactionAuthority = source === 'public'
@@ -378,13 +349,19 @@ export function DirectWithdrawPanel({
         setWithdrawMaximum(false);
         setPhase('idle');
         publishInAppNotification({
+          correlations: [{ namespace: 'solana-transaction', value: result.signature }],
           kind: 'withdrawal', outcome: 'success', title: 'Direct withdrawal confirmed',
+          scopeToken: notificationScope,
+          status: 'settled',
           message: `${formatTokenAmount(plan.amountBaseUnits, plan.decimals)} ${plan.symbol} reached ${shortAddress(plan.destinationAddress)}.`,
         });
       } else {
         setPhase('pending');
         publishInAppNotification({
+          correlations: [{ namespace: 'solana-transaction', value: result.signature }],
           kind: 'withdrawal', outcome: 'info', title: 'Direct withdrawal submitted',
+          scopeToken: notificationScope,
+          status: 'submitted',
           message: 'Solana confirmation is pending. Balances remain chain-backed and will refresh after settlement.',
         });
       }
@@ -393,6 +370,7 @@ export function DirectWithdrawPanel({
       onBalancesChanged();
       publishInAppNotification({
         kind: 'withdrawal', outcome: 'error', title: 'Direct withdrawal failed',
+        scopeToken: notificationScope,
         message: directErrorMessage(cause),
       });
     }

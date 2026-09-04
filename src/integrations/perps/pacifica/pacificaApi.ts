@@ -4,6 +4,12 @@ import { base58 } from '@scure/base';
 import { fetch } from 'expo/fetch';
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
+import {
+  clearPacificaReadCache,
+  coordinatePacificaRead,
+  pacificaReadCooldownMs,
+  recordPacificaReadRateLimit,
+} from '@/integrations/perps/pacifica/pacificaReadCoordinator';
 
 const API_PREFIX = '/api/v1';
 const EXPIRY_WINDOW_MS = 5_000;
@@ -16,6 +22,7 @@ export class PacificaApiError extends Error {
     readonly code: string,
     readonly status: number,
     readonly requestPath: string | null = null,
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = 'PacificaApiError';
@@ -26,6 +33,7 @@ type PacificaGetInput = {
   readonly apiOrigin: string;
   readonly path: string;
   readonly query?: Readonly<Record<string, string>>;
+  readonly freshness?: 'cached' | 'network';
   readonly signal?: AbortSignal | undefined;
 };
 
@@ -61,7 +69,47 @@ async function getEnvelope(input: PacificaGetInput): Promise<Record<string, unkn
   for (const [key, value] of Object.entries(input.query ?? {})) {
     url.searchParams.set(key, value);
   }
-  return requestEnvelope(url, { method: 'GET' }, input.signal);
+  if (input.signal?.aborted === true) throw cancelledRequest(url.pathname);
+  const rateLimitScope = url.searchParams.has('account')
+    ? `${url.origin}:account`
+    : `${url.origin}:${url.pathname}`;
+
+  const request = coordinatePacificaRead({
+    allowCached: input.freshness !== 'network',
+    cacheKey: url.toString(),
+    maxAgeMs: readCacheMaxAgeMs(url.pathname),
+    read: async () => {
+      const cooldownMs = pacificaReadCooldownMs(rateLimitScope);
+      if (cooldownMs > 0) {
+        throw new PacificaApiError(
+          'Pacifica is temporarily rate-limited.',
+          'rate_limited',
+          429,
+          url.pathname,
+          cooldownMs,
+        );
+      }
+      try {
+        return await requestEnvelope(url, { method: 'GET' });
+      } catch (cause) {
+        if (cause instanceof PacificaApiError && cause.status === 429) {
+          const retryAfterMs = recordPacificaReadRateLimit(
+            rateLimitScope,
+            cause.retryAfterMs,
+          );
+          throw new PacificaApiError(
+            'Pacifica is temporarily rate-limited.',
+            'rate_limited',
+            429,
+            url.pathname,
+            retryAfterMs,
+          );
+        }
+        throw cause;
+      }
+    },
+  });
+  return waitForPacificaRead(request, input.signal, url.pathname);
 }
 
 export async function pacificaPostSigned<T>(input: {
@@ -115,7 +163,25 @@ export async function pacificaPostSigned<T>(input: {
     { method: 'POST', body, headers: { 'content-type': 'application/json' } },
     input.signal,
   );
+  clearPacificaReadCache();
   return envelope.data as T;
+}
+
+export function isPacificaRateLimited(cause: unknown): cause is PacificaApiError {
+  return cause instanceof PacificaApiError && cause.status === 429;
+}
+
+export function pacificaRetryDelay(
+  cause: unknown,
+  attempt: number,
+  baseMs = 5_000,
+  maxMs = 60_000,
+): number {
+  if (isPacificaRateLimited(cause)) {
+    return Math.min(maxMs, Math.max(baseMs, cause.retryAfterMs ?? 30_000));
+  }
+  const exponential = Math.min(maxMs, baseMs * (2 ** Math.min(attempt - 1, 3)));
+  return Math.round(exponential * (0.8 + Math.random() * 0.4));
 }
 
 export type PacificaOperation =
@@ -226,6 +292,15 @@ async function requestEnvelope(
     const envelope = value;
     if (!response.ok || envelope.success !== true) {
       const upstream = pacificaFailure(envelope);
+      if (response.status === 429) {
+        throw new PacificaApiError(
+          'Pacifica is temporarily rate-limited.',
+          'rate_limited',
+          429,
+          url.pathname,
+          retryAfterMs(response.headers.get('retry-after')),
+        );
+      }
       throw new PacificaApiError(
         upstream.message,
         upstream.code,
@@ -318,5 +393,58 @@ function responseError(
   response: Response,
   url: URL,
 ): PacificaApiError {
+  if (response.status === 429) {
+    return new PacificaApiError(
+      'Pacifica is temporarily rate-limited.',
+      'rate_limited',
+      429,
+      url.pathname,
+      retryAfterMs(response.headers.get('retry-after')),
+    );
+  }
   return new PacificaApiError(message, code, response.status, url.pathname);
+}
+
+function readCacheMaxAgeMs(path: string): number {
+  if (
+    path === '/api/v1/trades/history' ||
+    path === '/api/v1/account/balance/history'
+  ) return 60_000;
+  if (
+    path === '/api/v1/account' ||
+    path === '/api/v1/positions' ||
+    path === '/api/v1/orders'
+  ) return 15_000;
+  return 0;
+}
+
+function retryAfterMs(value: string | null): number | null {
+  if (value === null) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1_000);
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : null;
+}
+
+function waitForPacificaRead<T>(
+  request: Promise<T>,
+  signal: AbortSignal | undefined,
+  requestPath: string,
+): Promise<T> {
+  if (signal === undefined) return request;
+  if (signal.aborted) return Promise.reject(cancelledRequest(requestPath));
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(cancelledRequest(requestPath));
+    signal.addEventListener('abort', abort, { once: true });
+    request.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
+function cancelledRequest(requestPath: string): PacificaApiError {
+  return new PacificaApiError(
+    'Pacifica request was cancelled.',
+    'request_cancelled',
+    0,
+    requestPath,
+  );
 }

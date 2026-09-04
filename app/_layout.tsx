@@ -14,6 +14,8 @@ import { PrivyBoundary } from '@/integrations/privy/PrivyBoundary';
 import { WalletProvisioningProvider } from '@/integrations/privy/useWalletProvisioning';
 import { PrivateFundingProvider } from '@/integrations/umbra/PrivateFundingProvider';
 import { PrivateExitProvider } from '@/integrations/umbra/PrivateExitProvider';
+import { ClientTelemetryBridge } from '@/integrations/observability/ClientTelemetryBridge';
+import { PacificaAccountLifecycleMonitor } from '@/integrations/perps/pacifica/PacificaAccountLifecycleMonitor';
 import { AuthNavigationGate } from '@/navigation/AuthNavigationGate';
 import { AppPreferencesProvider } from '@/storage/AppPreferencesProvider';
 import { TradingSessionProvider } from '@/wallet/trading/TradingSessionProvider';
@@ -42,6 +44,8 @@ export default function RootLayout() {
                   <PrivateExitProvider>
                     <AppPreferencesProvider>
                       <Fragment>
+                        <ClientTelemetryBridge />
+                        <PacificaAccountLifecycleMonitor />
                         <AuthNavigationGate />
                         <AppToastHost />
                       </Fragment>

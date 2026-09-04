@@ -18,7 +18,10 @@ export function logTradeError(
     errorCode: code,
     errorMessage: message
       .replace(/https?:\/\/\S+/giu, '[url]')
-      .replace(/\b[1-9A-HJ-NP-Za-km-z]{32,88}\b/gu, '[address]'),
+      .replace(/\b[1-9A-HJ-NP-Za-km-z]{32,88}\b/gu, '[address]')
+      .replace(/[a-z0-9+/=_-]{64,}/giu, '[data]')
+      .replace(/\s+/gu, ' ')
+      .slice(0, 320),
   }));
   recordClientTelemetry({
     durationMs: 0,

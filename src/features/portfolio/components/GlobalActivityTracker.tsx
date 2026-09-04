@@ -1,12 +1,4 @@
-import { useFocusEffect } from 'expo-router';
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { EmptyHistoryMark } from '@/assets/svg/EmptyHistoryMark';
@@ -22,24 +14,16 @@ import {
   matchesActivityQuery,
   mergeActivity,
 } from '@/features/portfolio/components/activityItems';
-import {
-  fetchPacificaActivity,
-  mergePacificaActivity,
-  type PacificaActivity,
-} from '@/integrations/perps/pacifica/pacificaActivity';
+import { usePacificaActivity } from '@/features/portfolio/hooks/usePacificaActivity';
+import { useSolanaWalletActivity } from '@/features/portfolio/hooks/useSolanaWalletActivity';
+import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
   readInAppNotifications,
   subscribeInAppNotifications,
 } from '@/storage/inAppNotifications';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
-const REFRESH_INTERVAL_MS = 5_000;
 const VISIBLE_PAGE_SIZE = 40;
-
-type RemoteState = {
-  readonly data: PacificaActivity | null;
-  readonly status: 'error' | 'loading' | 'ready' | 'stale';
-};
 
 /**
  * The account's history: trades from the venue, fund movements from the venue and from this device.
@@ -56,11 +40,25 @@ type RemoteState = {
 export function GlobalActivityTracker({
   account,
   apiOrigin,
+  generation,
+  publicAccount,
+  rpcUrl,
+  signer,
 }: {
   readonly account: string;
   readonly apiOrigin: string;
+  readonly generation: number;
+  readonly publicAccount: string | null;
+  readonly rpcUrl: string;
+  readonly signer: GatewayRequestSigner | null;
 }) {
   const remote = usePacificaActivity(apiOrigin, account);
+  const wallet = useSolanaWalletActivity({
+    privateAddress: account,
+    publicAddress: publicAccount,
+    rpcUrl,
+    signer,
+  });
   const local = useSyncExternalStore(
     subscribeInAppNotifications,
     readInAppNotifications,
@@ -71,9 +69,34 @@ export function GlobalActivityTracker({
   const [visibleLimit, setVisibleLimit] = useState(VISIBLE_PAGE_SIZE);
 
   const items = useMemo(
-    () => mergeActivity(remote.state.data, local),
-    [local, remote.state.data],
+    () => mergeActivity(remote.state.data, local, wallet.state.data),
+    [local, remote.state.data, wallet.state.data],
   );
+  const remoteBalanceCount = remote.state.data?.balances.length ?? 0;
+  const remoteTradeCount = remote.state.data?.trades.length ?? 0;
+  useEffect(() => {
+    if (!__DEV__) return;
+    console.info('[Perpal portfolio activity]', JSON.stringify({
+      balanceCount: remoteBalanceCount,
+      event: 'render_state',
+      generation,
+      localCount: local.length,
+      mergedCount: items.length,
+      remoteStatus: remote.state.status,
+      tradeCount: remoteTradeCount,
+      walletCount: wallet.state.data.length,
+      walletStatus: wallet.state.status,
+    }));
+  }, [
+    generation,
+    items.length,
+    local.length,
+    remoteBalanceCount,
+    remote.state.status,
+    remoteTradeCount,
+    wallet.state.data.length,
+    wallet.state.status,
+  ]);
   const visible = useMemo(
     () => items.filter((item) => (
       (filter === 'all' || item.kind === filter) && matchesActivityQuery(item, query)
@@ -83,8 +106,14 @@ export function GlobalActivityTracker({
   const displayed = visible.slice(0, visibleLimit);
 
   const remoteUnavailable = remote.state.status === 'error'
-    || remote.state.status === 'stale';
-  const loading = (remote.state.status === 'loading' || remoteUnavailable)
+    || remote.state.status === 'stale'
+    || wallet.state.status === 'error'
+    || wallet.state.status === 'stale';
+  const loading = (
+    remote.state.status === 'loading'
+    || wallet.state.status === 'loading'
+    || remoteUnavailable
+  )
     && items.length === 0;
   const narrowed = filter !== 'all' || query.trim().length > 0;
 
@@ -98,6 +127,7 @@ export function GlobalActivityTracker({
             accessibilityRole="button"
             onPress={() => {
               remote.refresh();
+              wallet.refresh();
             }}
             style={styles.retry}
           >
@@ -197,70 +227,6 @@ function EmptyHistory() {
       </Text>
     </View>
   );
-}
-
-function usePacificaActivity(apiOrigin: string, account: string) {
-  const [state, setState] = useState<RemoteState>({ data: null, status: 'loading' });
-  const [refreshKey, setRefreshKey] = useState(0);
-  const data = useRef<PacificaActivity | null>(null);
-  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
-
-  useEffect(() => {
-    data.current = null;
-    setState({ data: null, status: 'loading' });
-  }, [account, apiOrigin]);
-
-  useFocusEffect(useCallback(() => {
-    if (account.length === 0 || apiOrigin.length === 0) return undefined;
-    let active = true;
-    let controller: AbortController | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const load = async () => {
-      controller?.abort();
-      controller = new AbortController();
-      try {
-        const current = data.current;
-        const next = await fetchPacificaActivity(
-          apiOrigin,
-          account,
-          controller.signal,
-          current === null || current.incomplete ? 'backfill' : 'latest',
-        );
-        if (active) {
-          const merged = current === null ? next : mergePacificaActivity(current, next);
-          data.current = merged;
-          setState({ data: merged, status: merged.incomplete ? 'stale' : 'ready' });
-        }
-      } catch (cause) {
-        if (active && !controller.signal.aborted) {
-          if (__DEV__) {
-            console.error('[Perpal activity failed]', {
-              error: cause instanceof Error ? cause.message : typeof cause,
-            });
-          }
-          setState((current) => ({
-            data: current.data,
-            status: data.current === null ? 'error' : 'stale',
-          }));
-        }
-      } finally {
-        if (active) timer = setTimeout(() => void load(), REFRESH_INTERVAL_MS);
-      }
-    };
-
-    void load();
-    return () => {
-      active = false;
-      controller?.abort();
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [account, apiOrigin, refreshKey]));
-
-  return {
-    refresh,
-    state,
-  };
 }
 
 const styles = StyleSheet.create({

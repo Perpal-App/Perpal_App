@@ -41,6 +41,10 @@ let signer: GatewayRequestSigner | null = null;
 let storage: MMKV | null = null;
 let queue: readonly QueuedEvent[] | null = null;
 let flushing: Promise<void> | null = null;
+let activeAbort: AbortController | null = null;
+let lastSignerPublicKey: Uint8Array | null = null;
+let hasBoundSignerThisProcess = false;
+const processEventIds = new Set<string>();
 
 export function newTraceId(): string {
   return Crypto.randomUUID();
@@ -68,13 +72,39 @@ export function recordClientTelemetry(input: ClientTelemetryInput): void {
     traceId: input.traceId ?? Crypto.randomUUID(),
   };
 
+  processEventIds.add(event.id);
   commit([...readQueue(), event].slice(-MAX_QUEUED_EVENTS));
   void flushClientTelemetry();
 }
 
 export function setClientTelemetrySigner(next: GatewayRequestSigner | null): void {
+  const interruptedFlush = next !== null && activeAbort !== null ? flushing : null;
+  const identityChanged = next !== null && lastSignerPublicKey !== null &&
+    !sameBytes(lastSignerPublicKey, next.publicKey);
+  if (next === null || identityChanged) activeAbort?.abort();
+
+  if (next !== null && !hasBoundSignerThisProcess) {
+    // A persisted event has no locally retained wallet owner by design. Keep only
+    // events created during this process so a rotated or newly signed-in identity
+    // can never submit another wallet's backlog.
+    commit(readQueue().filter((event) => processEventIds.has(event.id)));
+    hasBoundSignerThisProcess = true;
+  } else if (
+    next !== null &&
+    identityChanged
+  ) {
+    commit([]);
+  }
+
   signer = next;
-  if (next !== null) void flushClientTelemetry();
+  if (next !== null) {
+    lastSignerPublicKey = Uint8Array.from(next.publicKey);
+    if (interruptedFlush === null) {
+      void flushClientTelemetry();
+    } else {
+      void interruptedFlush.then(() => flushClientTelemetry());
+    }
+  }
 }
 
 export function flushClientTelemetry(): Promise<void> {
@@ -87,11 +117,14 @@ export function flushClientTelemetry(): Promise<void> {
   }
 
   let sentBatch = false;
+  const controller = new AbortController();
+  activeAbort = controller;
   flushing = postSignedGatewayRequest<{ readonly accepted: number }>({
     body: pending.map(withoutQueueId),
     cluster: config.value.cluster,
     operation: 'telemetry.write',
     signer: activeSigner,
+    signal: controller.signal,
     timeoutMs: 5_000,
     url: config.value.api.telemetryUrl,
   }).then(() => {
@@ -101,6 +134,7 @@ export function flushClientTelemetry(): Promise<void> {
   }).catch(() => {
     // A later foreground transition or lifecycle event retries the same bounded batch.
   }).finally(() => {
+    if (activeAbort === controller) activeAbort = null;
     flushing = null;
     if (sentBatch && signer !== null && readQueue().length > 0) void flushClientTelemetry();
   });
@@ -170,6 +204,10 @@ function bounded(value: string, fallback: string): string {
 
 function clampDuration(value: number): number {
   return Number.isFinite(value) ? Math.min(600_000, Math.max(0, Math.round(value))) : 0;
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function releaseId(): string {

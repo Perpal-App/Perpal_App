@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { pacificaPostSigned } from '@/integrations/perps/pacifica/pacificaApi';
-import { fetchPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import { fetchFreshPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import {
   openPacificaWithdrawalMonitor,
   type PacificaWithdrawalConfirmation,
@@ -125,7 +125,11 @@ async function performWithdrawal(
   }
 
   if (pending === null) {
-    const portfolio = await fetchPacificaPortfolio(input.apiOrigin, input.account, input.signal);
+    const portfolio = await fetchFreshPacificaPortfolio(
+      input.apiOrigin,
+      input.account,
+      input.signal,
+    );
     const available = usdc(portfolio.availableToWithdraw);
     if (available < providerAmount) {
       throw new Error('Your private balance does not have enough withdrawable USDC for this amount and its fee.');

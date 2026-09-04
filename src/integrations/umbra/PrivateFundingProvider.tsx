@@ -39,7 +39,10 @@ import {
   type PrivateFundingRecord,
 } from '@/integrations/umbra/umbraSecureStorage';
 import type { ProviderCollateral } from '@/integrations/perps/providerCollateral';
-import { publishInAppNotification } from '@/storage/inAppNotifications';
+import {
+  captureInAppNotificationScope,
+  publishInAppNotification,
+} from '@/storage/inAppNotifications';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type BalanceCheckInput = Pick<
@@ -153,6 +156,7 @@ export function PrivateFundingProvider({
 
     passiveRecoveryRef.current = attemptKey;
     const controller = new AbortController();
+    const notificationScope = captureInAppNotificationScope();
     passiveRecoveryAbortRef.current = controller;
     void recoverSubmittedPrivateFundingRelay({
       apiEndpoint: config.value.privacy.umbraRelayerUrl,
@@ -162,8 +166,11 @@ export function PrivateFundingProvider({
     }).then((next) => {
       if (!controller.signal.aborted && next.phase === 'complete') {
         publishInAppNotification({
+          correlations: [{ namespace: 'umbra-request', value: next.id }],
           kind: 'funding',
           outcome: 'success',
+          scopeToken: notificationScope,
+          status: 'settled',
           title: 'Deposit completed',
           message: next.destination === 'pacifica'
             ? 'USDC is credited to Pacifica and ready to trade.'
@@ -312,6 +319,7 @@ export function PrivateFundingProvider({
     passiveRecoveryAbortRef.current?.abort();
     passiveRecoveryRef.current = null;
     runningRef.current = true;
+    const notificationScope = captureInAppNotificationScope();
     setIsRunning(true);
     setError(null);
 
@@ -320,8 +328,11 @@ export function PrivateFundingProvider({
       setRecord(next);
       if (next.phase === 'complete') {
         publishInAppNotification({
+          correlations: [{ namespace: 'umbra-request', value: next.id }],
           kind: 'funding',
           outcome: 'success',
+          scopeToken: notificationScope,
+          status: 'settled',
           title: 'Deposit completed',
           message: next.destination === 'pacifica'
             ? 'USDC is credited to Pacifica and ready to trade.'
@@ -341,8 +352,13 @@ export function PrivateFundingProvider({
           : privateFundingUserMessage(errorCode)} Error reference: ${errorCode}.`,
       );
       publishInAppNotification({
+        ...(record === null
+          ? {}
+          : { correlations: [{ namespace: 'umbra-request' as const, value: record.id }] }),
         kind: 'funding',
         outcome: 'error',
+        scopeToken: notificationScope,
+        status: 'failed',
         title: 'Private deposit needs attention',
         message: 'Open Portfolio to review and safely resume the deposit.',
       });
@@ -350,7 +366,7 @@ export function PrivateFundingProvider({
       runningRef.current = false;
       setIsRunning(false);
     }
-  }, []);
+  }, [record]);
 
   const start = useCallback(
     async (

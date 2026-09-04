@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { reconcilePendingTradeAction } from '@/integrations/perps/tradeActionRecovery';
+import { readPendingTradeAction } from '@/integrations/perps/tradeActionStorage';
 import { showAppToast } from '@/storage/appToast';
+import {
+  captureInAppNotificationScope,
+  publishInAppNotification,
+} from '@/storage/inAppNotifications';
 
 const POLL_INTERVAL_MS = 3_000;
 const ERROR_RETRY_INTERVAL_MS = 5_000;
@@ -41,13 +46,18 @@ export function useWalletSwapRecovery({
     }
 
     const controller = new AbortController();
+    const notificationScope = captureInAppNotificationScope();
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    void reconcilePendingTradeAction({
-      owner,
-      provider: 'wallet',
-      rpcUrl,
-      signal: controller.signal,
-      signer,
+    let correlationSignature: string | null = null;
+    void readPendingTradeAction(owner, 'wallet').then(async (record) => {
+      correlationSignature = record?.signature ?? null;
+      return reconcilePendingTradeAction({
+        owner,
+        provider: 'wallet',
+        rpcUrl,
+        signal: controller.signal,
+        signer,
+      });
     }).then((status) => {
       if (controller.signal.aborted) return;
       resolvedKeyRef.current = key;
@@ -63,11 +73,20 @@ export function useWalletSwapRecovery({
         pendingRef.current = false;
         noticeOwner.current = null;
         setPending(false);
-        showAppToast({
-          outcome: 'success',
-          title: 'Swap confirmed',
-          message: `${walletLabel} balances were updated.`,
-        });
+        if (correlationSignature !== null) {
+          publishInAppNotification({
+            correlations: [{ namespace: 'solana-transaction', value: correlationSignature }],
+            kind: 'wallet', outcome: 'success', status: 'settled',
+            scopeToken: notificationScope,
+            title: 'Swap confirmed', message: `${walletLabel} balances were updated.`,
+          });
+        } else {
+          showAppToast({
+            outcome: 'success',
+            title: 'Swap confirmed',
+            message: `${walletLabel} balances were updated.`,
+          });
+        }
         onBalancesChanged();
         return;
       }
@@ -76,11 +95,20 @@ export function useWalletSwapRecovery({
       setPending(true);
       if (noticeOwner.current !== owner) {
         noticeOwner.current = owner;
-        showAppToast({
-          outcome: 'info',
-          title: 'Swap confirming',
-          message: 'The signed swap is still confirming.',
-        });
+        if (correlationSignature !== null) {
+          publishInAppNotification({
+            correlations: [{ namespace: 'solana-transaction', value: correlationSignature }],
+            kind: 'wallet', outcome: 'info', status: 'submitted',
+            scopeToken: notificationScope,
+            title: 'Swap confirming', message: 'The signed swap is still confirming.',
+          });
+        } else {
+          showAppToast({
+            outcome: 'info',
+            title: 'Swap confirming',
+            message: 'The signed swap is still confirming.',
+          });
+        }
       }
       retryTimer = setTimeout(
         () => setRevision((value) => value + 1),
@@ -94,11 +122,21 @@ export function useWalletSwapRecovery({
       setPending(true);
       if (errorNoticeOwner.current !== owner) {
         errorNoticeOwner.current = owner;
-        showAppToast({
-          outcome: 'error',
-          title: 'Swap recovery paused',
-          message: cause instanceof Error ? cause.message : 'Swap recovery could not continue.',
-        });
+        if (correlationSignature !== null) {
+          publishInAppNotification({
+            correlations: [{ namespace: 'solana-transaction', value: correlationSignature }],
+            kind: 'wallet', outcome: 'error', status: 'failed',
+            scopeToken: notificationScope,
+            title: 'Swap recovery paused',
+            message: 'The submitted swap could not be reconciled yet.',
+          });
+        } else {
+          showAppToast({
+            outcome: 'error',
+            title: 'Swap recovery paused',
+            message: cause instanceof Error ? cause.message : 'Swap recovery could not continue.',
+          });
+        }
       }
       retryTimer = setTimeout(
         () => setRevision((value) => value + 1),

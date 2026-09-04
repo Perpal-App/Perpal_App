@@ -1,40 +1,42 @@
 import * as Crypto from 'expo-crypto';
 import { base64 } from '@scure/base';
-import {
-  createCloseAccountInstruction,
-  TOKEN_2022_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
 import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 
 import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
-import { fetchPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { hasPendingPacificaWithdrawal } from '@/integrations/perps/pacifica/pacificaWithdrawal';
-import { readPendingTradeAction } from '@/integrations/perps/tradeActionStorage';
 import {
+  readSubmittedTransactionStatus,
   signAndSubmitLegacyTransaction,
-  type SubmittedTransactionResult,
+  storedLegacyTransactionIsCurrent,
+  submitSignedLegacyTransaction,
 } from '@/integrations/solana/signedLegacyTransaction';
-import { readPrivateExitRecord } from '@/integrations/umbra/privateExitStorage';
-import { readPrivateFundingRecord } from '@/integrations/umbra/umbraSecureStorage';
+import {
+  readTradingWalletRotation,
+  removeTradingWalletRotation,
+  writeTradingWalletRotation,
+  type TradingWalletRotationCheckpoint,
+} from '@/storage/trading-wallet-rotation';
+import {
+  orderTokenMigrations,
+  readRotatableTokenAccounts,
+  tokenMigrationInstructions,
+  type RotatableTokenAccount,
+  type RotationRpcInput,
+} from '@/wallet/trading/rotationAccounts';
+import {
+  assertNoPendingRotationActivity,
+} from '@/wallet/trading/rotationReadiness';
+import {
+  TradingWalletRotationError,
+  type TradingWalletRotationPlan,
+} from '@/wallet/trading/rotationTypes';
 
-export class TradingWalletRotationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'TradingWalletRotationError';
-  }
-}
+const ROTATION_REVIEW_LIFETIME_MS = 45_000;
 
-export type TradingWalletRotationPlan = {
-  readonly feeLamports: bigint;
-  readonly idempotencyKey: string;
-  readonly nextWalletAddress: string;
-  readonly recoveredRentLamports: bigint;
-  readonly transferredLamports: bigint;
-  readonly unsignedTransaction: Uint8Array | null;
-};
+export { TradingWalletRotationError } from '@/wallet/trading/rotationTypes';
+export type { TradingWalletRotationPlan } from '@/wallet/trading/rotationTypes';
+export { assertTradingWalletIdentityRetired } from '@/wallet/trading/rotationReadiness';
 
 type RotationInput = {
   readonly config: AppConfig;
@@ -43,286 +45,421 @@ type RotationInput = {
   readonly tradingWalletAddress: string;
 };
 
-type TokenAccount = {
-  readonly address: string;
-  readonly amount: bigint;
-  readonly lamports: bigint;
-  readonly programId: string;
-};
+export type TradingWalletRotationRecovery =
+  | { readonly status: 'none' }
+  | {
+      readonly checkpoint: TradingWalletRotationCheckpoint;
+      readonly status: 'complete' | 'needs-resume';
+    };
 
 export async function prepareTradingWalletRotation(
-  input: RotationInput & { readonly nextWalletAddress: string },
+  input: RotationInput & {
+    readonly destinationGeneration: number;
+    readonly nextWalletAddress: string;
+  },
 ): Promise<TradingWalletRotationPlan> {
-  const [nativeBalance, tokenAccounts] = await Promise.all([
-    solBalance(input.tradingWalletAddress, input),
-    readTokenAccounts(input),
-    assertNoPendingActivity(input),
-  ]);
-
-  if (tokenAccounts.some((account) => account.amount !== 0n)) {
-    throw new TradingWalletRotationError('Withdraw every token balance from T first.');
+  const checkpoint = await readTradingWalletRotation(input.mainWalletAddress);
+  await assertNoPendingRotationActivity(input, checkpoint !== null);
+  if (checkpoint !== null) {
+    assertCheckpointMatches(checkpoint, input, input.nextWalletAddress, input.destinationGeneration);
   }
 
-  const recoveredRentLamports = tokenAccounts.reduce(
+  const rpcInput = rotationRpcInput(input);
+  const [sourceSolLamports, accounts, blockhash] = await Promise.all([
+    solBalance(input.tradingWalletAddress, rpcInput),
+    readRotatableTokenAccounts(
+      input.tradingWalletAddress,
+      input.nextWalletAddress,
+      rpcInput,
+    ),
+    latestBlockhash(rpcInput),
+  ]);
+  const ordered = orderTokenMigrations(accounts);
+  let estimatedFeeLamports = 0n;
+  for (const account of ordered) {
+    const transaction = tokenTransaction(account, input, input.nextWalletAddress, blockhash);
+    estimatedFeeLamports += await transactionFee(transaction, rpcInput);
+    await simulate(transaction, rpcInput, 'A token migration preview failed.');
+  }
+  estimatedFeeLamports += await estimatedSweepFee(input, blockhash, rpcInput);
+
+  const uniqueDestinationAccounts = new Map<string, bigint>();
+  for (const account of accounts) {
+    if (account.destinationAccount !== null && account.destinationRentLamports > 0n) {
+      uniqueDestinationAccounts.set(account.destinationAccount, account.destinationRentLamports);
+    }
+  }
+  const destinationRentLamports = [...uniqueDestinationAccounts.values()].reduce(
+    (total, rent) => total + rent,
+    0n,
+  );
+  const recoverableRentLamports = accounts.reduce(
     (total, account) => total + account.lamports,
     0n,
   );
-  if (nativeBalance === 0n && tokenAccounts.length === 0) {
-    return emptyPlan(input.nextWalletAddress);
-  }
-
-  const source = new PublicKey(input.tradingWalletAddress);
-  const destination = new PublicKey(input.nextWalletAddress);
-  const { blockhash } = await latestBlockhash(input);
-  const transaction = new Transaction({ feePayer: source, recentBlockhash: blockhash });
-
-  for (const account of tokenAccounts) {
-    transaction.add(createCloseAccountInstruction(
-      new PublicKey(account.address),
-      destination,
-      source,
-      [],
-      new PublicKey(account.programId),
-    ));
-  }
-
-  if (nativeBalance > 0n) {
-    transaction.add(SystemProgram.transfer({ fromPubkey: source, toPubkey: destination, lamports: 0 }));
-  }
-
-  const feeLamports = await transactionFee(transaction, input);
-  if (nativeBalance < feeLamports) {
+  const finalLamports = sourceSolLamports + recoverableRentLamports -
+    destinationRentLamports - estimatedFeeLamports;
+  if ((sourceSolLamports > 0n || accounts.length > 0) && (
+    sourceSolLamports === 0n || finalLamports < 0n
+  )) {
     throw new TradingWalletRotationError(
-      'Private wallet T needs enough SOL to pay the one-time rotation transaction fee.',
-    );
-  }
-
-  const transferredLamports = nativeBalance - feeLamports;
-  if (nativeBalance > 0n) {
-    transaction.instructions[transaction.instructions.length - 1] = SystemProgram.transfer({
-      fromPubkey: source,
-      toPubkey: destination,
-      lamports: transferredLamports,
-    });
-  }
-
-  await simulate(transaction, input);
-
-  let unsignedTransaction: Uint8Array;
-  try {
-    unsignedTransaction = transaction.serialize({
-      requireAllSignatures: false,
-      verifySignatures: false,
-    });
-  } catch {
-    throw new TradingWalletRotationError(
-      'Too many empty token accounts exist for one atomic rotation. Close some accounts first.',
+      'Private wallet T needs more SOL for live token-account rent and rotation fees.',
     );
   }
 
   return {
-    feeLamports,
-    idempotencyKey: Crypto.randomUUID(),
+    destinationGeneration: input.destinationGeneration,
+    destinationRentLamports,
+    estimatedFeeLamports,
+    expiresAtMs: Date.now() + ROTATION_REVIEW_LIFETIME_MS,
     nextWalletAddress: input.nextWalletAddress,
-    recoveredRentLamports,
-    transferredLamports,
-    unsignedTransaction,
+    recoverableRentLamports,
+    sourceSolLamports,
+    sourceWalletAddress: input.tradingWalletAddress,
+    tokenAccountCount: accounts.length,
+    tokenMintCount: new Set(accounts.map((account) => account.mint)).size,
   };
 }
 
 export async function submitTradingWalletRotation(
   plan: TradingWalletRotationPlan,
   input: RotationInput,
-): Promise<SubmittedTransactionResult | null> {
-  if (plan.unsignedTransaction === null) return null;
+): Promise<void> {
+  assertPlanMatches(plan, input);
+  await assertNoPendingRotationActivity(input, true);
+  let checkpoint = await ensureCheckpoint(plan, input);
+  checkpoint = await settleStoredSubmission(checkpoint, input);
 
-  const result = await signAndSubmitLegacyTransaction({
-    idempotencyKey: plan.idempotencyKey,
-    owner: input.tradingWalletAddress,
-    rpcUrl: input.config.api.rpcUrl,
-    signer: input.signer,
-    unsignedTransaction: plan.unsignedTransaction,
-  });
-
-  if (result.status !== 'confirmed') {
-    throw new TradingWalletRotationError(
-      `Rotation submission ${result.signature} is not confirmed yet. Retry after it settles.`,
+  while (checkpoint.phase === 'migrating-tokens') {
+    const accounts = orderTokenMigrations(await readRotatableTokenAccounts(
+      input.tradingWalletAddress,
+      plan.nextWalletAddress,
+      rotationRpcInput(input),
+    ));
+    const account = accounts[0];
+    if (account === undefined) {
+      checkpoint = await updateCheckpoint(checkpoint, { phase: 'sweeping-sol', submitted: null });
+      break;
+    }
+    await submitStep(
+      tokenTransaction(
+        account,
+        input,
+        plan.nextWalletAddress,
+        await latestBlockhash(rotationRpcInput(input)),
+      ),
+      checkpoint,
+      input,
     );
+    checkpoint = await requireCheckpoint(input.mainWalletAddress);
+    checkpoint = await settleStoredSubmission(checkpoint, input);
   }
 
-  const [oldNativeBalance, oldTokenAccounts] = await Promise.all([
-    solBalance(input.tradingWalletAddress, input),
-    readTokenAccounts(input),
+  if (checkpoint.phase === 'sweeping-sol') {
+    const accounts = await readRotatableTokenAccounts(
+      input.tradingWalletAddress,
+      plan.nextWalletAddress,
+      rotationRpcInput(input),
+    );
+    if (accounts.length > 0) {
+      await updateCheckpoint(checkpoint, { phase: 'migrating-tokens', submitted: null });
+      return submitTradingWalletRotation(plan, input);
+    }
+    const balance = await solBalance(input.tradingWalletAddress, rotationRpcInput(input));
+    if (balance > 0n) {
+      await submitStep(await sweepTransaction(input, plan.nextWalletAddress, balance), checkpoint, input);
+      checkpoint = await requireCheckpoint(input.mainWalletAddress);
+      checkpoint = await settleStoredSubmission(checkpoint, input);
+    }
+  }
+
+  const [remainingSol, remainingTokens] = await Promise.all([
+    solBalance(input.tradingWalletAddress, rotationRpcInput(input)),
+    readRotatableTokenAccounts(
+      input.tradingWalletAddress,
+      plan.nextWalletAddress,
+      rotationRpcInput(input),
+    ),
   ]);
-  if (oldNativeBalance !== 0n || oldTokenAccounts.length !== 0) {
+  if (remainingSol !== 0n || remainingTokens.length !== 0) {
     throw new TradingWalletRotationError(
-      'The rotation confirmed but the old wallet is not empty. The active wallet was not changed.',
+      'Rotation is partially complete. Resume it to migrate the remaining private-wallet assets.',
     );
   }
-
-  return result;
+  await updateCheckpoint(checkpoint, { phase: 'complete', submitted: null });
 }
 
-async function assertNoPendingActivity(input: RotationInput): Promise<void> {
-  const [funding, exit, directExit, pacificaWithdrawal, pacifica, pacificaAction] = await Promise.all([
-    readPrivateFundingRecord(input.mainWalletAddress),
-    readPrivateExitRecord(input.tradingWalletAddress),
-    readPendingTradeAction(input.tradingWalletAddress, 'wallet-withdrawal'),
-    hasPendingPacificaWithdrawal(input.tradingWalletAddress),
-    fetchPacificaPortfolio(input.config.perps.pacificaApiOrigin, input.tradingWalletAddress),
-    readPendingTradeAction(input.tradingWalletAddress, 'pacifica'),
-  ]);
-
-  if (funding !== null && funding.phase !== 'complete') {
-    throw new TradingWalletRotationError('Private funding is still pending.');
-  }
-  if (exit !== null && exit.phase !== 'complete') {
-    throw new TradingWalletRotationError('A private withdrawal is still pending.');
-  }
-  if (directExit !== null) {
-    throw new TradingWalletRotationError('A direct withdrawal is still pending confirmation.');
-  }
-  if (pacificaWithdrawal) {
-    throw new TradingWalletRotationError('A Pacifica withdrawal is still pending.');
-  }
-  if (pacificaAction !== null) {
-    throw new TradingWalletRotationError('A trading transaction is still pending confirmation.');
-  }
+export async function reconcileTradingWalletRotation(
+  input: RotationInput,
+): Promise<TradingWalletRotationRecovery> {
+  const checkpoint = await readTradingWalletRotation(input.mainWalletAddress);
+  if (checkpoint === null) return { status: 'none' };
   if (
-    pacifica.positionsCount > 0 ||
-    pacifica.ordersCount > 0 ||
-    pacifica.stopOrdersCount > 0 ||
-    nonZero(pacifica.balance) ||
-    nonZero(pacifica.pendingBalance)
+    checkpoint.sourceWalletAddress !== input.tradingWalletAddress &&
+    checkpoint.destinationWalletAddress !== input.tradingWalletAddress
   ) {
     throw new TradingWalletRotationError(
-      'Pacifica still holds positions, orders, stop orders, collateral, or a pending balance.',
+      'Saved rotation does not belong to the active private-wallet identity.',
     );
   }
-}
-
-async function readTokenAccounts(input: RotationInput): Promise<readonly TokenAccount[]> {
-  const programs = [TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()];
-  const batches = await Promise.all(programs.map(async (programId) => {
-    const result = await signedSolanaRpc<{
-      readonly value: readonly {
-        readonly pubkey: string;
-        readonly account: { readonly data: unknown; readonly lamports: number; readonly owner: string };
-      }[];
-    }>({
-      method: 'getTokenAccountsByOwner',
-      params: [
-        input.tradingWalletAddress,
-        { programId },
-        { commitment: 'confirmed', encoding: 'jsonParsed' },
-      ],
-      rpcUrl: input.config.api.rpcUrl,
-      signer: input.signer,
-    });
-
-    return result.value.map((entry): TokenAccount => {
-      if (
-        entry.account.owner !== programId ||
-        !Number.isSafeInteger(entry.account.lamports) ||
-        entry.account.lamports < 0
-      ) throw invalidToken();
-      return {
-        address: new PublicKey(entry.pubkey).toBase58(),
-        amount: parsedTokenAmount(entry.account.data),
-        lamports: BigInt(entry.account.lamports),
-        programId,
-      };
-    });
-  }));
-  return batches.flat();
-}
-
-async function solBalance(address: string, input: RotationInput): Promise<bigint> {
-  const result = await signedSolanaRpc<{ readonly value: number }>({
-    method: 'getBalance',
-    params: [address, { commitment: 'confirmed' }],
-    rpcUrl: input.config.api.rpcUrl,
-    signer: input.signer,
-  });
-  if (!Number.isSafeInteger(result.value) || result.value < 0) {
-    throw new TradingWalletRotationError('A wallet balance could not be verified.');
-  }
-  return BigInt(result.value);
-}
-
-async function latestBlockhash(input: RotationInput): Promise<{ readonly blockhash: string }> {
-  const result = await signedSolanaRpc<{
-    readonly value: { readonly blockhash: string; readonly lastValidBlockHeight: number };
-  }>({
-    method: 'getLatestBlockhash',
-    params: [{ commitment: 'confirmed' }],
-    rpcUrl: input.config.api.rpcUrl,
-    signer: input.signer,
-  });
-  return { blockhash: result.value.blockhash };
-}
-
-async function transactionFee(transaction: Transaction, input: RotationInput): Promise<bigint> {
-  const result = await signedSolanaRpc<{ readonly value: number | null }>({
-    method: 'getFeeForMessage',
-    params: [base64.encode(transaction.serializeMessage()), { commitment: 'confirmed' }],
-    rpcUrl: input.config.api.rpcUrl,
-    signer: input.signer,
-  });
-  if (result.value === null || !Number.isSafeInteger(result.value) || result.value < 0) {
-    throw new TradingWalletRotationError('The rotation transaction fee could not be verified.');
-  }
-  return BigInt(result.value);
-}
-
-async function simulate(transaction: Transaction, input: RotationInput): Promise<void> {
-  const unsigned = transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
-  const result = await signedSolanaRpc<{ readonly value: { readonly err: unknown } }>({
-    method: 'simulateTransaction',
-    params: [
-      base64.encode(unsigned),
-      { commitment: 'confirmed', encoding: 'base64', sigVerify: false },
-    ],
-    rpcUrl: input.config.api.rpcUrl,
-    signer: input.signer,
-  });
-  if (result.value.err !== null) {
-    throw new TradingWalletRotationError(
-      'The atomic rent-and-SOL recovery preview failed. The wallet was not changed.',
-    );
-  }
-}
-
-function emptyPlan(nextWalletAddress: string): TradingWalletRotationPlan {
+  const [remainingSol, remainingTokens] = await Promise.all([
+    solBalance(checkpoint.sourceWalletAddress, rotationRpcInput(input)),
+    readRotatableTokenAccounts(
+      checkpoint.sourceWalletAddress,
+      checkpoint.destinationWalletAddress,
+      rotationRpcInput(input),
+    ),
+  ]);
   return {
-    feeLamports: 0n,
-    idempotencyKey: Crypto.randomUUID(),
-    nextWalletAddress,
-    recoveredRentLamports: 0n,
-    transferredLamports: 0n,
-    unsignedTransaction: null,
+    checkpoint,
+    status: remainingSol === 0n && remainingTokens.length === 0
+      ? 'complete'
+      : 'needs-resume',
   };
 }
 
-function nonZero(value: string): boolean {
-  return !/^0+(?:\.0+)?$/u.test(value);
+export async function finalizeTradingWalletRotation(mainWalletAddress: string): Promise<void> {
+  await removeTradingWalletRotation(mainWalletAddress);
 }
 
-function parsedTokenAmount(value: unknown): bigint {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalidToken();
-  const parsed = (value as Record<string, unknown>).parsed;
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw invalidToken();
-  const info = (parsed as Record<string, unknown>).info;
-  if (typeof info !== 'object' || info === null || Array.isArray(info)) throw invalidToken();
-  const tokenAmount = (info as Record<string, unknown>).tokenAmount;
-  if (typeof tokenAmount !== 'object' || tokenAmount === null || Array.isArray(tokenAmount)) {
-    throw invalidToken();
+async function ensureCheckpoint(
+  plan: TradingWalletRotationPlan,
+  input: RotationInput,
+): Promise<TradingWalletRotationCheckpoint> {
+  const current = await readTradingWalletRotation(input.mainWalletAddress);
+  if (current !== null) {
+    assertCheckpointMatches(current, input, plan.nextWalletAddress, plan.destinationGeneration);
+    return current;
   }
-  const amount = (tokenAmount as Record<string, unknown>).amount;
-  if (typeof amount !== 'string' || !/^\d+$/u.test(amount)) throw invalidToken();
-  return BigInt(amount);
+  const now = Date.now();
+  const checkpoint: TradingWalletRotationCheckpoint = {
+    createdAtMs: now,
+    destinationGeneration: plan.destinationGeneration,
+    destinationWalletAddress: plan.nextWalletAddress,
+    mainWalletAddress: input.mainWalletAddress,
+    phase: 'migrating-tokens',
+    sourceWalletAddress: input.tradingWalletAddress,
+    submitted: null,
+    updatedAtMs: now,
+    version: 1,
+  };
+  await writeTradingWalletRotation(checkpoint);
+  return checkpoint;
 }
 
-function invalidToken() {
-  return new TradingWalletRotationError('A token account could not be verified.');
+async function settleStoredSubmission(
+  checkpoint: TradingWalletRotationCheckpoint,
+  input: RotationInput,
+): Promise<TradingWalletRotationCheckpoint> {
+  const submitted = checkpoint.submitted;
+  if (submitted === null) return checkpoint;
+  const status = await readSubmittedTransactionStatus({
+    rpcUrl: input.config.api.rpcUrl,
+    signature: submitted.signature,
+    signer: input.signer,
+  });
+  if (status === 'confirmed' || status === 'failed') {
+    return updateCheckpoint(checkpoint, { submitted: null });
+  }
+  const current = await storedLegacyTransactionIsCurrent({
+    rpcUrl: input.config.api.rpcUrl,
+    signedTransactionBase64: submitted.signedTransactionBase64,
+    signer: input.signer,
+  });
+  if (!current) return updateCheckpoint(checkpoint, { submitted: null });
+  const result = await submitSignedLegacyTransaction({
+    expectedSignature: submitted.signature,
+    idempotencyKey: submitted.idempotencyKey,
+    owner: checkpoint.sourceWalletAddress,
+    rpcUrl: input.config.api.rpcUrl,
+    signedTransactionBase64: submitted.signedTransactionBase64,
+    signer: input.signer,
+  });
+  if (result.status !== 'confirmed') {
+    throw new TradingWalletRotationError(
+      `Rotation transaction ${result.signature} is still confirming. Resume after it settles.`,
+    );
+  }
+  return updateCheckpoint(checkpoint, { submitted: null });
+}
+
+async function submitStep(
+  transaction: Transaction,
+  checkpoint: TradingWalletRotationCheckpoint,
+  input: RotationInput,
+): Promise<void> {
+  await simulate(transaction, rotationRpcInput(input), 'The rotation preview changed.');
+  const idempotencyKey = Crypto.randomUUID();
+  const result = await signAndSubmitLegacyTransaction({
+    idempotencyKey,
+    onSigned: async (signature, signedTransactionBase64) => {
+      await updateCheckpoint(checkpoint, {
+        submitted: { idempotencyKey, signature, signedTransactionBase64 },
+      });
+    },
+    onSubmissionRejected: async () => {
+      await updateCheckpoint(checkpoint, { submitted: null });
+    },
+    owner: input.tradingWalletAddress,
+    rpcUrl: input.config.api.rpcUrl,
+    signer: input.signer,
+    unsignedTransaction: transaction.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    }),
+  });
+  if (result.status !== 'confirmed') {
+    throw new TradingWalletRotationError(
+      `Rotation transaction ${result.signature} is still confirming. Resume after it settles.`,
+    );
+  }
+  const latest = await requireCheckpoint(input.mainWalletAddress);
+  await updateCheckpoint(latest, { submitted: null });
+}
+
+function tokenTransaction(
+  account: RotatableTokenAccount,
+  input: RotationInput,
+  destinationAddress: string,
+  blockhash: string,
+): Transaction {
+  const source = new PublicKey(input.tradingWalletAddress);
+  const transaction = new Transaction({ feePayer: source, recentBlockhash: blockhash });
+  transaction.add(...tokenMigrationInstructions(
+    account,
+    input.tradingWalletAddress,
+    destinationAddress,
+  ));
+  return transaction;
+}
+
+async function sweepTransaction(
+  input: RotationInput,
+  destinationAddress: string,
+  balance: bigint,
+): Promise<Transaction> {
+  const source = new PublicKey(input.tradingWalletAddress);
+  const destination = new PublicKey(destinationAddress);
+  const transaction = new Transaction({
+    feePayer: source,
+    recentBlockhash: await latestBlockhash(rotationRpcInput(input)),
+  });
+  transaction.add(SystemProgram.transfer({ fromPubkey: source, toPubkey: destination, lamports: 0n }));
+  const fee = await transactionFee(transaction, rotationRpcInput(input));
+  if (balance < fee) {
+    throw new TradingWalletRotationError('Private wallet T needs more SOL for the final rotation fee.');
+  }
+  transaction.instructions[0] = SystemProgram.transfer({
+    fromPubkey: source,
+    toPubkey: destination,
+    lamports: balance - fee,
+  });
+  return transaction;
+}
+
+async function estimatedSweepFee(
+  input: RotationInput,
+  blockhash: string,
+  rpcInput: RotationRpcInput,
+): Promise<bigint> {
+  const source = new PublicKey(input.tradingWalletAddress);
+  const transaction = new Transaction({ feePayer: source, recentBlockhash: blockhash });
+  transaction.add(SystemProgram.transfer({ fromPubkey: source, toPubkey: source, lamports: 0n }));
+  return transactionFee(transaction, rpcInput);
+}
+
+async function latestBlockhash(input: RotationRpcInput): Promise<string> {
+  const result = await signedSolanaRpc<{ readonly value: { readonly blockhash: string } }>({
+    method: 'getLatestBlockhash',
+    params: [{ commitment: 'confirmed' }],
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+  });
+  return result.value.blockhash;
+}
+
+async function transactionFee(transaction: Transaction, input: RotationRpcInput): Promise<bigint> {
+  const result = await signedSolanaRpc<{ readonly value: number | null }>({
+    method: 'getFeeForMessage',
+    params: [base64.encode(transaction.serializeMessage()), { commitment: 'confirmed' }],
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+  });
+  if (result.value === null || !Number.isSafeInteger(result.value) || result.value < 0) {
+    throw new TradingWalletRotationError('The live rotation fee could not be verified.');
+  }
+  return BigInt(result.value);
+}
+
+async function solBalance(address: string, input: RotationRpcInput): Promise<bigint> {
+  const result = await signedSolanaRpc<{ readonly value: number }>({
+    method: 'getBalance',
+    params: [address, { commitment: 'confirmed' }],
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+  });
+  if (!Number.isSafeInteger(result.value) || result.value < 0) {
+    throw new TradingWalletRotationError('A private-wallet SOL balance could not be verified.');
+  }
+  return BigInt(result.value);
+}
+
+async function simulate(
+  transaction: Transaction,
+  input: RotationRpcInput,
+  message: string,
+): Promise<void> {
+  const result = await signedSolanaRpc<{ readonly value: { readonly err: unknown } }>({
+    method: 'simulateTransaction',
+    params: [
+      base64.encode(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })),
+      { commitment: 'confirmed', encoding: 'base64', sigVerify: false },
+    ],
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+  });
+  if (result.value.err !== null) throw new TradingWalletRotationError(message);
+}
+
+async function updateCheckpoint(
+  current: TradingWalletRotationCheckpoint,
+  update: Partial<Pick<TradingWalletRotationCheckpoint, 'phase' | 'submitted'>>,
+): Promise<TradingWalletRotationCheckpoint> {
+  const next = { ...current, ...update, updatedAtMs: Date.now() };
+  await writeTradingWalletRotation(next);
+  return next;
+}
+
+async function requireCheckpoint(mainWalletAddress: string): Promise<TradingWalletRotationCheckpoint> {
+  const checkpoint = await readTradingWalletRotation(mainWalletAddress);
+  if (checkpoint === null) throw new TradingWalletRotationError('Rotation checkpoint is missing.');
+  return checkpoint;
+}
+
+function rotationRpcInput(input: RotationInput): RotationRpcInput {
+  return { rpcUrl: input.config.api.rpcUrl, signer: input.signer };
+}
+
+function assertPlanMatches(plan: TradingWalletRotationPlan, input: RotationInput): void {
+  if (
+    !Number.isSafeInteger(plan.expiresAtMs) || plan.expiresAtMs <= Date.now() ||
+    plan.sourceWalletAddress !== input.tradingWalletAddress ||
+    plan.destinationGeneration <= 0 || plan.nextWalletAddress === input.tradingWalletAddress
+  ) throw new TradingWalletRotationError(
+    'The reviewed rotation expired or no longer matches this wallet. Review it again.',
+  );
+}
+
+function assertCheckpointMatches(
+  checkpoint: TradingWalletRotationCheckpoint,
+  input: RotationInput,
+  destination: string,
+  generation: number,
+): void {
+  if (
+    checkpoint.mainWalletAddress !== input.mainWalletAddress ||
+    checkpoint.sourceWalletAddress !== input.tradingWalletAddress ||
+    checkpoint.destinationWalletAddress !== destination ||
+    checkpoint.destinationGeneration !== generation
+  ) throw new TradingWalletRotationError('Saved rotation does not match the reviewed wallet identities.');
 }

@@ -37,7 +37,9 @@ describe('Pacifica canonical signing payload', () => {
 describe('Pacifica market order intent', () => {
   it('binds valid long TP/SL prices and the selected margin mode', async () => {
     const plan = await preparePacificaOrder({
+      account: '11111111111111111111111111111111',
       action: 'open',
+      apiOrigin: 'https://example.invalid',
       collateralBaseUnits: 100_000_000n,
       leverage: 5,
       marginMode: 'cross',
@@ -52,7 +54,8 @@ describe('Pacifica market order intent', () => {
         accountEquity: '100', availableToSpend: '100', availableToWithdraw: '100',
         balance: '100', initialized: true, makerFee: '0.0002', orders: [], pendingBalance: '0',
         ordersCount: 0, positions: [], positionsCount: 0, stopOrdersCount: 0,
-        takerFee: '0.0007', totalMarginUsed: '0', updatedAtMs: Date.now(),
+        takerFee: '0.0007', totalMarginUsed: '0', crossMmr: '0',
+        fetchedAtMs: Date.now(), updatedAtMs: Date.now(),
       },
       side: 'long',
       snapshot: {

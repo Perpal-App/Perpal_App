@@ -6,9 +6,12 @@ import { SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
 import { layoutMorph } from '@/components/motion/layoutMorph';
 import { RiseInView } from '@/components/motion/RiseInView';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
 import { ProfileHeader } from '@/features/account/components/ProfileHeader';
+import {
+  TradingWalletRecoveryDialog,
+  TradingWalletRotationDialog,
+} from '@/features/account/components/TradingWalletDialogs';
 import {
   SettingsGroup,
   SettingsRow,
@@ -23,6 +26,7 @@ import {
   useTradingSession,
   type TradingSessionStatus,
 } from '@/wallet/trading/TradingSessionProvider';
+import type { TradingWalletRotationPlan } from '@/wallet/trading/rotationSafety';
 
 /** Where support goes. Shown in full on the row, so nobody has to open a link to read it. */
 const SUPPORT_EMAIL = 'perpal.app@gmail.com';
@@ -38,9 +42,9 @@ const X_URL = 'https://x.com/PerpalApp';
 const PRIVATE_ACTIONS = {
   ready: { label: 'Rotate wallet', spoken: 'Rotate private wallet' },
   error: { label: 'Retry wallet setup', spoken: 'Retry private wallet setup' },
-} as const satisfies Partial<
-  Record<TradingSessionStatus, { readonly label: string; readonly spoken: string }>
->;
+  recovery: { label: 'Review recovery', spoken: 'Review private wallet recovery' },
+  resume: { label: 'Resume rotation', spoken: 'Resume private wallet rotation' },
+} as const;
 
 /**
  * Profile: who this device is, the two wallets it holds, and how to reach us.
@@ -61,7 +65,9 @@ export function AccountScreen() {
   const { showOnboardingIntro } = useAppPreferences();
   const signOutInFlight = useRef(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [rotateOpen, setRotateOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [rotationPlan, setRotationPlan] = useState<TradingWalletRotationPlan | null>(null);
+  const [walletActionLoading, setWalletActionLoading] = useState(false);
   const version = Application.nativeApplicationVersion ?? 'Unavailable';
 
   const handlePrivateWallet = () => {
@@ -70,12 +76,58 @@ export function AccountScreen() {
         session.retryRestore();
         return;
       case 'ready':
-        // The preconditions are stated at the point of consent rather than standing on the page:
-        // rotation is rare, and the row is not where that sentence earns its space.
-        setRotateOpen(true);
+        void reviewRotation();
+        return;
+      case 'recovery-required':
+        setRecoveryOpen(true);
         return;
       default:
         return;
+    }
+  };
+
+  const reviewRotation = async () => {
+    if (walletActionLoading) return;
+    setWalletActionLoading(true);
+    try {
+      setRotationPlan(await session.prepareRotation());
+    } catch (cause) {
+      showAppToast({
+        outcome: 'error',
+        title: 'Rotation unavailable',
+        message: cause instanceof Error ? cause.message : 'Rotation could not be reviewed.',
+      });
+    } finally {
+      setWalletActionLoading(false);
+    }
+  };
+
+  const confirmRotation = async () => {
+    const plan = rotationPlan;
+    if (plan === null || walletActionLoading) return;
+    setWalletActionLoading(true);
+    try {
+      await session.rotate(plan);
+      setRotationPlan(null);
+    } finally {
+      setWalletActionLoading(false);
+    }
+  };
+
+  const confirmRecovery = async () => {
+    if (walletActionLoading) return;
+    setWalletActionLoading(true);
+    try {
+      await session.recover();
+      setRecoveryOpen(false);
+    } catch (cause) {
+      showAppToast({
+        outcome: 'error',
+        title: 'Recovery paused',
+        message: cause instanceof Error ? cause.message : 'The recorded identity was preserved.',
+      });
+    } finally {
+      setWalletActionLoading(false);
     }
   };
 
@@ -99,7 +151,7 @@ export function AccountScreen() {
   };
 
   const publicFallback = publicWalletFallback(wallet.status);
-  const privateAction = readPrivateAction(session.status);
+  const privateAction = readPrivateAction(session.status, session.rotationPending);
   // A wallet still being derived has an address on its way, so its row shimmers. A wallet that is
   // inactive or unrecoverable has none coming, and the state on the right says so without a line
   // of placeholder pretending otherwise.
@@ -177,6 +229,7 @@ export function AccountScreen() {
               accessibilityLabel={privateAction.spoken}
               icon="rotate"
               label={privateAction.label}
+              loading={walletActionLoading}
               onPress={handlePrivateWallet}
             />
           )}
@@ -227,17 +280,19 @@ export function AccountScreen() {
         </SettingsGroup>
       </RiseInView>
 
-      <ConfirmDialog
-        confirmLabel="Rotate"
-        message={'Rotation proceeds only after balances, collateral, positions, orders, and pending '
-          + 'private operations are confirmed empty.'}
-        onCancel={() => setRotateOpen(false)}
-        onConfirm={() => {
-          setRotateOpen(false);
-          void session.rotate();
-        }}
-        title="Rotate private wallet?"
-        visible={rotateOpen}
+      <TradingWalletRecoveryDialog
+        error={session.error}
+        loading={walletActionLoading}
+        onCancel={() => setRecoveryOpen(false)}
+        onConfirm={() => void confirmRecovery()}
+        recovery={session.recovery}
+        visible={recoveryOpen}
+      />
+      <TradingWalletRotationDialog
+        loading={walletActionLoading}
+        onCancel={() => setRotationPlan(null)}
+        onConfirm={() => void confirmRotation()}
+        plan={rotationPlan}
       />
 
     </AppScreen>
@@ -280,10 +335,11 @@ function isDeriving(status: TradingSessionStatus): boolean {
 
 function readPrivateAction(
   status: TradingSessionStatus,
+  rotationPending: boolean,
 ): (typeof PRIVATE_ACTIONS)[keyof typeof PRIVATE_ACTIONS] | null {
-  return status === 'ready' || status === 'error'
-    ? PRIVATE_ACTIONS[status]
-    : null;
+  if (status === 'recovery-required') return PRIVATE_ACTIONS.recovery;
+  if (status === 'ready') return rotationPending ? PRIVATE_ACTIONS.resume : PRIVATE_ACTIONS.ready;
+  return status === 'error' ? PRIVATE_ACTIONS.error : null;
 }
 
 /** The private wallet's state as one word, for every state except a working one. */

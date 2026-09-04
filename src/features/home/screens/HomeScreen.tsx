@@ -167,11 +167,15 @@ export function HomeScreen() {
           physics matters for the same reason; two springs at different rates visibly come apart. */}
       <RiseInView delay={motion.rise.stagger} layout={layoutMorph()} style={styles.summary}>
         <AccountOverviewCard
-          activationRequired={tradingSession.status === 'inactive' || tradingSession.status === 'error'}
+          activationRequired={tradingSession.status === 'inactive' ||
+            tradingSession.status === 'error' ||
+            tradingSession.status === 'recovery-required'}
           balances={walletBalances.balances}
           onActivate={tradingSession.status === 'error'
             ? tradingSession.retryRestore
-            : () => void tradingSession.activate()}
+            : tradingSession.status === 'recovery-required'
+              ? () => router.navigate('/account')
+              : () => void tradingSession.activate()}
           portfolio={portfolio.snapshot}
         />
       </RiseInView>

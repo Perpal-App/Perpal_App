@@ -29,6 +29,12 @@ type PressableScaleProps = Omit<
   disabled?: boolean;
   pressedScale?: number;
   /**
+   * Spring the press and its release run on. Defaults to the app's `motion.spring`, which is damped
+   * enough to arrive without overshoot. Pass a slacker one — `motion.pressGooey` — where the control
+   * should settle back through a bounce instead of stopping dead.
+   */
+  pressSpring?: Parameters<typeof withSpring>[1];
+  /**
    * Cross-fades the control in on mount. Handled here rather than in a wrapper
    * so the fade and the press scale share one animated view instead of two
    * nested views writing competing styles.
@@ -55,6 +61,7 @@ export function PressableScale({
   onPress,
   disabled = false,
   pressedScale = motion.pressScale,
+  pressSpring = motion.spring,
   fadeIn = false,
   fadeDuration = motion.fade.duration,
   fadeDelay = 0,
@@ -88,12 +95,12 @@ export function PressableScale({
   }, [enter, fadeDelay, fadeDuration, fades]);
 
   const settle = useCallback(() => {
-    scale.set(withSpring(1, motion.spring));
-  }, [scale]);
+    scale.set(withSpring(1, pressSpring));
+  }, [pressSpring, scale]);
 
   const handlePressIn = () => {
     if (!disabled && !reduceMotion) {
-      scale.set(withSpring(pressedScale, motion.spring));
+      scale.set(withSpring(pressedScale, pressSpring));
     }
   };
 

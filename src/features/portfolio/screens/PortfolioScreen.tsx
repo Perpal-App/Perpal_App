@@ -1,4 +1,5 @@
 import { StyleSheet, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { SkeletonText } from '@/components/feedback/Skeleton';
@@ -14,6 +15,7 @@ import { layout, spacing } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 export function PortfolioScreen() {
+  const router = useRouter();
   const config = readAppConfig();
   const publicWallet = useWalletProvisioning();
   const session = useTradingSession();
@@ -67,7 +69,7 @@ export function PortfolioScreen() {
     return (
       <PortfolioState
         action={recoveryRequired
-          ? undefined
+          ? { label: 'Review recovery', onPress: () => router.navigate('/account') }
           : { label: 'Retry private trading', onPress: session.retryRestore }}
         message={recoveryRequired
           ? 'The derived trading wallet does not match the recorded identity. No new identity was adopted.'

@@ -5,6 +5,7 @@ import { getUmbraRelayer } from '@umbra-privacy/sdk/relayer';
 import type { AppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmount } from '@/domain/money/amount';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
+import { recordClientTelemetry } from '@/integrations/observability/clientTelemetry';
 import {
   classifyPrivateFundingFailure,
   PrivateFundingError,
@@ -131,6 +132,7 @@ async function runExit(
   input: Input,
   onRecord: (record: PrivateExitRecord) => void,
 ): Promise<PrivateExitRecord> {
+  const startedAtMs = performance.now();
   let record: PrivateExitRecord = {
     ...initial,
     errorCode: null,
@@ -172,10 +174,21 @@ async function runExit(
       onState: async (state, phase) => save(withLeg(record, state, phase)),
     });
     await save({ ...record, phase: 'complete', errorCode: null, updatedAtMs: Date.now() });
+    recordClientTelemetry({
+      durationMs: performance.now() - startedAtMs,
+      operation: 'funding.private_withdrawal',
+      outcome: 'ok',
+    });
     return record;
   } catch (cause) {
     const code = classifyPrivateFundingFailure(cause);
     await save({ ...record, errorCode: code, updatedAtMs: Date.now() });
+    recordClientTelemetry({
+      durationMs: performance.now() - startedAtMs,
+      errorCode: code,
+      operation: 'funding.private_withdrawal',
+      outcome: 'error',
+    });
     throw cause instanceof PrivateFundingError
       ? cause
       : new PrivateFundingError(

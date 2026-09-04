@@ -5,7 +5,6 @@ import Svg, { Path } from 'react-native-svg';
 
 import { EyeIcon } from '@/assets/svg/EyeIcon';
 import { SkeletonText } from '@/components/feedback/Skeleton';
-import { ActionButton } from '@/components/ui/ActionButton';
 import { PressableScale } from '@/components/ui/PressableScale';
 import {
   money,
@@ -18,22 +17,18 @@ import {
   walletLabel,
 } from '@/domain/portfolio/accountFigures';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
+import {
+  FundingActions,
+  type FundingAction,
+} from '@/features/portfolio/components/FundingActions';
 import { PortfolioActivityRow } from '@/features/portfolio/components/PortfolioActivityRow';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
-
-type Action = 'deposit' | 'swap' | 'withdraw';
+import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
 /** Stands in for every figure while balances are hidden. */
 const MASK = '••••••';
 /** Invisible box around the eye. With `hitSlop` on top it clears the 48pt minimum target. */
 const REVEAL_SIZE = 34;
-
-const ACTIONS: readonly { readonly key: Action; readonly label: string }[] = [
-  { key: 'deposit', label: 'Deposit' },
-  { key: 'swap', label: 'Swap' },
-  { key: 'withdraw', label: 'Withdraw' },
-];
 
 /**
  * The balance, what it is made of, and what to do with it.
@@ -54,7 +49,7 @@ export function PortfolioSummaryCard({
   portfolio,
 }: {
   readonly balances: WalletBalances | null;
-  readonly onAction: (action: Action) => void;
+  readonly onAction: (action: FundingAction) => void;
   readonly portfolio: PacificaPortfolioSnapshot | null;
 }) {
   // Session-scoped on purpose: this exists for the moment someone is standing behind you, not as a
@@ -120,16 +115,18 @@ export function PortfolioSummaryCard({
           </PressableScale>
         </View>
 
-        {/* An inset panel, the way the reference card holds its secondary block: the two balances the
-            total is made of sit on their own surface rather than floating on the gradient, which is
-            what stops them reading as a second heading under the figure. */}
+        {/* Two capsules rather than one panel split by a rule. The panel was the uneven part: a single
+            flat translucent fill stretched across the card's diagonal ramp, so it read lighter at its
+            top-left corner than at its bottom-right — the wider the fill, the more of the gradient it
+            had to sit still against. Two narrower capsules on the denser `glassRaised` each cover far
+            less of that sweep, and the material is now the same one the actions below use, so the card
+            holds two kinds of pill instead of a box above a row of pills. */}
         <View style={styles.funds}>
           <Figure
             hidden={hidden}
             label={walletLabel('Public funds', balances?.publicWallet ?? null)}
             value={money(publicBalance)}
           />
-          <View style={styles.fundsRule} />
           <Figure
             hidden={hidden}
             label={walletLabel('Private funds', balances?.privateWallet ?? null)}
@@ -137,22 +134,7 @@ export function PortfolioSummaryCard({
           />
         </View>
 
-        {/* The order bar's material, unchanged: same ramp, same one-point rim, same 0.98 press. All
-            three take `accent` because they are peers — three routes to the same sheet — and the
-            grey `neutral` tone would read as a hole cut in a violet card. */}
-        <View accessibilityRole="toolbar" style={styles.actions}>
-          {ACTIONS.map(({ key, label }) => (
-            <ActionButton
-              accessibilityHint={`Opens the ${label.toLowerCase()} options`}
-              key={key}
-              label={label}
-              onPress={() => onAction(key)}
-              style={styles.action}
-              tone="accent"
-            />
-          ))}
-        </View>
-
+        <FundingActions onAction={onAction} />
       </LinearGradient>
 
       <PortfolioActivityRow hidden={hidden} portfolio={portfolio} />
@@ -278,25 +260,31 @@ const styles = StyleSheet.create({
   // rounded, clipped View is the case Android is least reliable about clipping.
   pillTint: { opacity: 0.18, borderRadius: radii.pill },
   pillText: { ...typography.caption, fontVariant: ['tabular-nums'] },
-  funds: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radii.md,
-    borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassRim,
-    backgroundColor: colors.glassHighlight,
+  // Same gap as the action row below, so the two rows of capsules share one rhythm.
+  funds: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs },
+  // The actions' material and radius, at figure proportions: `spacing.md` of horizontal inset rather
+  // than `spacing.xs`, because a capsule this tall has a ~30pt corner and text ranged to the edge
+  // would run into the curve.
+  figure: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.pill,
+    backgroundColor: colors.glassRaised,
   },
-  fundsRule: { width: StyleSheet.hairlineWidth, backgroundColor: colors.glassRim },
-  figure: { flex: 1, minWidth: 0, gap: 2 },
-  figureLabel: { ...typography.caption, color: colors.textSecondary },
+  figureLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
   figureValue: {
     ...typography.label,
     color: colors.textPrimary,
+    textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
-  actions: { flexDirection: 'row', gap: spacing.sm },
-  action: { flex: 1 },
 });

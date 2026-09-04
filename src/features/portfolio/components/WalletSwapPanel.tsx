@@ -33,7 +33,10 @@ import {
   type WalletStablecoinSwapPlan,
   type WalletSwapScope,
 } from '@/integrations/solana/walletStablecoinSwap';
-import { publishInAppNotification } from '@/storage/inAppNotifications';
+import {
+  captureInAppNotificationScope,
+  publishInAppNotification,
+} from '@/storage/inAppNotifications';
 import { showAppToast } from '@/storage/appToast';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
@@ -177,6 +180,7 @@ export function WalletSwapPanel({
 
   const submit = async (confirmedPlan: WalletStablecoinSwapPlan) => {
     if (submitInFlight.current || recovery.isBlocked()) return;
+    const notificationScope = captureInAppNotificationScope();
     if (!config.ok || session.signer === null) {
       setConfirmationVisible(false);
       showAppToast({
@@ -209,8 +213,11 @@ export function WalletSwapPanel({
       setAmount('');
       onBalancesChanged();
       publishInAppNotification({
+        correlations: [{ namespace: 'solana-transaction', value: result.signature }],
         kind: 'wallet',
         outcome: confirmed ? 'success' : 'info',
+        scopeToken: notificationScope,
+        status: confirmed ? 'settled' : 'submitted',
         title: confirmed ? 'Swap complete' : 'Swap submitted',
         message: `${formatSwapAmount(confirmedPlan.amountBaseUnits, confirmedPlan.from)} ${confirmedPlan.from} → ${confirmedPlan.to}.`,
       });

@@ -31,6 +31,7 @@ export type PacificaPortfolioSnapshot = {
   readonly initialized: boolean;
   readonly balance: string;
   readonly accountEquity: string;
+  readonly crossMmr: string;
   readonly availableToSpend: string;
   readonly availableToWithdraw: string;
   readonly pendingBalance: string;
@@ -43,6 +44,8 @@ export type PacificaPortfolioSnapshot = {
   readonly stopOrdersCount: number;
   readonly positions: readonly PacificaPosition[];
   readonly orders: readonly PacificaOpenOrder[];
+  /** Local receipt time for this complete account/positions/orders snapshot. */
+  readonly fetchedAtMs: number;
 };
 
 export async function fetchPacificaPortfolio(
@@ -50,17 +53,39 @@ export async function fetchPacificaPortfolio(
   account: string,
   signal?: AbortSignal,
 ): Promise<PacificaPortfolioSnapshot> {
+  return loadPacificaPortfolio(apiOrigin, account, signal, 'cached');
+}
+
+export async function fetchFreshPacificaPortfolio(
+  apiOrigin: string,
+  account: string,
+  signal?: AbortSignal,
+): Promise<PacificaPortfolioSnapshot> {
+  return loadPacificaPortfolio(apiOrigin, account, signal, 'network');
+}
+
+async function loadPacificaPortfolio(
+  apiOrigin: string,
+  account: string,
+  signal: AbortSignal | undefined,
+  freshness: 'cached' | 'network',
+): Promise<PacificaPortfolioSnapshot> {
   try {
     const [rawAccount, rawPositions, rawOrders] = await Promise.all([
-      pacificaGet<unknown>({ apiOrigin, path: '/account', query: { account }, signal }),
-      pacificaGet<readonly unknown[]>({ apiOrigin, path: '/positions', query: { account }, signal }),
-      pacificaGet<readonly unknown[]>({ apiOrigin, path: '/orders', query: { account }, signal }),
+      pacificaGet<unknown>({ apiOrigin, freshness, path: '/account', query: { account }, signal }),
+      pacificaGet<readonly unknown[]>({
+        apiOrigin, freshness, path: '/positions', query: { account }, signal,
+      }),
+      pacificaGet<readonly unknown[]>({
+        apiOrigin, freshness, path: '/orders', query: { account }, signal,
+      }),
     ]);
     const value = object(rawAccount, 'account');
     return {
       initialized: true,
       balance: decimal(value.balance, 'balance'),
       accountEquity: decimal(value.account_equity, 'account equity'),
+      crossMmr: decimal(value.cross_mmr, 'cross maintenance margin'),
       availableToSpend: decimal(value.available_to_spend, 'available balance'),
       availableToWithdraw: decimal(value.available_to_withdraw, 'withdrawable balance'),
       pendingBalance: decimal(value.pending_balance, 'pending balance'),
@@ -73,6 +98,7 @@ export async function fetchPacificaPortfolio(
       stopOrdersCount: nonNegativeInteger(value.stop_orders_count, 'stop orders count'),
       positions: parsePositions(rawPositions),
       orders: parseOrders(rawOrders),
+      fetchedAtMs: Date.now(),
     };
   } catch (cause) {
     if (
@@ -133,6 +159,7 @@ function emptyPortfolio(): PacificaPortfolioSnapshot {
     initialized: false,
     balance: '0',
     accountEquity: '0',
+    crossMmr: '0',
     availableToSpend: '0',
     availableToWithdraw: '0',
     pendingBalance: '0',
@@ -145,6 +172,7 @@ function emptyPortfolio(): PacificaPortfolioSnapshot {
     stopOrdersCount: 0,
     positions: [],
     orders: [],
+    fetchedAtMs: Date.now(),
   };
 }
 

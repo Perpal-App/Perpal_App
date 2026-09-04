@@ -2,9 +2,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58, base64 } from '@scure/base';
 import { isConnected, useEmbeddedSolanaWallet } from '@privy-io/expo';
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -19,8 +17,13 @@ import {
   readTradingWalletIdentity,
   writeActivatedTradingWallet,
   writeTradingWalletIdentity,
+  type ActivatedTradingWallet,
 } from '@/storage/trading-wallet-identity';
-import { publishInAppNotification } from '@/storage/inAppNotifications';
+import { readTradingWalletRotation } from '@/storage/trading-wallet-rotation';
+import {
+  captureInAppNotificationScope,
+  publishInAppNotification,
+} from '@/storage/inAppNotifications';
 import {
   DERIVATION_MESSAGE,
   checkTradingWalletIdentity,
@@ -29,43 +32,27 @@ import {
   verifyDerivationSignature,
   zeroize,
   type DerivedTradingWallet,
-  type TradingWalletIdentity,
 } from '@/wallet/trading/derivation';
 import {
+  finalizeTradingWalletRotation,
   prepareTradingWalletRotation,
   submitTradingWalletRotation,
+  type TradingWalletRotationPlan,
 } from '@/wallet/trading/rotationSafety';
+import {
+  reconcileActivatedTradingWallet,
+  type RecoveryCandidate,
+} from '@/wallet/trading/rotationRecovery';
+import {
+  TradingSessionContext,
+  type TradingSessionRecovery,
+  type TradingSessionStatus,
+} from '@/wallet/trading/TradingSessionContext';
+import { useTradingWalletRecovery } from '@/wallet/trading/useTradingWalletRecovery';
+import { logTradingWalletError } from '@/wallet/trading/tradingWalletLog';
 
-export type TradingSessionStatus =
-  | 'waiting-for-wallet'
-  | 'restoring'
-  | 'inactive'
-  | 'activating'
-  | 'rotating'
-  | 'ready'
-  | 'recovery-required'
-  | 'error';
-
-type TradingSession = {
-  readonly status: TradingSessionStatus;
-  readonly mainWalletAddress: string | null;
-  readonly address: string | null;
-  readonly signer: GatewayRequestSigner | null;
-  readonly generation: number;
-  readonly recovery: TradingSessionRecovery | null;
-  readonly error: string | null;
-  readonly activate: () => Promise<void>;
-  readonly retryRestore: () => void;
-  readonly rotate: () => Promise<void>;
-};
-
-export type TradingSessionRecovery = {
-  readonly reason: 'mismatch' | 'version-upgrade';
-  readonly recorded: TradingWalletIdentity;
-  readonly derived: TradingWalletIdentity;
-};
-
-const TradingSessionContext = createContext<TradingSession | null>(null);
+export { useTradingSession } from '@/wallet/trading/TradingSessionContext';
+export type { TradingSessionRecovery, TradingSessionStatus } from '@/wallet/trading/TradingSessionContext';
 
 export function TradingSessionProvider({
   children,
@@ -84,11 +71,13 @@ export function TradingSessionProvider({
   );
   const [address, setAddress] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<TradingSessionRecovery | null>(null);
+  const [rotationPending, setRotationPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const [restoreAttempt, setRestoreAttempt] = useState(0);
   const seedRef = useRef<Uint8Array | null>(null);
   const rootSeedRef = useRef<Uint8Array | null>(null);
+  const recoveryCandidateRef = useRef<RecoveryCandidate | null>(null);
   const walletAddressRef = useRef(mainWalletAddress);
   const activatingRef = useRef(false);
   const automaticActivationRef = useRef<string | null>(null);
@@ -102,6 +91,12 @@ export function TradingSessionProvider({
       zeroize(rootSeedRef.current);
       rootSeedRef.current = null;
     }
+    const candidate = recoveryCandidateRef.current;
+    if (candidate !== null) {
+      zeroize(candidate.wallet.secretKey);
+      zeroize(candidate.rootSecretKey);
+      recoveryCandidateRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -111,6 +106,7 @@ export function TradingSessionProvider({
     clearSecret();
     setAddress(null);
     setRecovery(null);
+    setRotationPending(false);
     setError(null);
     setGeneration(0);
 
@@ -120,6 +116,7 @@ export function TradingSessionProvider({
     }
 
     let cancelled = false;
+    const scopeToken = captureInAppNotificationScope();
     setStatus('restoring');
 
     void readActivatedTradingWallet(mainWalletAddress)
@@ -136,6 +133,7 @@ export function TradingSessionProvider({
         }
 
         let retained = false;
+        let selected: ActivatedTradingWallet = activated;
 
         try {
           const recorded = await readTradingWalletIdentity(mainWalletAddress);
@@ -150,6 +148,11 @@ export function TradingSessionProvider({
             identity.status === 'mismatch' ||
             identity.status === 'version-upgrade'
           ) {
+            recoveryCandidateRef.current = {
+              rootSecretKey: activated.rootSecretKey,
+              wallet: activated,
+            };
+            retained = true;
             setRecovery({
               reason: identity.status,
               recorded: identity.recorded,
@@ -163,20 +166,34 @@ export function TradingSessionProvider({
             await writeTradingWalletIdentity(mainWalletAddress, activated);
           }
 
+          const config = readAppConfig();
+          if (!config.ok) throw new Error('Private-wallet configuration is unavailable.');
+          const rotation = await reconcileActivatedTradingWallet({
+            activated,
+            config: config.value,
+            mainWalletAddress,
+          });
+          selected = rotation.wallet;
+
           if (cancelled) {
             return;
           }
 
-          seedRef.current = activated.secretKey;
-          rootSeedRef.current = activated.rootSecretKey;
+          seedRef.current = selected.secretKey;
+          rootSeedRef.current = selected.rootSecretKey;
           retained = true;
-          setAddress(activated.address);
-          setGeneration(activated.generation);
+          setAddress(selected.address);
+          setGeneration(selected.generation);
+          setRotationPending(rotation.rotationPending);
           setStatus('ready');
         } finally {
           if (!retained) {
-            activated.secretKey.fill(0);
-            activated.rootSecretKey.fill(0);
+            selected.secretKey.fill(0);
+            selected.rootSecretKey.fill(0);
+            if (selected !== activated) {
+              activated.secretKey.fill(0);
+              activated.rootSecretKey.fill(0);
+            }
           }
         }
       })
@@ -184,10 +201,11 @@ export function TradingSessionProvider({
         if (!cancelled) {
           setError('The saved private trading wallet could not be verified.');
           setStatus('error');
-          logActivationError('restore', cause);
+          logTradingWalletError('restore', cause);
           publishInAppNotification({
             kind: 'wallet',
             outcome: 'error',
+            scopeToken,
             title: 'Private wallet restore paused',
             message: 'Retry private wallet T from the profile screen.',
           });
@@ -200,7 +218,6 @@ export function TradingSessionProvider({
   }, [clearSecret, mainWalletAddress, restoreAttempt]);
 
   useEffect(() => clearSecret, [clearSecret]);
-
   const activate = useCallback(async () => {
     if (
       activatingRef.current ||
@@ -221,6 +238,7 @@ export function TradingSessionProvider({
       return;
     }
 
+    const scopeToken = captureInAppNotificationScope();
     activatingRef.current = true;
     setError(null);
     setStatus('activating');
@@ -252,7 +270,10 @@ export function TradingSessionProvider({
       }
 
       if (identity.status === 'mismatch' || identity.status === 'version-upgrade') {
-        zeroize(derived.secretKey);
+        recoveryCandidateRef.current = {
+          rootSecretKey: derived.secretKey.slice(),
+          wallet: derived,
+        };
         setRecovery({
           reason: identity.status,
           recorded: identity.recorded,
@@ -278,6 +299,7 @@ export function TradingSessionProvider({
       publishInAppNotification({
         kind: 'wallet',
         outcome: 'success',
+        scopeToken,
         title: 'Private trading activated',
         message: 'Private wallet T is ready for funding and trading.',
       });
@@ -286,15 +308,20 @@ export function TradingSessionProvider({
       setAddress(null);
       setError('Private trading activation was not completed. Try again.');
       setStatus('error');
-      logActivationError('activate', cause);
+      logTradingWalletError('activate', cause);
       publishInAppNotification({
         kind: 'wallet',
         outcome: 'error',
+        scopeToken,
         title: 'Private trading setup paused',
         message: 'Retry the private wallet setup.',
       });
     } finally {
-      if (derived !== null && seedRef.current !== derived.secretKey) {
+      if (
+        derived !== null &&
+        seedRef.current !== derived.secretKey &&
+        recoveryCandidateRef.current?.wallet.secretKey !== derived.secretKey
+      ) {
         zeroize(derived.secretKey);
       }
       activatingRef.current = false;
@@ -316,6 +343,25 @@ export function TradingSessionProvider({
     setRestoreAttempt((attempt) => attempt + 1);
   }, []);
 
+  const recover = useTradingWalletRecovery({
+    activatingRef,
+    clearSecret,
+    mainWalletAddress,
+    recovery,
+    recoveryCandidateRef,
+    rootSeedRef,
+    seedRef,
+    setAddress,
+    setError,
+    setGeneration,
+    setRecovery,
+    setRotationPending,
+    setStatus,
+    status,
+    wallet,
+    walletAddressRef,
+  });
+
   const signer = useMemo<GatewayRequestSigner | null>(() => {
     if (status !== 'ready' || address === null) {
       return null;
@@ -335,7 +381,7 @@ export function TradingSessionProvider({
     };
   }, [address, status]);
 
-  const rotate = useCallback(async () => {
+  const prepareRotation = useCallback(async (): Promise<TradingWalletRotationPlan> => {
     const config = readAppConfig();
     const rootSeed = rootSeedRef.current;
     if (
@@ -345,19 +391,44 @@ export function TradingSessionProvider({
       address === null ||
       signer === null ||
       rootSeed === null
-    ) return;
-    setStatus('rotating');
-    setError(null);
-    let next: DerivedTradingWallet | null = null;
+    ) throw new Error('Private wallet is not ready to review rotation.');
+    const checkpoint = await readTradingWalletRotation(mainWalletAddress);
+    const destinationGeneration = checkpoint?.destinationGeneration ?? generation + 1;
+    const next = deriveRotatedTradingWallet(rootSeed, mainWalletAddress, destinationGeneration);
     try {
-      next = deriveRotatedTradingWallet(rootSeed, mainWalletAddress, generation + 1);
-      const plan = await prepareTradingWalletRotation({
+      if (checkpoint !== null && checkpoint.destinationWalletAddress !== next.address) {
+        throw new Error('Saved rotation destination does not match the private-wallet root.');
+      }
+      return await prepareTradingWalletRotation({
         config: config.value,
+        destinationGeneration,
         mainWalletAddress,
         nextWalletAddress: next.address,
         signer,
         tradingWalletAddress: address,
       });
+    } finally {
+      zeroize(next.secretKey);
+    }
+  }, [address, generation, mainWalletAddress, signer, status]);
+
+  const rotate = useCallback(async (plan: TradingWalletRotationPlan) => {
+    const config = readAppConfig();
+    const rootSeed = rootSeedRef.current;
+    if (
+      !config.ok || status !== 'ready' || mainWalletAddress === null ||
+      address === null || signer === null || rootSeed === null
+    ) return;
+    const scopeToken = captureInAppNotificationScope();
+    setStatus('rotating');
+    setError(null);
+    let next: DerivedTradingWallet | null = null;
+    let adopted = false;
+    try {
+      next = deriveRotatedTradingWallet(rootSeed, mainWalletAddress, plan.destinationGeneration);
+      if (next.address !== plan.nextWalletAddress || plan.sourceWalletAddress !== address) {
+        throw new Error('The reviewed rotation identities changed. Review it again.');
+      }
       await submitTradingWalletRotation(plan, {
         config: config.value,
         mainWalletAddress,
@@ -367,27 +438,36 @@ export function TradingSessionProvider({
       await writeActivatedTradingWallet(mainWalletAddress, next, rootSeed);
       seedRef.current?.fill(0);
       seedRef.current = next.secretKey;
+      adopted = true;
       setAddress(next.address);
       setGeneration(next.generation);
+      setRotationPending(false);
       setStatus('ready');
+      await finalizeTradingWalletRotation(mainWalletAddress);
       publishInAppNotification({
         kind: 'wallet',
         outcome: 'success',
+        scopeToken,
         title: 'Private wallet rotated',
         message: 'The new private wallet T is active and recovered SOL and account rent are available.',
       });
     } catch (cause) {
-      if (next !== null && seedRef.current !== next.secretKey) zeroize(next.secretKey);
+      if (next !== null && !adopted) zeroize(next.secretKey);
+      const pending = await readTradingWalletRotation(mainWalletAddress).catch(() => null);
+      setRotationPending(pending !== null);
       setError(cause instanceof Error ? cause.message : 'Rotation safety could not be verified.');
       setStatus('ready');
       publishInAppNotification({
         kind: 'wallet',
         outcome: 'error',
+        scopeToken,
         title: 'Private wallet not rotated',
-        message: 'Balances or pending activity may still block rotation.',
+        message: pending === null
+          ? 'Balances or pending activity may still block rotation.'
+          : 'Rotation is safely checkpointed. Resume it after the pending step settles.',
       });
     }
-  }, [address, generation, mainWalletAddress, signer, status]);
+  }, [address, mainWalletAddress, signer, status]);
 
   const value = useMemo(
     () => ({
@@ -396,13 +476,19 @@ export function TradingSessionProvider({
       error,
       generation,
       mainWalletAddress,
+      prepareRotation,
       recovery,
+      recover,
       rotate,
+      rotationPending,
       retryRestore,
       signer,
       status,
     }),
-    [activate, address, error, generation, mainWalletAddress, recovery, retryRestore, rotate, signer, status],
+    [
+      activate, address, error, generation, mainWalletAddress, prepareRotation,
+      recover, recovery, retryRestore, rotate, rotationPending, signer, status,
+    ],
   );
 
   return (
@@ -410,26 +496,4 @@ export function TradingSessionProvider({
       {children}
     </TradingSessionContext.Provider>
   );
-}
-
-export function useTradingSession(): TradingSession {
-  const session = useContext(TradingSessionContext);
-
-  if (session === null) {
-    throw new Error('useTradingSession must be used inside TradingSessionProvider.');
-  }
-
-  return session;
-}
-
-function logActivationError(
-  phase: 'activate' | 'restore',
-  cause: unknown,
-): void {
-  if (__DEV__) {
-    console.error('[Perpal private trading wallet failed]', {
-      phase,
-      errorName: cause instanceof Error ? cause.name : typeof cause,
-    });
-  }
 }

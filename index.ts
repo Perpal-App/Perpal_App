@@ -7,4 +7,5 @@
  */
 import './src/polyfills';
 import 'react-native-gesture-handler';
+import './src/integrations/observability/installRedactedErrorHandler';
 import 'expo-router/entry';

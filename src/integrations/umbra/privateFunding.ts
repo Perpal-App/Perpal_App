@@ -3,6 +3,7 @@ import { NATIVE_MINT } from '@solana/spl-token';
 
 import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
+import { recordClientTelemetry } from '@/integrations/observability/clientTelemetry';
 import {
   pacificaCollateral,
   type ProviderCollateral,
@@ -234,7 +235,7 @@ async function runPrivateFunding(
     }
     if (fundingClaimsComplete(record)) {
       await completeFundingDestination(record, input, save);
-      logFundingCompleted(operationStartedAtMs);
+      logFundingCompleted(operationStartedAtMs, record.destination);
       return record;
     }
     const dependencies = createUmbraGatewayDependencies({
@@ -348,7 +349,7 @@ async function runPrivateFunding(
       },
     });
     await completeFundingDestination(record, input, save);
-    logFundingCompleted(operationStartedAtMs);
+    logFundingCompleted(operationStartedAtMs, record.destination);
     return record;
   } catch (cause) {
     const classifiedCode = classifyPrivateFundingFailure(cause);
@@ -360,6 +361,12 @@ async function runPrivateFunding(
       event: 'funding_failed',
       phase: record.phase,
     }));
+    recordClientTelemetry({
+      durationMs: performance.now() - operationStartedAtMs,
+      errorCode: code,
+      operation: `funding.private_deposit.${record.destination}`,
+      outcome: 'error',
+    });
     throw cause instanceof PrivateFundingError
       ? cause
       : new PrivateFundingError(privateFundingUserMessage(code), code);
@@ -415,11 +422,20 @@ function fundingClaimsComplete(record: PrivateFundingRecord): boolean {
   return record.claimSignature !== null && record.feeFundingSignature !== null;
 }
 
-function logFundingCompleted(startedAtMs: number): void {
+function logFundingCompleted(
+  startedAtMs: number,
+  destination: PrivateFundingRecord['destination'],
+): void {
+  const durationMs = Math.round(performance.now() - startedAtMs);
   console.info('[Perpal Umbra deposit]', JSON.stringify({
-    durationMs: Math.round(performance.now() - startedAtMs),
+    durationMs,
     event: 'funding_completed',
   }));
+  recordClientTelemetry({
+    durationMs,
+    operation: `funding.private_deposit.${destination}`,
+    outcome: 'ok',
+  });
 }
 
 function hasNoSubmittedFundingStage(record: PrivateFundingRecord): boolean {

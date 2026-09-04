@@ -5,7 +5,7 @@ import {
   submitPacificaDeposit,
   type PacificaDepositPlan,
 } from '@/integrations/perps/pacifica/pacificaDeposit';
-import { fetchPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import { fetchFreshPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { collateralShortfall, creditedDepositAmount } from '@/integrations/perps/tradeCollateralMath';
 import {
   removePendingTradeAction,
@@ -45,7 +45,7 @@ export async function preparePacificaTradeCollateral(input: {
   readonly usdcMint: string;
   readonly vault: string;
 }): Promise<TradeCollateralStep | null> {
-  const portfolio = await fetchPacificaPortfolio(
+  const portfolio = await fetchFreshPacificaPortfolio(
     input.apiOrigin,
     input.owner,
     input.signal,
