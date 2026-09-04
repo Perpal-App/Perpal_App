@@ -41,23 +41,32 @@ export function GlobalActivityTracker({
   account,
   apiOrigin,
   generation,
+  pacificaProgramId,
   publicAccount,
   rpcUrl,
   signer,
+  usdcMint,
+  usdtMint,
 }: {
   readonly account: string;
   readonly apiOrigin: string;
   readonly generation: number;
+  readonly pacificaProgramId: string;
   readonly publicAccount: string | null;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner | null;
+  readonly usdcMint: string;
+  readonly usdtMint: string;
 }) {
   const remote = usePacificaActivity(apiOrigin, account);
   const wallet = useSolanaWalletActivity({
+    pacificaProgramId,
     privateAddress: account,
     publicAddress: publicAccount,
     rpcUrl,
     signer,
+    usdcMint,
+    usdtMint,
   });
   const local = useSyncExternalStore(
     subscribeInAppNotifications,

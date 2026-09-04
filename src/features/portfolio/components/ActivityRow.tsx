@@ -34,9 +34,9 @@ export function ActivityRow({
   // would disagree with the number printed beside it.
   const color = item.outcome === 'error'
     ? colors.negative
-    : item.value?.startsWith('+$')
+    : item.value?.startsWith('+')
       ? colors.positive
-      : item.value?.startsWith('-$')
+      : item.value?.startsWith('-')
         ? colors.negative
         : colors.textPrimary;
 
@@ -93,10 +93,17 @@ function ActivityGlyph({ item }: { readonly item: ActivityItem }) {
           <Path {...stroke} d="M12 7.8v4.8" />
           <Circle cx="12" cy="16.1" fill={tone} r="1.1" />
         </>
-      ) : item.kind === 'trade' ? (
+      ) : item.kind === 'trade' || item.kind === 'swap' ? (
         <>
           <Path {...stroke} d="M4 16.4 9.2 11.2 13 15 20 8" />
           <Path {...stroke} d="M15.4 8h4.6v4.6" />
+        </>
+      ) : item.kind === 'transfer' ? (
+        <>
+          <Path {...stroke} d="M4.5 8h14" />
+          <Path {...stroke} d="m15 4.5 3.5 3.5-3.5 3.5" />
+          <Path {...stroke} d="M19.5 16h-14" />
+          <Path {...stroke} d="m9 12.5-3.5 3.5L9 19.5" />
         </>
       ) : item.kind === 'funding' ? (
         <>

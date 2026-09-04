@@ -3,18 +3,19 @@ import type {
   PacificaBalanceActivity,
   PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
+import { formatAmountWithCommas } from '@/domain/money/amount';
 import type { SolanaWalletActivity } from '@/integrations/solana/solanaWalletActivity';
+import type { WalletAssetAmount } from '@/integrations/solana/solanaWalletActivityParser';
 import type { InAppNotification } from '@/storage/inAppNotifications';
 import { privateIdentifier } from '@/storage/privateIdentifier';
 
 /**
  * What a row in the history can be.
  *
- * Three kinds rather than the venue's dozen event types: a trade, value arriving, value leaving.
- * That is the distinction a reader scanning a history actually makes, and it is what the filter
- * chips are built on — a chip per underlying event type would be a menu, not a filter.
+ * Provider trades, wallet swaps/transfers, and directional fund movements remain distinct so the
+ * filter never claims an on-chain send is a deposit or a swap is a trade fill.
  */
-export type ActivityKind = 'funding' | 'trade' | 'withdrawal';
+export type ActivityKind = 'funding' | 'swap' | 'trade' | 'transfer' | 'withdrawal';
 
 export type ActivityItem = {
   readonly createdAtMs: number;
@@ -39,7 +40,9 @@ export function mergeActivity(
   local: readonly InAppNotification[],
   walletActivity: readonly SolanaWalletActivity[] = [],
 ): readonly ActivityItem[] {
-  const authoritative = authoritativeCorrelationKeys(remote, walletActivity);
+  const authoritative = authoritativeCorrelationKeys(remote);
+  const portfolioLocal = local.filter(isPortfolioActivity);
+  const walletKeys = new Set(walletActivity.map((item) => item.correlationKey));
   const detailedTradeTimes = new Set(
     remote?.trades.map((trade) => trade.createdAtMs) ?? [],
   );
@@ -49,10 +52,11 @@ export function mergeActivity(
       .filter((item) => shouldShowBalanceEvent(item, detailedTradeTimes))
       .map(balanceItem) ?? []),
     ...walletActivity.map(walletItem),
-    ...local.filter((item) => (
-      isPortfolioActivity(item)
-      && !item.correlationKeys.some((key) => authoritative.has(key))
-    )).map(localItem),
+    ...portfolioLocal
+      .filter((item) => !item.correlationKeys.some((key) => (
+        authoritative.has(key) || walletKeys.has(key)
+      )))
+      .map(localItem),
   ];
 
   return items.sort(
@@ -62,7 +66,6 @@ export function mergeActivity(
 
 function authoritativeCorrelationKeys(
   remote: PacificaActivity | null,
-  walletActivity: readonly SolanaWalletActivity[],
 ): ReadonlySet<string> {
   const keys = new Set<string>();
   for (const trade of remote?.trades ?? []) {
@@ -74,7 +77,6 @@ function authoritativeCorrelationKeys(
       `${balance.createdAtMs}:${balance.eventType}:${balance.amount}:${balance.balance}`,
     ));
   }
-  for (const item of walletActivity) keys.add(item.correlationKey);
   return keys;
 }
 
@@ -98,7 +100,8 @@ export function matchesActivityQuery(item: ActivityItem, query: string): boolean
   if (needle.length === 0) return true;
 
   return item.title.toLowerCase().includes(needle)
-    || item.detail.toLowerCase().includes(needle);
+    || item.detail.toLowerCase().includes(needle)
+    || item.value?.toLowerCase().includes(needle) === true;
 }
 
 function tradeItem(trade: PacificaTradeActivity): ActivityItem {
@@ -157,18 +160,69 @@ function isPortfolioActivity(item: InAppNotification): boolean {
 }
 
 function walletItem(item: SolanaWalletActivity): ActivityItem {
-  const label = item.wallet === 'transfer'
-    ? 'Wallet transfer'
-    : item.wallet === 'public' ? 'Public wallet transaction' : 'Private wallet transaction';
-  return {
+  const action = item.action;
+  const shared = {
     createdAtMs: item.createdAtMs,
-    detail: item.outcome === 'success' ? 'Confirmed on Solana' : 'Failed on Solana',
     id: `solana:${item.id}`,
-    kind: 'funding',
     outcome: item.outcome,
-    title: label,
-    value: null,
+  } as const;
+
+  if (action.type === 'swap') {
+    return {
+      ...shared,
+      detail: `${walletLabel(action.wallet)} · Confirmed on Solana`,
+      kind: 'swap',
+      title: `Swapped ${action.spent.symbol} to ${action.received.symbol}`,
+      value: `${assetAmount(action.spent)} → ${assetAmount(action.received)}`,
+    };
+  }
+
+  if (action.type === 'transfer') {
+    return {
+      ...shared,
+      detail: `${walletLabel(action.from)} → ${walletLabel(action.to)} · Confirmed on Solana`,
+      kind: 'transfer',
+      title: `Moved ${action.amount.symbol} to ${action.to} wallet`,
+      value: assetAmount(action.amount),
+    };
+  }
+
+  if (action.type === 'pacifica_deposit') {
+    return {
+      ...shared,
+      detail: 'Private wallet → Pacifica · Confirmed on Solana',
+      kind: 'funding',
+      title: 'Deposited to Pacifica',
+      value: `-${assetAmount(action.amount)}`,
+    };
+  }
+
+  if (action.type === 'pacifica_withdrawal') {
+    return {
+      ...shared,
+      detail: 'Pacifica → Private wallet · Confirmed on Solana',
+      kind: 'withdrawal',
+      title: 'Withdrew from Pacifica',
+      value: `+${assetAmount(action.amount)}`,
+    };
+  }
+
+  const receiving = action.type === 'receive';
+  return {
+    ...shared,
+    detail: `${walletLabel(action.wallet)} · Confirmed on Solana`,
+    kind: receiving ? 'funding' : 'withdrawal',
+    title: `${receiving ? 'Received' : 'Sent'} ${action.amount.symbol}`,
+    value: `${receiving ? '+' : '-'}${assetAmount(action.amount)}`,
   };
+}
+
+function assetAmount(amount: WalletAssetAmount): string {
+  return `${formatAmountWithCommas(amount)} ${amount.symbol}`;
+}
+
+function walletLabel(wallet: 'private' | 'public'): string {
+  return wallet === 'public' ? 'Public wallet' : 'Private wallet';
 }
 
 /**

@@ -183,9 +183,12 @@ export function PacificaPortfolioContent({
         account={session.address ?? ''}
         apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
         generation={session.generation}
+        pacificaProgramId={config.ok ? config.value.perps.pacificaProgramId : ''}
         publicAccount={session.mainWalletAddress}
         rpcUrl={config.ok ? config.value.api.rpcUrl : ''}
         signer={session.signer}
+        usdcMint={config.ok ? config.value.perps.usdcMint : ''}
+        usdtMint={config.ok ? config.value.perps.usdtMint : ''}
       />
 
       <FundsSheet

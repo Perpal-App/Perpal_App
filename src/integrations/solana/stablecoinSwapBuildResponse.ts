@@ -3,6 +3,7 @@ import { Buffer } from 'buffer';
 import { PublicKey, TransactionInstruction } from '@solana/web3.js';
 
 import { validateStablecoinSwapInstructions } from '@/integrations/solana/stablecoinSwapInstructionValidation';
+import { JUPITER_SWAP_PROGRAM_ID } from '@/integrations/solana/programIds';
 import {
   StablecoinSwapError,
   type SwapAsset,
@@ -10,7 +11,7 @@ import {
 } from '@/integrations/solana/stablecoinSwapTypes';
 
 const JUPITER_PROGRAM_ID = new PublicKey(
-  'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+  JUPITER_SWAP_PROGRAM_ID,
 );
 
 type EncodedInstruction = {

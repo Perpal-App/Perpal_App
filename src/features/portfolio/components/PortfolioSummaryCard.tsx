@@ -115,18 +115,18 @@ export function PortfolioSummaryCard({
           </PressableScale>
         </View>
 
-        {/* Two capsules rather than one panel split by a rule. The panel was the uneven part: a single
-            flat translucent fill stretched across the card's diagonal ramp, so it read lighter at its
-            top-left corner than at its bottom-right — the wider the fill, the more of the gradient it
-            had to sit still against. Two narrower capsules on the denser `glassRaised` each cover far
-            less of that sweep, and the material is now the same one the actions below use, so the card
-            holds two kinds of pill instead of a box above a row of pills. */}
+        {/* One panel again, split by a rule — but stripped of the two things that made it look boxy
+            rather than of the panel itself. The hairline rim is gone, so the shape ends where its fill
+            ends instead of being outlined, and the corner is `radii.lg` to match the card's own rather
+            than the tighter `radii.md` it had. Figures range left, which is what lets the rule read as
+            a column separator instead of as decoration between two centred blocks. */}
         <View style={styles.funds}>
           <Figure
             hidden={hidden}
             label={walletLabel('Public funds', balances?.publicWallet ?? null)}
             value={money(publicBalance)}
           />
+          <View style={styles.fundsRule} />
           <Figure
             hidden={hidden}
             label={walletLabel('Private funds', balances?.privateWallet ?? null)}
@@ -260,31 +260,24 @@ const styles = StyleSheet.create({
   // rounded, clipped View is the case Android is least reliable about clipping.
   pillTint: { opacity: 0.18, borderRadius: radii.pill },
   pillText: { ...typography.caption, fontVariant: ['tabular-nums'] },
-  // Same gap as the action row below, so the two rows of capsules share one rhythm.
-  funds: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs },
-  // The actions' material and radius, at figure proportions: `spacing.md` of horizontal inset rather
-  // than `spacing.xs`, because a capsule this tall has a ~30pt corner and text ranged to the edge
-  // would run into the curve.
-  figure: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.pill,
-    backgroundColor: colors.glassRaised,
+  // No rim, and the card's own corner. A tint rather than the graphite the action chips below are cut
+  // from: this panel covers roughly four times a chip's area, and a fill dark enough to read as its own
+  // surface at that size would divide the card in two instead of grouping two figures inside it.
+  funds: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    borderCurve: 'continuous',
+    backgroundColor: colors.glassHighlight,
   },
-  figureLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
+  fundsRule: { width: StyleSheet.hairlineWidth, backgroundColor: colors.glassRim },
+  figure: { flex: 1, minWidth: 0, gap: 2 },
+  figureLabel: { ...typography.caption, color: colors.textSecondary },
   figureValue: {
     ...typography.label,
     color: colors.textPrimary,
-    textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
 });

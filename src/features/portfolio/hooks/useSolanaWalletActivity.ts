@@ -15,10 +15,13 @@ type State = {
 const REFRESH_AFTER_MS = 60_000;
 
 export function useSolanaWalletActivity(input: {
+  readonly pacificaProgramId: string;
   readonly privateAddress: string;
   readonly publicAddress: string | null;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner | null;
+  readonly usdcMint: string;
+  readonly usdtMint: string;
 }) {
   const [state, setState] = useState<State>({ data: [], status: 'loading' });
   const [refreshKey, setRefreshKey] = useState(0);
@@ -32,14 +35,25 @@ export function useSolanaWalletActivity(input: {
   useEffect(() => {
     updatedAtMs.current = 0;
     setState({ data: [], status: 'loading' });
-  }, [input.privateAddress, input.publicAddress, input.rpcUrl, input.signer]);
+  }, [
+    input.pacificaProgramId,
+    input.privateAddress,
+    input.publicAddress,
+    input.rpcUrl,
+    input.signer,
+    input.usdcMint,
+    input.usdtMint,
+  ]);
 
   useFocusEffect(useCallback(() => {
     if (
       input.publicAddress === null
+      || input.pacificaProgramId.length === 0
       || input.privateAddress.length === 0
       || input.rpcUrl.length === 0
       || input.signer === null
+      || input.usdcMint.length === 0
+      || input.usdtMint.length === 0
     ) return undefined;
     const forced = forceNetwork.current;
     forceNetwork.current = false;
@@ -47,11 +61,14 @@ export function useSolanaWalletActivity(input: {
 
     const controller = new AbortController();
     void fetchSolanaWalletActivity({
+      pacificaProgramId: input.pacificaProgramId,
       privateAddress: input.privateAddress,
       publicAddress: input.publicAddress,
       rpcUrl: input.rpcUrl,
       signal: controller.signal,
       signer: input.signer,
+      usdcMint: input.usdcMint,
+      usdtMint: input.usdtMint,
     }).then((data) => {
       if (controller.signal.aborted) return;
       updatedAtMs.current = Date.now();
@@ -71,10 +88,13 @@ export function useSolanaWalletActivity(input: {
 
     return () => controller.abort();
   }, [
+    input.pacificaProgramId,
     input.privateAddress,
     input.publicAddress,
     input.rpcUrl,
     input.signer,
+    input.usdcMint,
+    input.usdtMint,
     refreshKey,
   ]));
 

@@ -19,7 +19,7 @@ export type ActivityFilter = 'all' | ActivityKind;
 /**
  * The filters, in the order a reader scans them.
  *
- * "All" first because it is the resting state, then the three kinds. Fixed here rather than derived
+ * "All" first because it is the resting state, then the stable activity groups. Fixed here rather than derived
  * from what the history happens to contain: a list that gains and loses options as events arrive
  * would move under the reader's thumb, and an option that currently matches nothing is a useful
  * answer — it says the account has no withdrawals, which a missing option does not.
@@ -27,8 +27,10 @@ export type ActivityFilter = 'all' | ActivityKind;
 const FILTERS: readonly MenuOption<ActivityFilter>[] = [
   { id: 'all', label: 'All activity' },
   { id: 'trade', label: 'Trades' },
-  { id: 'funding', label: 'Funds' },
+  { id: 'funding', label: 'Deposits' },
   { id: 'withdrawal', label: 'Withdrawals' },
+  { id: 'swap', label: 'Swaps' },
+  { id: 'transfer', label: 'Wallet transfers' },
 ];
 
 /**

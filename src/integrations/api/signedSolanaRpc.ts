@@ -1,6 +1,10 @@
 import * as Crypto from 'expo-crypto';
 
 import {
+  GATEWAY_RPC_BATCH_OPERATION,
+  MAX_GATEWAY_RPC_BATCH_ENTRIES,
+} from '@/integrations/api/gatewayProtocol';
+import {
   GatewayError,
   postSignedGatewayRequest,
   type GatewayRequestSigner,
@@ -34,6 +38,15 @@ type SignedRpcRequest = {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 };
+
+export type SignedRpcBatchEntry = {
+  readonly method: string;
+  readonly params?: unknown;
+};
+
+export type SignedRpcBatchResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly error: SolanaRpcError; readonly ok: false };
 
 export class SolanaRpcError extends Error {
   constructor(
@@ -110,6 +123,85 @@ export async function signedSolanaRpc<T>({
   }
 
   return result;
+}
+
+/** Sends a bounded read batch while preserving one result for every request. */
+export async function signedSolanaRpcBatch<T>(input: {
+  readonly requests: readonly SignedRpcBatchEntry[];
+  readonly rpcUrl: string;
+  readonly signer: GatewayRequestSigner;
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+}): Promise<readonly SignedRpcBatchResult<T>[]> {
+  if (
+    input.requests.length === 0
+    || input.requests.length > MAX_GATEWAY_RPC_BATCH_ENTRIES
+  ) {
+    throw new SolanaRpcError('Solana RPC batch size is invalid.', 'rpc_batch_invalid');
+  }
+
+  const requests = input.requests.map((request) => ({
+    id: Crypto.randomUUID(),
+    jsonrpc: '2.0' as const,
+    method: request.method,
+    ...(request.params === undefined ? {} : { params: request.params }),
+  }));
+  let responses: readonly RpcResponse<T>[];
+
+  try {
+    responses = await postSignedGatewayRequest<readonly RpcResponse<T>[]>({
+      body: requests,
+      cluster: 'mainnet',
+      operation: GATEWAY_RPC_BATCH_OPERATION,
+      signer: input.signer,
+      url: input.rpcUrl,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    });
+  } catch (cause) {
+    if (cause instanceof GatewayError) {
+      throw new SolanaRpcError(cause.message, cause.code);
+    }
+
+    throw new SolanaRpcError('Solana request failed.', 'rpc_unavailable');
+  }
+
+  if (!Array.isArray(responses) || responses.length !== requests.length) {
+    throw new SolanaRpcError('Solana returned an invalid batch.', 'rpc_invalid');
+  }
+
+  const byId = new Map(responses.map((response) => [response.id, response]));
+
+  return requests.map((request): SignedRpcBatchResult<T> => {
+    const response = byId.get(request.id);
+
+    if (response?.jsonrpc !== '2.0') {
+      return {
+        error: new SolanaRpcError('Solana returned an invalid response.', 'rpc_invalid'),
+        ok: false,
+      };
+    }
+
+    if (response.error !== undefined) {
+      return {
+        error: new SolanaRpcError(
+          'Solana rejected the request.',
+          `rpc_${response.error.code}`,
+          createSolanaRpcDiagnostic(response.error),
+        ),
+        ok: false,
+      };
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(response, 'result')) {
+      return {
+        error: new SolanaRpcError('Solana omitted the result.', 'rpc_invalid'),
+        ok: false,
+      };
+    }
+
+    return { ok: true, value: response.result as T };
+  });
 }
 
 export function createSolanaRpcDiagnostic(error: RpcError): SolanaRpcDiagnostic {
