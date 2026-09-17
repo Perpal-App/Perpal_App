@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { EmptyHistoryMark } from '@/assets/svg/EmptyHistoryMark';
-import { SkeletonText } from '@/components/feedback/Skeleton';
 import { PressableScale } from '@/components/ui/PressableScale';
 import {
   ActivityFilters,
   activityFilterLabel,
   type ActivityFilter,
 } from '@/features/portfolio/components/ActivityFilters';
-import { ActivityRow } from '@/features/portfolio/components/ActivityRow';
+import {
+  ActivityRow,
+  ActivityRowSkeleton,
+} from '@/features/portfolio/components/ActivityRow';
 import {
   matchesActivityQuery,
   mergeActivity,
@@ -172,10 +174,17 @@ export function GlobalActivityTracker({
 
       <View style={styles.list}>
         {loading ? (
-          <View accessibilityLabel="Loading activity" accessibilityRole="progressbar" style={styles.loading}>
-            <SkeletonText role="label" width="82%" />
-            <SkeletonText role="bodyCompact" width="64%" />
-            <SkeletonText role="label" width="76%" />
+          // Three of the row's own card, not three bare text bars on the page. The old placeholder
+          // promised a list of lines and then delivered a list of cards, so the feed rebuilt itself
+          // the moment it loaded.
+          <View
+            accessibilityLabel="Loading activity"
+            accessibilityRole="progressbar"
+            style={styles.loading}
+          >
+            <ActivityRowSkeleton />
+            <ActivityRowSkeleton />
+            <ActivityRowSkeleton />
           </View>
         ) : items.length === 0 ? (
           <EmptyHistory />
@@ -268,7 +277,8 @@ const styles = StyleSheet.create({
   // in one container; each row now carries its own rim, so the rule was a line drawn above a card
   // that already had one. The gap is what separates them.
   list: { overflow: 'hidden', gap: spacing.xs },
-  loading: { gap: spacing.sm, paddingVertical: spacing.md },
+  // The list's own rhythm, so the placeholder cards sit exactly where the real ones will.
+  loading: { gap: spacing.xs },
   status: { ...typography.bodyCompact, paddingVertical: spacing.md, color: colors.textSecondary },
   error: { ...typography.caption, color: colors.negative },
   more: {

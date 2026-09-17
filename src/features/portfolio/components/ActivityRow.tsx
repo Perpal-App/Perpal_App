@@ -183,9 +183,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  // Fixed width, so a swap's overlapped pair and a single direction glyph leave every title in the
-  // feed starting at the same x.
-  mark: { width: MARK, marginTop: MARK_TOP, flexShrink: 0, alignItems: 'flex-start' },
+  // Fixed box, so a swap's overlapped pair and a single direction glyph leave every title in the feed
+  // starting at the same x. Contents centre inside it, which is what lets the shorter pair share the
+  // taller glyph's optical line without a second offset to keep in step.
+  mark: {
+    width: MARK_SLOT,
+    height: MARK,
+    marginTop: MARK_TOP,
+    flexShrink: 0,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
   // `minWidth: 0` is what lets the title wrap rather than forcing the row wider than the card: a flex
   // child's default minimum is its content, so one long unbroken title would push the amount off the
   // edge instead of taking a second line.
