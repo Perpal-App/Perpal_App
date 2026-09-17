@@ -21,7 +21,7 @@ import {
 } from '@/domain/portfolio/accountFigures';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { BalanceTiles } from '@/features/portfolio/components/BalanceTiles';
-import { ConcealedValue } from '@/features/portfolio/components/ConcealedValue';
+import { ConcealFade, ConcealedValue } from '@/components/ui/ConcealedValue';
 import {
   FundingActions,
   type FundingAction,
@@ -181,9 +181,9 @@ function TrendPill({
           percentage down with it and leave the text unreadable. */}
       <View style={[StyleSheet.absoluteFill, styles.pillTint, { backgroundColor: tint }]} />
       {flat ? null : (
-        <View style={hidden && styles.concealed}>
+        <ConcealFade hidden={hidden}>
           <TrendArrow color={tint} down={down} />
-        </View>
+        </ConcealFade>
       )}
       <ConcealedValue
         hidden={hidden}
@@ -277,5 +277,4 @@ const styles = StyleSheet.create({
   // rounded, clipped View is the case Android is least reliable about clipping.
   pillTint: { opacity: 0.18, borderRadius: radii.pill },
   pillText: { ...typography.caption, fontVariant: ['tabular-nums'] },
-  concealed: { opacity: 0 },
 });

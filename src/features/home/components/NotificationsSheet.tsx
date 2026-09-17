@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -12,7 +13,7 @@ import {
   markAllInAppNotificationsRead,
   type InAppNotification,
 } from '@/storage/inAppNotifications';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
 
 const CLOSE_TARGET = 34;
 const CLOSE_GLYPH = 15;
@@ -257,7 +258,19 @@ function Group({ boxed = false, children, label }: {
       <Text accessibilityRole="header" maxFontSizeMultiplier={1.35} style={styles.groupLabel}>
         {label}
       </Text>
-      <View style={boxed ? styles.card : styles.stack}>{children}</View>
+      {boxed ? (
+        <LinearGradient
+          colors={gradients.surfaceRaise.colors}
+          end={{ x: 0.5, y: 1 }}
+          locations={gradients.surfaceRaise.locations}
+          start={{ x: 0.5, y: 0 }}
+          style={styles.card}
+        >
+          {children}
+        </LinearGradient>
+      ) : (
+        <View style={styles.stack}>{children}</View>
+      )}
     </View>
   );
 }
@@ -355,15 +368,15 @@ const styles = StyleSheet.create({
   // Event rows, each carrying its own card. Spaced by the smallest step that still resolves two
   // adjacent hairline rims into two edges rather than one thick line.
   stack: { gap: spacing.xs },
-  // `radii.lg`, matching the row cards beside it, so every corner in the list is the same corner.
-  // At `radii.md` this block sat visibly squarer than the rows under it and read as older chrome.
+  // The event rows' material and corner exactly: `surfaceRaise` under a 1pt rim at `radii.lg`. A
+  // flat `surfaceElevated` fill beside a column of ramped cards read as a different kind of object,
+  // and at `radii.md` it also sat visibly squarer than them.
   card: {
     overflow: 'hidden',
     borderRadius: radii.lg,
     borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surfaceElevated,
   },
   liveRow: {
     gap: 2,

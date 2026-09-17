@@ -1,134 +1,81 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
 
-import { NotificationReadButton } from '@/features/home/components/NotificationReadButton';
+import { NotificationKindIcon } from '@/features/home/components/NotificationKindIcon';
+import {
+  NotificationReadButton,
+  NOTIFICATION_TICK_SIZE,
+} from '@/features/home/components/NotificationReadButton';
 import {
   markInAppNotificationRead,
   type InAppNotification,
-  type InAppNotificationKind,
 } from '@/storage/inAppNotifications';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
 /**
- * The card's corner, and the icon tile's, held in the concentric relationship that keeps a nested
- * corner looking like the same corner.
+ * The mark's size, with no container around it.
  *
- * A rounded box inside a rounded box only reads as one object when the inner radius is the outer
- * radius less the space between them. Set the tile to a token instead and the two curves fight:
- * too large and the tile bulges out of the corner it sits in, too small and it looks square beside
- * it. Derived rather than written down so it stays true if the card's radius or its inset moves.
+ * Larger than the glyph that used to sit inside the tile even though the row is now shorter, because
+ * the footprint that was going to the box's padding goes to ink instead. Sized to sit inside the two
+ * lines it stands beside — the title and the first line of the message, 39pt together — with enough
+ * air left that a solid shape does not outweigh the type it introduces.
  */
-const CARD_RADIUS = radii.lg;
-const TILE_RADIUS = CARD_RADIUS - spacing.md;
+const ICON = 30;
 
 /**
- * The kind tile, sized to the two lines it stands beside — the title, and the first line of the
- * message — rather than picked by eye.
+ * Centres the mark on the title and the first message line, and puts the tick on that same axis.
  *
- * That is the relationship that makes a leading mark read as belonging to its text: it spans the
- * part of the row carrying the meaning and stops before the timestamp, which is metadata. Both
- * lines lead at 21, so the sum is exact and there is no gap between them to account for.
+ * The two derive from one number so the row has a single horizontal centreline for its two marks
+ * however either of them is resized. Without this the mark sat flush with the text block's top,
+ * which reads high: a line box is taller than the letters in it, so type always starts lower than a
+ * shape set beside it.
  */
-const TILE = typography.label.lineHeight + typography.bodyCompact.lineHeight;
-
-/**
- * Render size of the glyph's 24-unit box inside the tile.
- *
- * The glyphs below draw on a 3–21 band of that box — an 18-unit ink grid with even 3-unit padding,
- * the grid Feather and Lucide use — so the visible mark is three quarters of this number. That
- * accounting is the whole reason the icons read as an afterthought before: a 20pt box holding paths
- * that inked 14 of 24 units put roughly 12pt of visible glyph inside a 37pt tile, under a third of
- * it. Raising only the box would not have fixed it while the paths stayed loose inside their own
- * grid, and each of the four inked a different amount, so the set was unevenly weighted too.
- */
-const TILE_GLYPH = Math.round(TILE * 0.64);
-
-/**
- * Optical top for the tile and the tick.
- *
- * A text line box is taller than the letters inside it — `label` leads at 21 for a 14pt face — so
- * the title's capitals begin about 3.5pt below the top of its line. A tile has no such internal
- * padding, so setting it flush with the text block's top edge lands it visibly higher than the
- * title it is meant to sit beside. Half the title's leading lines it up with the caps instead of
- * with the invisible box around them, and putting the tick on the same offset keeps the row's two
- * fixed-size objects level with each other.
- */
-const OPTICAL_TOP = (typography.label.lineHeight - typography.label.fontSize) / 2;
-
-const STROKE = 1.8;
+const MARK_BAND = typography.label.lineHeight + typography.caption.lineHeight;
+const ICON_TOP = (MARK_BAND - ICON) / 2;
 
 /**
  * Ceiling on the OS text size for this row.
  *
  * The row scales with the reader's setting rather than ignoring it, but not without limit: past
- * roughly a third larger the title and the timestamp stop sharing a card with a fixed-size tile and
- * a tap target without one of them being pushed out. Every line here wraps instead of truncating at
- * one, so growth costs height, which the sheet can scroll, rather than costing words.
+ * roughly a third larger the type stops sharing a card with a fixed-size mark and a tap target
+ * without one of them being pushed out. Every line wraps instead of truncating at one, so growth
+ * costs height, which the sheet can scroll, rather than costing words.
  */
 const MAX_TEXT_SCALE = 1.35;
 
 /**
- * One glyph per kind of event, which is what replaced the coloured dot.
- *
- * A dot could only ever say "something happened, and it went well or badly" — the kind had to be
- * spelled out in a text tag beside it, and five hues down a column read as decoration rather than
- * as information. A glyph names the event instead, so the row identifies itself before a single
- * word is read, and the colour budget goes back to the one case that genuinely needs it.
- *
- * All four are redrawn to one ink grid: 3 to 21 on both axes of the 24-unit box, so a stroke ends
- * where the next glyph's stroke ends and the four carry the same visual weight in the column. They
- * did not before — the wallet inked 15 units wide, the trend arrow 8 tall — which read as four
- * icons at four different sizes rather than one set.
- *
- * The trend line is the one that stays short of the full height, and has to: pushed to 18 units
- * tall its slope becomes a cliff and it stops reading as a market moving.
- *
- * Money in and money out are still the same arrow mirrored across the same baseline, deliberately:
- * they are one operation in two directions, and drawing them as unrelated shapes would hide that.
- */
-const GLYPHS: Readonly<Record<InAppNotificationKind, string>> = {
-  trade: 'M3.5 19 10 12.5l3.75 3.75L20.5 5.5M14.5 5.5h6v6',
-  funding: 'M12 3.5V14M7.5 9.5 12 14l4.5-4.5M4 19.5h16',
-  withdrawal: 'M12 14V3.5M7.5 8 12 3.5l4.5 4.5M4 19.5h16',
-  wallet:
-    'M3.5 8A3.5 3.5 0 0 1 7 4.5h10A3.5 3.5 0 0 1 20.5 8v8a3.5 3.5 0 0 1-3.5 3.5H7A3.5 3.5 0 0 1 3.5 16Z' +
-    'M15.75 12h4.75',
-};
-
-/**
  * One logged event: what it was, what it said, when, and whether it has been acknowledged.
  *
- * Its own rounded card, rather than a band inside a taller one divided by hairlines. Dividers make
- * a run of events read as a table, where each of these is a separate thing that happened at a
- * separate time and can be acted on by itself — and the tick that acts on it had no visible extent
- * of its own to belong to. Separating them also retires the last-child rule the group needed to
- * stop drawing a line against its own edge.
+ * Built on the same material as the order buttons on the market detail screen — `surfaceRaise` run
+ * top to bottom under a 1pt rim in `border` — rather than a flat fill. That ramp is what gives those
+ * controls their dimension, and it does the same here: the card reads as a raised surface catching
+ * light instead of a lighter rectangle painted on the sheet. Clipped so the ramp takes the corner.
  *
- * Read state is carried by weight and by the tick's fill, never by colour. Colour on this row means
- * exactly one thing — the event failed — so a red glyph is always worth looking at instead of being
- * one more tint in a palette.
+ * Its own card, rather than a band inside a taller one divided by hairlines. Dividers make a run of
+ * events read as a table, where each of these is a separate thing that happened at a separate time
+ * and can be acted on by itself.
+ *
+ * Read state is carried by weight and by the tick's fill. Colour belongs to the mark, where it says
+ * how the event went, and is never spent on the text.
  */
 export function NotificationRow({ item }: { readonly item: InAppNotification }) {
   const unread = item.readAtMs === null;
 
   return (
-    <View style={styles.row}>
+    <LinearGradient
+      colors={gradients.surfaceRaise.colors}
+      end={{ x: 0.5, y: 1 }}
+      locations={gradients.surfaceRaise.locations}
+      start={{ x: 0.5, y: 0 }}
+      style={styles.row}
+    >
       <View
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
         pointerEvents="none"
-        style={styles.tile}
+        style={styles.mark}
       >
-        <Svg height={TILE_GLYPH} viewBox="0 0 24 24" width={TILE_GLYPH}>
-          <Path
-            d={GLYPHS[item.kind]}
-            fill="none"
-            stroke={item.outcome === 'error' ? colors.negative : colors.textSecondary}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={STROKE}
-          />
-        </Svg>
+        <NotificationKindIcon kind={item.kind} outcome={item.outcome} size={ICON} />
       </View>
 
       <View style={styles.body}>
@@ -139,7 +86,7 @@ export function NotificationRow({ item }: { readonly item: InAppNotification }) 
         >
           {item.title}
         </Text>
-        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={3} style={styles.message}>
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={2} style={styles.message}>
           {item.message}
         </Text>
         <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={1} style={styles.time}>
@@ -154,8 +101,7 @@ export function NotificationRow({ item }: { readonly item: InAppNotification }) 
           read={!unread}
         />
       </View>
-
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -171,55 +117,46 @@ function formatTime(timeMs: number): string {
 }
 
 const styles = StyleSheet.create({
+  // 1pt rim rather than a hairline, matching the order buttons: at a hairline the ramp's dark base
+  // and the rim resolve into one soft edge and the card loses the boundary that makes it a surface.
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    overflow: 'hidden',
     gap: spacing.sm,
     padding: spacing.md,
-    borderRadius: CARD_RADIUS,
+    borderRadius: radii.lg,
     borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surfaceElevated,
   },
-  // A rounded square rather than a circle: the app's circles are all controls — the bell, the
-  // avatar, the close button, the tick across this row — and a round container here would invite a
-  // tap that does nothing.
-  tile: {
-    width: TILE,
-    height: TILE,
-    marginTop: OPTICAL_TOP,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: TILE_RADIUS,
-    borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  // Carries the tick's optical offset rather than the tick doing it itself, so the button stays a
-  // plain control that any row can place, and the halo keeps expanding from the disc's own centre.
-  action: { marginTop: OPTICAL_TOP, flexShrink: 0 },
+  mark: { marginTop: ICON_TOP, flexShrink: 0 },
+  // Carries the tick's offset rather than the tick doing it itself, so the button stays a plain
+  // control any row can place and its halo keeps expanding from the disc's own centre.
+  action: { marginTop: ICON_TOP + (ICON - NOTIFICATION_TICK_SIZE) / 2, flexShrink: 0 },
   // `minWidth: 0` is what lets the title wrap instead of forcing the row wider than the card: a
   // flex child's default minimum is its content, so a long unbroken title would otherwise push the
   // tick off the edge.
   //
-  // No gap between the title and the message. Both lead at 1.5x, which already puts 21pt between
-  // their baselines — adding a gap on top of that separated the two lines that have to be read as
-  // one statement, while leaving the timestamp attached to the message it is not part of. The
-  // timestamp gets the only gap in the block instead.
+  // No gap between the title and the message. `caption` leads at 18 under a title leading at 21,
+  // which is already the separation those two need — an extra step on top of it pulled apart the
+  // two lines that have to be read as one statement.
   body: { flex: 1, minWidth: 0 },
   title: { ...typography.label, color: colors.textPrimary },
   // Read rows step back rather than disappearing. Still legible, clearly already dealt with.
   titleRead: { color: colors.textSecondary },
-  // `bodyCompact`: the same 14pt as the title, in Regular rather than SemiBold.
-  //
-  // It was `caption` — 12pt Medium — which put the whole hierarchy on a 2pt size step and left the
-  // message the same size and weight as the timestamp, so a sentence worth reading looked like
-  // metadata. Matching the title's size and letting weight and colour separate them is both easier
-  // to read at a glance and the stronger contrast: 14 SemiBold white, 14 Regular secondary, 12
-  // Medium muted is three unmistakable steps where 14/12/12 was two.
-  message: { ...typography.bodyCompact, color: colors.textSecondary },
-  time: { ...typography.caption, marginTop: spacing.xxs, color: colors.textMuted },
+  // `caption`, not `bodyCompact`. At 14pt the message matched the title's size and carried the row's
+  // height with it — two lines of body text is 42pt of card before the timestamp is even placed.
+  // A supporting line is meant to be scanned, not read across, so it goes back to 12 and the copy
+  // that feeds it is short enough to land on one line.
+  message: { ...typography.caption, color: colors.textSecondary },
+  // Smallest role in the row, and the only one that gets a gap: it is metadata, not part of the
+  // sentence above it. `letterSpacing` back to 0 — `eyebrow` is tracked out for all-caps headers,
+  // and a tracked-out clock reads as a label rather than as a time.
+  time: {
+    ...typography.eyebrow,
+    letterSpacing: 0,
+    marginTop: spacing.xxs,
+    color: colors.textMuted,
+  },
 });

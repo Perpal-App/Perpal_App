@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { PnlTrendIcon, TradesIcon } from '@/assets/svg/ActivityStatIcons';
 import { SkeletonText } from '@/components/feedback/Skeleton';
-import { ConcealedValue } from '@/features/portfolio/components/ConcealedValue';
+import { ConcealedValue, CONCEALED_MASK } from '@/components/ui/ConcealedValue';
 import {
   amountTone,
   percent,
@@ -138,13 +138,16 @@ function StatCard({
         ) : (
           <ConcealedValue
             hidden={hidden}
+            // A tone is a claim about the figure, so the mask must stop making it: it returns to the
+            // plain colour while the value fades out still wearing its own.
+            maskStyle={styles.value}
             numberOfLines={1}
             style={[
               styles.value,
               tone === 'positive' && styles.positive,
               tone === 'negative' && styles.negative,
             ]}
-            value={value ?? '***'}
+            value={value ?? CONCEALED_MASK}
           />
         )}
 

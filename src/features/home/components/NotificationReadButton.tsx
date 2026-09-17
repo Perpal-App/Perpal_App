@@ -13,11 +13,18 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { colors, layout, motion, radii, spacing } from '@/theme/tokens';
 
 /**
- * Diameter. `minTouchTarget` less one step, so the disc stays visibly smaller than the kind tile
- * across the row — the row's identity should outweigh its secondary action — while the hit slop
- * below brings the real target back to the full 48.
+ * Diameter. `minTouchTarget` less one step, which keeps the disc close in size to the row's kind
+ * mark without overtaking it: a filled circle already carries more weight than a glyph of the same
+ * width, and the row's identity should not be the second thing the eye finds. The hit slop below
+ * restores the real target to the full 48.
  */
-const TARGET = layout.minTouchTarget - spacing.sm;
+const TARGET = layout.minTouchTarget - spacing.md;
+
+/**
+ * Published so a row can put this control on the same centreline as its own mark without hard-coding
+ * the diameter, which would silently go stale the next time this file changes.
+ */
+export const NOTIFICATION_TICK_SIZE = TARGET;
 
 /** Restores the full touch target around the smaller disc, split evenly on every side. */
 const HIT_SLOP = (layout.minTouchTarget - TARGET) / 2;

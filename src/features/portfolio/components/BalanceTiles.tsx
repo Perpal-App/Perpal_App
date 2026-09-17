@@ -12,7 +12,11 @@ import type {
   WalletBalance,
   WalletBalances,
 } from '@/features/account/hooks/useWalletBalances';
-import { ConcealedValue } from '@/features/portfolio/components/ConcealedValue';
+import {
+  ConcealFade,
+  ConcealedValue,
+  CONCEALED_MASK,
+} from '@/components/ui/ConcealedValue';
 import { TokenLogo } from '@/features/portfolio/components/TokenLogo';
 import { listWalletTokens } from '@/features/portfolio/components/withdrawalAssets';
 import { listTradingCollateralOptions } from '@/integrations/perps/providerCollateral';
@@ -113,12 +117,10 @@ function Tile({
           {label}
         </Text>
 
-        {/* The slot stays mounted when concealed so toggling privacy cannot resize the tile. */}
-        <View
-          accessibilityElementsHidden={hidden}
-          importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
-          style={[styles.tokens, hidden && styles.concealed]}
-        >
+        {/* The slot stays mounted when concealed so toggling privacy cannot resize the tile, and it
+            fades on the figure's own clock so the logos and the number they belong to leave
+            together. Which tokens are held is itself a balance, so they conceal with it. */}
+        <ConcealFade hidden={hidden} style={styles.tokens}>
           {logoMints.map((mint, index) => (
             <TokenLogo
               key={mint}
@@ -127,7 +129,7 @@ function Tile({
               url={metadata.get(mint)?.imageUrl ?? null}
             />
           ))}
-        </View>
+        </ConcealFade>
       </View>
 
       <View style={styles.figure}>
@@ -138,7 +140,10 @@ function Tile({
             hidden={hidden}
             numberOfLines={1}
             style={styles.value}
-            value={value ?? '***'}
+            // Only reachable while concealed — an absent figure shows the skeleton instead — so the
+            // frame is sized by the mask itself rather than by a second hardcoded run of asterisks
+            // that had to be kept in step with the real one by hand.
+            value={value ?? CONCEALED_MASK}
           />
         )}
       </View>
@@ -167,7 +172,6 @@ const styles = StyleSheet.create({
   head: { gap: spacing.xs },
   label: { ...typography.caption, color: colors.textSecondary },
   tokens: { minHeight: 24, flexDirection: 'row', alignItems: 'center' },
-  concealed: { opacity: 0 },
   logoOverlap: { marginLeft: -6 },
   // The activity cards' arrangement: the figure lands in the corner diagonally opposite the marks, held
   // off the right edge by half a step more than the tile's own inset. A bold 26pt figure carries more

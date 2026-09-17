@@ -32,6 +32,27 @@ export const motion = {
     duration: 420,
   },
   /**
+   * Concealing and revealing a figure, for the eye toggle on the balance headers.
+   *
+   * Eased at both ends rather than only on the way out, because this is one control run in two
+   * directions and an asymmetric curve makes hiding and showing feel like different gestures. Long
+   * enough to read as the number being veiled, short enough that nobody waits to see their balance.
+   *
+   * The value contracts slightly and lifts as it goes while the mask rises into its place, so the two
+   * read as one thing replacing another rather than as two independent fades crossing over. Both legs
+   * are transform and opacity only: several figures conceal at once on these screens, and anything
+   * touching layout would reflow the whole card on every tap.
+   *
+   * `travel` is deliberately tiny. At a hero figure's size a longer slide reads as the balance
+   * escaping upward, and the same distance applied to a 12pt tile figure looks like a glitch — a
+   * couple of points is enough to give the fade a direction at every size it runs on.
+   */
+  conceal: {
+    duration: 280,
+    travel: 3,
+    scale: 0.96,
+  },
+  /**
    * Staggered candle reveal. Each candle starts `stagger` ms after the one to
    * its left, so the series reads left to right. Because `duration` is much
    * longer than `stagger`, neighbouring fades overlap and the run lands as one

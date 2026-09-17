@@ -207,7 +207,7 @@ export function TradingSessionProvider({
             outcome: 'error',
             scopeToken,
             title: 'Private wallet restore paused',
-            message: 'Retry private wallet T from the profile screen.',
+            message: 'Retry from your profile.',
           });
         }
       });
@@ -301,7 +301,7 @@ export function TradingSessionProvider({
         outcome: 'success',
         scopeToken,
         title: 'Private trading activated',
-        message: 'Private wallet T is ready for funding and trading.',
+        message: 'Ready to fund and trade.',
       });
     } catch (cause) {
       clearSecret();
@@ -314,7 +314,7 @@ export function TradingSessionProvider({
         outcome: 'error',
         scopeToken,
         title: 'Private trading setup paused',
-        message: 'Retry the private wallet setup.',
+        message: 'Retry from your profile.',
       });
     } finally {
       if (
@@ -449,7 +449,7 @@ export function TradingSessionProvider({
         outcome: 'success',
         scopeToken,
         title: 'Private wallet rotated',
-        message: 'The new private wallet T is active and recovered SOL and account rent are available.',
+        message: 'Recovered SOL is available.',
       });
     } catch (cause) {
       if (next !== null && !adopted) zeroize(next.secretKey);

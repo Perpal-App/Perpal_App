@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { EyeIcon } from '@/assets/svg/EyeIcon';
 import { SkeletonText } from '@/components/feedback/Skeleton';
+import { ConcealedValue } from '@/components/ui/ConcealedValue';
 import { PressableScale } from '@/components/ui/PressableScale';
 import {
   amountTone,
@@ -20,8 +21,6 @@ import type { WalletBalances } from '@/features/account/hooks/useWalletBalances'
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
-/** Stands in for every figure while balances are hidden. */
-const MASK = '••••••';
 /** Invisible box around the eye. With `hitSlop` on top it clears the 48pt minimum target. */
 const REVEAL_SIZE = 34;
 
@@ -59,6 +58,7 @@ export function AccountOverviewCard({
   const publicBalance = walletFunds(balances?.publicWallet ?? null);
   const privateBalance = privateFunds(balances, portfolio);
   const total = sumAmounts(publicBalance, privateBalance);
+  const totalDisplay = money(total);
   const pnl = unrealizedPnl(portfolio);
   const pnlRate = unrealizedRate(portfolio, pnl);
 
@@ -95,19 +95,18 @@ export function AccountOverviewCard({
             <Rate hidden={hidden} value={pnlRate} />
           </View>
 
-          {total === null ? (
+          {totalDisplay === null ? (
             <View style={styles.heroPending}>
               <SkeletonText role="display" width={196} />
             </View>
           ) : (
-            <Text
+            <ConcealedValue
               accessibilityLiveRegion="polite"
+              hidden={hidden}
               numberOfLines={1}
-              selectable={!hidden}
               style={styles.hero}
-            >
-              {hidden ? MASK : money(total)}
-            </Text>
+              value={totalDisplay}
+            />
           )}
         </View>
 
@@ -158,12 +157,15 @@ export function AccountOverviewCard({
  * The unrealized move as a rate, in a tinted pill beside the heading.
  *
  * A rate needs a base to be a rate, so it is dropped rather than faked when the account has no
- * deposited balance to measure against — a percentage off zero is either infinity or a lie. Absent
- * is also the right state while balances are hidden: a rate discloses how the balance is doing,
- * which is most of what hiding it was for.
+ * deposited balance to measure against — a percentage off zero is either infinity or a lie.
+ *
+ * Concealed in place rather than unmounted. Removing it did conceal the rate, but it also collapsed
+ * the label row on the same tap that faded the figure below, so the one element that vanished was
+ * the one right next to the thing being smoothly animated. Keeping the footprint and masking the
+ * number conceals just as much — the tint drops to neutral, so direction does not leak either.
  */
 function Rate({ hidden, value }: { readonly hidden: boolean; readonly value: number | null }) {
-  if (value === null || hidden) return null;
+  if (value === null) return null;
 
   const flat = value === 0;
   const down = value < 0;
@@ -171,17 +173,27 @@ function Rate({ hidden, value }: { readonly hidden: boolean; readonly value: num
   return (
     <View style={styles.pill}>
       {/* The tint is a layer, not opacity on the pill: dimming the container would take the
-          percentage down with it and leave the text unreadable. */}
+          percentage down with it and leave the text unreadable. Switched rather than cross-faded —
+          at 0.18 alpha the step between two hues is below the threshold where a fade would read. */}
       <View
         style={[
           StyleSheet.absoluteFill,
           styles.pillTint,
-          { backgroundColor: flat ? colors.border : down ? colors.negative : colors.positive },
+          {
+            backgroundColor: hidden || flat
+              ? colors.border
+              : down
+                ? colors.negative
+                : colors.positive,
+          },
         ]}
       />
-      <Text style={[styles.pillText, flat ? null : down ? styles.negative : styles.positive]}>
-        {percent(value)}
-      </Text>
+      <ConcealedValue
+        hidden={hidden}
+        maskStyle={styles.pillText}
+        style={[styles.pillText, flat ? null : down ? styles.negative : styles.positive]}
+        value={percent(value)}
+      />
     </View>
   );
 }
@@ -204,17 +216,20 @@ function Part({
       {value === null ? (
         <SkeletonText role="label" width={56} />
       ) : (
-        <Text
+        <ConcealedValue
+          hidden={hidden}
+          // A tone is a claim about the figure. Once the figure is masked the mask must not keep
+          // making it, so the mask alone returns to the plain colour while the value fades out
+          // still wearing its own.
+          maskStyle={styles.partValue}
           numberOfLines={1}
-          selectable={!hidden}
           style={[
             styles.partValue,
             tone === 'positive' && styles.positive,
             tone === 'negative' && styles.negative,
           ]}
-        >
-          {hidden ? MASK : value}
-        </Text>
+          value={value}
+        />
       )}
     </View>
   );
