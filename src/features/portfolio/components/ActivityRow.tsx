@@ -1,10 +1,52 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
 
+import { Skeleton, SkeletonText } from '@/components/feedback/Skeleton';
+import {
+  ActivityMark,
+  activityAmountColor,
+  activityDirection,
+} from '@/features/portfolio/components/ActivityMark';
+import { TokenPairMark, tokenPairWidth } from '@/features/portfolio/components/TokenMark';
 import type { ActivityItem } from '@/features/portfolio/components/activityItems';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
-const GLYPH_SIZE = 20;
+/** Matched to the notification rows' mark, so one leading glyph size runs through the app. */
+const MARK = 26;
+
+/**
+ * Disc size for a swap's asset pair, and the slot both it and a single glyph sit in.
+ *
+ * The pair overlaps to about 1.66 discs wide, so dividing the mark size by that lands a pair inside a
+ * single glyph's footprint; floored rather than rounded so it can only ever come in under the slot.
+ * The slot then takes whichever is wider, asked of `tokenPairWidth` instead of assumed — if the
+ * overlap is ever retuned, the two stay in agreement rather than drifting a point apart, and the
+ * column of titles cannot start at two different x positions depending on the row.
+ */
+const PAIR_DISC = Math.floor(MARK / 1.66);
+const MARK_SLOT = Math.max(MARK, tokenPairWidth(PAIR_DISC));
+
+/**
+ * Centres the mark on the title's own line rather than on the block beneath it.
+ *
+ * A line box is taller than the letters in it — `label` leads at 21 for a 14pt face — so a shape set
+ * flush with the text's top edge sits visibly high. Half the leading puts the two on the same
+ * optical line.
+ */
+const MARK_TOP = (typography.label.lineHeight - MARK) / 2
+  + (typography.label.lineHeight - typography.label.fontSize) / 2;
+
+/**
+ * How much of the row the amount may claim.
+ *
+ * Token amounts here are unrounded — `0.009271901 SOL` is a real row — and the amount is the thing
+ * this column exists for, so it never shrinks or wraps; the title wraps instead. The cap stops a
+ * pathological figure from taking the whole row and leaving no title at all.
+ */
+const AMOUNT_MAX_WIDTH = '54%';
+
+const MAX_TEXT_SCALE = 1.3;
+
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   day: 'numeric',
   hour: 'numeric',
@@ -13,138 +55,154 @@ const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
 });
 
 /**
- * One event in the history: what happened, what it was worth, and when.
+ * One event in the history: what happened on the left, what it was worth on the right.
  *
- * Two lines, not three. The timestamp used to hold a line of its own, which made every row in a
- * forty-row feed three lines tall and gave the least specific value on the row the most space.
+ * Two columns rather than two stacked lines. The old row put the title and the amount on one line
+ * with the title on `flex: 1`, which meant the longest amounts — a swap printed both of its legs
+ * there — ate the row and ellipsised the title down to "Swapped …". Amounts now own a column of their
+ * own, right-ranged and tabular so the decimal points line up down the feed, with the timestamp
+ * underneath as the only thing that qualifies them.
  *
- * Flat, with a hairline under it. The raised card material the positions above use is deliberately
- * kept off this list — a ramp repeated down forty rows stops reading as a surface and starts reading
- * as stripes.
+ * The supporting line is gone from every wallet movement, because it was ceremony: it restated the
+ * wallet, asserted a confirmation implied by the row existing, and repeated the timestamp. Trades
+ * keep theirs — size, price and fee are figures, and there is nowhere else for them.
+ *
+ * The card material is the order buttons' and the notification rows': `surfaceRaise` top to bottom
+ * under a 1pt rim. The comment this file used to carry argued that a ramp repeated down forty rows
+ * reads as stripes, and it was right about rows sharing one container edge to edge — a sawtooth of
+ * light-dark-light-dark with nothing between the repeats. Separated cards break that: each one is
+ * bounded by its own rim and by a gap of page darker than the ramp's own base, so it reads as forty
+ * surfaces rather than as a striped one.
  */
-export function ActivityRow({
-  item,
-  last,
-}: {
-  readonly item: ActivityItem;
-  readonly last: boolean;
-}) {
-  // Direction is read from the formatted value rather than the event type, because that is where the
-  // sign already lives: a funding payment can be either way round, and re-deriving it from the kind
-  // would disagree with the number printed beside it.
-  const color = item.outcome === 'error'
-    ? colors.negative
-    : item.value?.startsWith('+')
-      ? colors.positive
-      : item.value?.startsWith('-')
-        ? colors.negative
-        : colors.textPrimary;
+export function ActivityRow({ item }: { readonly item: ActivityItem }) {
+  const direction = activityDirection(item);
 
   return (
-    <View style={[styles.row, last && styles.rowLast]}>
-      {/* A bare glyph, not a bordered tile. The tile put a second surface and a second radius on
-          every row of a feed, which is what made the list read as a stack of objects rather than as
-          history. */}
+    <LinearGradient
+      colors={gradients.surfaceRaise.colors}
+      end={{ x: 0.5, y: 1 }}
+      locations={gradients.surfaceRaise.locations}
+      start={{ x: 0.5, y: 0 }}
+      style={styles.row}
+    >
       <View
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={styles.icon}
+        pointerEvents="none"
+        style={styles.mark}
       >
-        <ActivityGlyph item={item} />
+        {item.pair === undefined ? (
+          <ActivityMark direction={direction} item={item} size={MARK} />
+        ) : (
+          <TokenPairMark
+            received={item.pair.received}
+            size={PAIR_DISC}
+            spent={item.pair.spent}
+          />
+        )}
       </View>
+
       <View style={styles.body}>
-        <View style={styles.rowTop}>
-          <Text numberOfLines={1} style={styles.title}>{item.title}</Text>
-          {item.value === null ? null : (
-            <Text selectable style={[styles.value, { color }]}>{item.value}</Text>
-          )}
-        </View>
-        <Text numberOfLines={2} selectable style={styles.detail}>
-          {`${item.detail} · ${formatTime(item.createdAtMs)}`}
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={2} style={styles.title}>
+          {item.title}
+        </Text>
+        {item.detail === null ? null : (
+          <Text
+            maxFontSizeMultiplier={MAX_TEXT_SCALE}
+            numberOfLines={1}
+            selectable
+            style={styles.detail}
+          >
+            {item.detail}
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.trailing}>
+        {item.value === null ? null : (
+          <Text
+            maxFontSizeMultiplier={MAX_TEXT_SCALE}
+            numberOfLines={1}
+            selectable
+            style={[styles.amount, { color: activityAmountColor(direction) }]}
+          >
+            {item.value}
+          </Text>
+        )}
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={1} style={styles.time}>
+          {DATE_FORMATTER.format(new Date(item.createdAtMs))}
         </Text>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
 /**
- * The mark that opens a row: what happened, and whether it worked.
+ * The row's own shape, waiting for data.
  *
- * Drawn here rather than pulled from an icon font, like every other glyph in the app. Direction is
- * the whole vocabulary — down for value arriving, up for value leaving, a rising line for a trade —
- * and a failure takes the alert shape as well as the loss colour, so an error is never read from
- * tone alone.
+ * Built from the row's constants and the row's style rather than approximated, so the card that
+ * appears while history loads is the card that lands when it arrives: same material, same corner,
+ * same mark slot, and the same trailing block of an amount over a timestamp. It replaced three bare
+ * text bars floating on the page, which promised a list of lines and then delivered a list of cards.
+ *
+ * Sized for a one-line title and no supporting line — the shape most rows take — so a feed that
+ * settles mostly stays where it was rather than growing under the reader.
  */
-function ActivityGlyph({ item }: { readonly item: ActivityItem }) {
-  const tone = item.outcome === 'error' ? colors.negative : colors.textSecondary;
-  const stroke = {
-    fill: 'none',
-    stroke: tone,
-    strokeLinecap: 'round',
-    strokeLinejoin: 'round',
-    strokeWidth: 1.8,
-  } as const;
-
+export function ActivityRowSkeleton() {
   return (
-    <Svg height={GLYPH_SIZE} viewBox="0 0 24 24" width={GLYPH_SIZE}>
-      {item.outcome === 'error' ? (
-        <>
-          <Circle {...stroke} cx="12" cy="12" r="8.4" />
-          <Path {...stroke} d="M12 7.8v4.8" />
-          <Circle cx="12" cy="16.1" fill={tone} r="1.1" />
-        </>
-      ) : item.kind === 'trade' || item.kind === 'swap' ? (
-        <>
-          <Path {...stroke} d="M4 16.4 9.2 11.2 13 15 20 8" />
-          <Path {...stroke} d="M15.4 8h4.6v4.6" />
-        </>
-      ) : item.kind === 'transfer' ? (
-        <>
-          <Path {...stroke} d="M4.5 8h14" />
-          <Path {...stroke} d="m15 4.5 3.5 3.5-3.5 3.5" />
-          <Path {...stroke} d="M19.5 16h-14" />
-          <Path {...stroke} d="m9 12.5-3.5 3.5L9 19.5" />
-        </>
-      ) : item.kind === 'funding' ? (
-        <>
-          <Path {...stroke} d="M12 4.6v14.2" />
-          <Path {...stroke} d="M6.4 13.2 12 18.8 17.6 13.2" />
-        </>
-      ) : (
-        <>
-          <Path {...stroke} d="M12 19.4V5.2" />
-          <Path {...stroke} d="M6.4 10.8 12 5.2 17.6 10.8" />
-        </>
-      )}
-    </Svg>
+    <LinearGradient
+      colors={gradients.surfaceRaise.colors}
+      end={{ x: 0.5, y: 1 }}
+      locations={gradients.surfaceRaise.locations}
+      start={{ x: 0.5, y: 0 }}
+      style={styles.row}
+    >
+      <View style={styles.mark}>
+        <Skeleton height={MARK} radius={radii.pill} width={MARK} />
+      </View>
+      <View style={styles.body}>
+        <SkeletonText role="label" width="76%" />
+      </View>
+      <View style={styles.trailing}>
+        <SkeletonText align="right" role="label" width={102} />
+        <SkeletonText align="right" role="eyebrow" width={74} />
+      </View>
+    </LinearGradient>
   );
-}
-
-function formatTime(timeMs: number): string {
-  return DATE_FORMATTER.format(new Date(timeMs));
 }
 
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    overflow: 'hidden',
     gap: spacing.sm,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  rowLast: { borderBottomWidth: 0 },
-  // Fixed width, so every title in the feed starts at the same x whatever glyph opens its row.
-  icon: {
-    width: GLYPH_SIZE,
-    flexShrink: 0,
-    alignItems: 'center',
-    // Nudged to sit on the title's cap height rather than centred against a two-line block.
-    paddingTop: 2,
-  },
-  body: { flex: 1, minWidth: 0, gap: 2 },
-  rowTop: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm },
-  title: { ...typography.label, flex: 1, color: colors.textPrimary },
-  value: { ...typography.label, fontVariant: ['tabular-nums'] },
+  // Fixed width, so a swap's overlapped pair and a single direction glyph leave every title in the
+  // feed starting at the same x.
+  mark: { width: MARK, marginTop: MARK_TOP, flexShrink: 0, alignItems: 'flex-start' },
+  // `minWidth: 0` is what lets the title wrap rather than forcing the row wider than the card: a flex
+  // child's default minimum is its content, so one long unbroken title would push the amount off the
+  // edge instead of taking a second line.
+  body: { flex: 1, minWidth: 0 },
+  title: { ...typography.label, color: colors.textPrimary },
   detail: { ...typography.caption, color: colors.textMuted },
+  // Never shrinks: the amount is the reason this column exists. Ranged right so the figures form a
+  // column a reader can scan down instead of a ragged edge that follows the titles.
+  trailing: { flexShrink: 0, maxWidth: AMOUNT_MAX_WIDTH, alignItems: 'flex-end' },
+  amount: { ...typography.label, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  // Under the amount rather than on a line of its own across the row. It is what qualifies the
+  // figure, and on its own line it was the least specific value on the row taking the most space.
+  time: {
+    ...typography.eyebrow,
+    letterSpacing: 0,
+    color: colors.textMuted,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
 });

@@ -186,9 +186,7 @@ export function GlobalActivityTracker({
               : 'No activity of this kind yet.'}
           </Text>
         ) : (
-          displayed.map((item, index) => (
-            <ActivityRow item={item} key={item.id} last={index === displayed.length - 1} />
-          ))
+          displayed.map((item) => <ActivityRow item={item} key={item.id} />)
         )}
       </View>
 
@@ -266,7 +264,10 @@ const styles = StyleSheet.create({
   // Clipped, and that is what makes the morph read as a shape rather than a slide: the rows are laid
   // out at their final size the instant a filter changes while the box is still travelling to meet
   // them, so the overflow would otherwise spill past it for the length of the spring.
-  list: { overflow: 'hidden', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  // No top rule any more. It existed to close the first row's open top edge when the rows were bands
+  // in one container; each row now carries its own rim, so the rule was a line drawn above a card
+  // that already had one. The gap is what separates them.
+  list: { overflow: 'hidden', gap: spacing.xs },
   loading: { gap: spacing.sm, paddingVertical: spacing.md },
   status: { ...typography.bodyCompact, paddingVertical: spacing.md, color: colors.textSecondary },
   error: { ...typography.caption, color: colors.negative },

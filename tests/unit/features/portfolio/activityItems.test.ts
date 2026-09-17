@@ -1,4 +1,4 @@
-import { mergeActivity } from './activityItems';
+import { mergeActivity } from '@/features/portfolio/components/activityItems';
 
 describe('mergeActivity', () => {
   it('keeps confirmed local trades visible while venue history catches up', () => {

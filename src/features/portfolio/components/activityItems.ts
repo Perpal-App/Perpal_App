@@ -20,10 +20,29 @@ export type ActivityKind = 'funding' | 'swap' | 'trade' | 'transfer' | 'withdraw
 
 export type ActivityItem = {
   readonly createdAtMs: number;
-  readonly detail: string;
+  /**
+   * A second line, only when it says something the title and the amount do not.
+   *
+   * Null for every wallet movement, because those lines were ceremony: "Public wallet · Confirmed on
+   * Solana · Sep 4, 4:12 PM" restated the wallet the reader had already filtered to, asserted a
+   * confirmation that is the precondition for the row existing at all, and repeated the timestamp
+   * that now sits under the amount. A trade keeps its line — size, price and fee are figures, not
+   * ceremony, and there is nowhere else on the row for them.
+   */
+  readonly detail: string | null;
   readonly id: string;
   readonly kind: ActivityKind;
   readonly outcome: 'error' | 'info' | 'success';
+  /**
+   * The two assets a swap exchanged, for the row to draw as marks instead of naming in prose.
+   *
+   * Only a swap sets it — it is the one event with two assets, so it is the one that earns a pair of
+   * marks in place of a direction glyph. Everything else names its single asset once, on its amount.
+   */
+  readonly pair?: {
+    readonly received: WalletAssetAmount['symbol'];
+    readonly spent: WalletAssetAmount['symbol'];
+  };
   readonly title: string;
   readonly value: string | null;
 };
@@ -115,7 +134,7 @@ export function matchesActivityQuery(item: ActivityItem, query: string): boolean
   if (needle.length === 0) return true;
 
   return item.title.toLowerCase().includes(needle)
-    || item.detail.toLowerCase().includes(needle)
+    || item.detail?.toLowerCase().includes(needle) === true
     || item.value?.toLowerCase().includes(needle) === true;
 }
 
@@ -171,7 +190,9 @@ function balanceItem(item: PacificaBalanceActivity): ActivityItem {
 
   return {
     createdAtMs: item.createdAtMs,
-    detail: `Private trading balance ${usd(item.balance)}`,
+    // The running balance after the event is the current balance restated once per row, and the
+    // header at the top of the screen already owns that figure. The event's own amount is the value.
+    detail: null,
     id: `balance:${item.createdAtMs}:${item.eventType}:${item.amount}:${item.balance}`,
     kind,
     outcome: isLiquidationEvent(item.eventType) ? 'info' : 'success',
@@ -210,19 +231,26 @@ function walletItem(item: SolanaWalletActivity): ActivityItem {
   if (action.type === 'swap') {
     return {
       ...shared,
-      detail: `${walletLabel(action.wallet)} · Confirmed on Solana`,
+      detail: null,
       kind: 'swap',
-      title: `Swapped ${action.spent.symbol} to ${action.received.symbol}`,
-      value: `${assetAmount(action.spent)} → ${assetAmount(action.received)}`,
+      // The pair moves to the row's mark, as two brand discs. It was being stated three times over:
+      // once in prose here, once on the amount, and once on a second line carrying the other leg —
+      // and that second line was what pushed the title to wrap and then ellipsise to "Swapped …".
+      pair: { received: action.received.symbol, spent: action.spent.symbol },
+      title: 'Swapped',
+      // Unsigned: an exchange is neither a gain nor a loss, and the row's neutral tone says so.
+      value: assetAmount(action.spent),
     };
   }
 
   if (action.type === 'transfer') {
     return {
       ...shared,
-      detail: `${walletLabel(action.from)} → ${walletLabel(action.to)} · Confirmed on Solana`,
+      detail: null,
       kind: 'transfer',
-      title: `Moved ${action.amount.symbol} to ${action.to} wallet`,
+      // No symbol: the amount beside it already carries one, and spelling it out here is what made
+      // "Moved SOL to public wallet" wrap onto a second line for no added information.
+      title: `Moved to ${action.to} wallet`,
       value: assetAmount(action.amount),
     };
   }
@@ -230,7 +258,7 @@ function walletItem(item: SolanaWalletActivity): ActivityItem {
   if (action.type === 'pacifica_deposit') {
     return {
       ...shared,
-      detail: 'Private wallet → Pacifica · Confirmed on Solana',
+      detail: null,
       kind: 'funding',
       title: 'Deposited to Pacifica',
       value: `-${assetAmount(action.amount)}`,
@@ -240,7 +268,7 @@ function walletItem(item: SolanaWalletActivity): ActivityItem {
   if (action.type === 'pacifica_withdrawal') {
     return {
       ...shared,
-      detail: 'Pacifica → Private wallet · Confirmed on Solana',
+      detail: null,
       kind: 'withdrawal',
       title: 'Withdrew from Pacifica',
       value: `+${assetAmount(action.amount)}`,
@@ -250,19 +278,15 @@ function walletItem(item: SolanaWalletActivity): ActivityItem {
   const receiving = action.type === 'receive';
   return {
     ...shared,
-    detail: `${walletLabel(action.wallet)} · Confirmed on Solana`,
+    detail: null,
     kind: receiving ? 'funding' : 'withdrawal',
-    title: `${receiving ? 'Received' : 'Sent'} ${action.amount.symbol}`,
+    title: receiving ? 'Received' : 'Sent',
     value: `${receiving ? '+' : '-'}${assetAmount(action.amount)}`,
   };
 }
 
 function assetAmount(amount: WalletAssetAmount): string {
   return `${formatAmountWithCommas(amount)} ${amount.symbol}`;
-}
-
-function walletLabel(wallet: 'private' | 'public'): string {
-  return wallet === 'public' ? 'Public wallet' : 'Private wallet';
 }
 
 /**
