@@ -37,13 +37,20 @@ export type FontFace = (typeof fonts)[keyof typeof fonts];
 
 export const typography = {
   wordmark: {
-    // Patrick Hand is a handwriting face; heavy tracking breaks its flow, so
-    // the letters keep only a light, breathable gap. Sized to read as a brand
-    // mark without competing with the headline below it.
-    fontFamily: fonts.brand,
+    // Bold Poppins rather than the handwriting face. Sized to read as a brand mark
+    // without competing with the headline below it.
+    //
+    // Two numbers moved with the family and had to. The leading was 63 — 1.37x,
+    // which is Patrick Hand's 1.36em glyph box; Poppins' box is 1.4em and Android
+    // crops any line shorter than the box, so this now leads at the 1.5x every
+    // other role in this file uses. And the tracking flipped sign: a handwriting
+    // face needs a breathable gap or its flow breaks, where a geometric sans at
+    // display size needs pulling in, on the same ramp as `display` (-1 at 36) and
+    // `title` (-0.6 at 26).
+    fontFamily: fonts.bold,
     fontSize: 46,
-    lineHeight: 63,
-    letterSpacing: 1.5,
+    lineHeight: 69,
+    letterSpacing: -1.2,
   },
   display: {
     fontFamily: fonts.bold,

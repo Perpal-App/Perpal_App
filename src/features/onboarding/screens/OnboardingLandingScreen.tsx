@@ -155,8 +155,6 @@ const styles = StyleSheet.create({
     ...typography.wordmark,
     color: colors.textPrimary,
     textAlign: 'center',
-    // Offset the trailing letter-spacing so the tracked word stays centred.
-    paddingLeft: typography.wordmark.letterSpacing,
     // A soft shadow thickens the mark so it reads with more presence.
     textShadowColor: colors.glassTextShadow,
     textShadowOffset: { width: 0, height: 1 },
@@ -164,8 +162,8 @@ const styles = StyleSheet.create({
   },
   compactWordmark: {
     fontSize: 40,
-    // Patrick Hand needs 1.36x its size to keep the "p" descender intact.
-    lineHeight: 55,
+    // Poppins needs 1.5x its size to keep the "p" descender off Android's crop.
+    lineHeight: 60,
   },
   spark: {
     marginBottom: spacing.xl,

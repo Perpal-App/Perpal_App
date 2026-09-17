@@ -230,16 +230,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     color: colors.textPrimary,
     textAlign: 'center',
-    // Offset the trailing letter-spacing so the tracked word stays centred.
-    paddingLeft: typography.wordmark.letterSpacing,
     textShadowColor: colors.glassTextShadow,
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 12,
   },
   compactWordmark: {
     fontSize: 40,
-    // Patrick Hand needs 1.36x its size to keep the "p" descender intact.
-    lineHeight: 55,
+    // Poppins needs 1.5x its size to keep the "p" descender off Android's crop.
+    lineHeight: 60,
   },
   // Absolute within the inset content: dims the screen above the sheet without
   // reaching past the safe area. Final translucency comes from the fade's
