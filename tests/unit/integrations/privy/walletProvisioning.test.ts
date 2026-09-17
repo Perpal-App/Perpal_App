@@ -29,8 +29,26 @@ describe('wallet provisioning status', () => {
   });
 
   it('reconnects one failed wallet only after Privy restores authentication', () => {
-    expect(shouldProvisionWallet(false, 'error')).toBe(false);
-    expect(shouldProvisionWallet(true, 'error')).toBe(true);
-    expect(shouldProvisionWallet(true, 'connected')).toBe(false);
+    expect(
+      shouldProvisionWallet({
+        hasEmbeddedWallet: true,
+        isAuthenticated: false,
+        walletStatus: 'error',
+      }),
+    ).toBe(false);
+    expect(
+      shouldProvisionWallet({
+        hasEmbeddedWallet: true,
+        isAuthenticated: true,
+        walletStatus: 'error',
+      }),
+    ).toBe(true);
+    expect(
+      shouldProvisionWallet({
+        hasEmbeddedWallet: true,
+        isAuthenticated: true,
+        walletStatus: 'connected',
+      }),
+    ).toBe(false);
   });
 });

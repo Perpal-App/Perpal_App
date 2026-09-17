@@ -20,6 +20,7 @@ import { AuthProviderButton } from '@/features/auth/components/AuthProviderButto
 import { PrivyOtpInput } from '@/features/auth/components/PrivyOtpInput';
 import {
   usePrivyAuth,
+  type PrivyAuthErrorKind,
   type SocialAuthProvider,
 } from '@/integrations/privy/usePrivyAuth';
 import { colors, fonts, spacing, typography } from '@/theme/tokens';
@@ -42,6 +43,25 @@ const PRIVY_TEXT = '#040217';
 const loginLogo = require('../../../../assets/AppLogos/perpal_logo_black.png') as ImageSourcePropType;
 
 /**
+ * One phrasing for a failed social login, wherever it surfaces from.
+ *
+ * There are three: the promise rejecting, the promise resolving without a session, and the SDK
+ * reporting through `oauthState`. They described the same failure differently before, and two of them
+ * did not describe it at all.
+ */
+function socialFailureMessage(
+  kind: PrivyAuthErrorKind,
+  provider: SocialAuthProvider,
+): string {
+  if (kind === 'configuration') return 'Social sign-in is not enabled for this app.';
+  if (kind === 'network') return 'Check your connection and try again.';
+  if (kind === 'rate-limited') {
+    return 'Too many attempts. Please wait a moment and try again.';
+  }
+  return `Could not continue with ${provider === 'twitter' ? 'X' : 'Google'}. Please try again.`;
+}
+
+/**
  * Accurate inline recreation of Privy's default login flow in Perpal's existing
  * 40% sheet. Email entry and social methods share the first card; only a
  * successful code request swaps its inner content to confirmation-code entry.
@@ -57,6 +77,11 @@ export function AuthFlowCard() {
   const [emailFocused, setEmailFocused] = useState(false);
   const [emailError, setEmailError] = useState(false);
   const [resendRemaining, setResendRemaining] = useState(0);
+  // Which provider the pending attempt belongs to. `pending` is cleared in `finally`, before the SDK
+  // has necessarily settled its own state, so the error effect cannot read the provider from it.
+  const [lastSocialProvider, setLastSocialProvider] =
+    useState<SocialAuthProvider>('google');
+  const oauthState = auth.oauthState;
   // Once the unauthenticated flow has appeared, keep that exact subtree mounted
   // through Privy's transient readiness/user changes during an OAuth handoff.
   // The root guard performs the post-login route replacement once the session
@@ -77,7 +102,7 @@ export function AuthFlowCard() {
     pending !== null ||
     auth.emailState.status === 'sending-code' ||
     auth.emailState.status === 'submitting-code' ||
-    auth.oauthState.status === 'loading';
+    oauthState.status === 'loading';
 
   useEffect(() => {
     if (resendRemaining <= 0) {
@@ -91,6 +116,18 @@ export function AuthFlowCard() {
 
     return () => clearTimeout(timer);
   }, [resendRemaining]);
+
+  // Privy reports some OAuth failures by moving `oauthState` to `error` rather than by rejecting
+  // `login()`. Nothing read that state, so those attempts ended with the sheet exactly as it was:
+  // no banner, no log, nothing to act on. `isBusy` only ever consulted `status === 'loading'`.
+  useEffect(() => {
+    if (oauthState.status !== 'error') return;
+
+    const kind = auth.getErrorKind(oauthState.error);
+    if (kind === 'cancelled') return;
+
+    setMessage(socialFailureMessage(kind, lastSocialProvider));
+  }, [auth.getErrorKind, lastSocialProvider, oauthState]);
 
   // Alerts are transient: dismiss the banner (and any red input state) shortly
   // after it appears so a stale error never lingers on screen.
@@ -207,26 +244,26 @@ export function AuthFlowCard() {
 
   const handleSocialLogin = async (provider: SocialAuthProvider) => {
     setPending(provider);
+    setLastSocialProvider(provider);
     setEmailError(false);
     setMessage(null);
 
     try {
-      await auth.loginWithSocial({ provider });
+      // The result was discarded here. `login()` resolves `User | undefined`, and it resolves
+      // `undefined` whenever the flow ends without a session but without throwing — an abandoned
+      // browser tab, or a redirect that never made it back to the app. Dropping it meant the most
+      // common social-login failure produced no banner and no log at all, which is indistinguishable
+      // from the button not working. Cancellation still throws, and is filtered in the catch.
+      const authenticated = await auth.loginWithSocial({ provider });
+
+      if (!authenticated) {
+        setMessage(socialFailureMessage('unknown', provider));
+      }
     } catch (error) {
       const kind = auth.getErrorKind(error);
 
       if (kind !== 'cancelled') {
-        const providerName = provider === 'twitter' ? 'X' : 'Google';
-
-        setMessage(
-          kind === 'configuration'
-            ? 'Social sign-in is not enabled for this app.'
-            : kind === 'network'
-              ? 'Check your connection and try again.'
-              : kind === 'rate-limited'
-                ? 'Too many attempts. Please wait a moment and try again.'
-                : `Could not continue with ${providerName}. Please try again.`,
-        );
+        setMessage(socialFailureMessage(kind, provider));
       }
     } finally {
       setPending(null);

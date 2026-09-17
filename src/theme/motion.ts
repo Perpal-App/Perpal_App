@@ -86,6 +86,36 @@ export const motion = {
     fillInMs: 140,
     fillOutMs: 190,
   },
+  /**
+   * Feather touch: the lightest acknowledgement in the app, for a small control that confirms and
+   * then settles — the read tick on a notification.
+   *
+   * `dipScale` is shallow deliberately. The compression that reads as give on a full-width button
+   * reads as a stutter on a 32pt disc, and the movement a finger actually registers at this size is
+   * the halo leaving the control, not the glyph shrinking. Paired with a stiff, lightly damped
+   * spring so the return is quick and carries one soft overshoot rather than stopping dead.
+   *
+   * The halo is a ring expanding out of the control's own edge and fading as it travels: scale and
+   * opacity only, composited, never a layout dimension. It stops barely past the target because a
+   * wide ripple on a small control reads as a material splash, which is a different language from
+   * this app's.
+   *
+   * `commitMs` is the separate, slower leg — the outline filling in once the event is acknowledged.
+   * Slower than the halo on purpose: the ripple is the reaction to the finger, the fill is the
+   * state that outlives it, and running both at ripple speed made the change look like a flicker.
+   */
+  featherTouch: {
+    dipScale: 0.9,
+    spring: {
+      damping: 13,
+      stiffness: 320,
+      mass: 0.4,
+    },
+    haloMs: 460,
+    haloScale: 1.7,
+    haloOpacity: 0.4,
+    commitMs: 260,
+  },
   layoutMorph: {
     damping: 22,
     stiffness: 190,

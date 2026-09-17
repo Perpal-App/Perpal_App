@@ -167,14 +167,16 @@ export function NotificationsSheet({
         showsVerticalScrollIndicator={false}
       >
         {showLive ? (
-          <Group label="Live market">
+          <Group boxed label="Live market">
             {liveRows.map((row, index) => (
               <View
                 key={row.label}
                 style={[styles.liveRow, index === liveRows.length - 1 && styles.liveRowLast]}
               >
-                <Text style={styles.liveLabel}>{row.label}</Text>
-                <Text numberOfLines={3} style={styles.liveText}>{row.text}</Text>
+                <Text maxFontSizeMultiplier={1.35} style={styles.liveLabel}>{row.label}</Text>
+                <Text maxFontSizeMultiplier={1.35} numberOfLines={3} style={styles.liveText}>
+                  {row.text}
+                </Text>
               </View>
             ))}
           </Group>
@@ -185,12 +187,8 @@ export function NotificationsSheet({
             <EmptyState filter={filter} />
           ) : groups.map((group) => (
             <Group key={group.key} label={group.label}>
-              {group.items.map((item, index) => (
-                <NotificationRow
-                  item={item}
-                  key={item.id}
-                  last={index === group.items.length - 1}
-                />
+              {group.items.map((item) => (
+                <NotificationRow item={item} key={item.id} />
               ))}
             </Group>
           ))}
@@ -238,20 +236,28 @@ function EmptyState({ filter }: { readonly filter: ReadFilter }) {
 }
 
 /**
- * A heading and the card of rows under it.
+ * A heading and the rows under it, in one of two arrangements.
  *
- * Flat fill, no gradient. A ramp repeated down five cards stopped reading as material and started
- * reading as five separate panels of slightly different colour, which is the look this redesign
- * was pulling away from. The border and the raised fill are enough to group.
+ * `boxed` puts them inside a single card divided by hairlines, which is right for readings that are
+ * facets of one thing — the live market block is three views of the same instant, and three separate
+ * cards would claim they were three unrelated items. Events get the default instead: each row is its
+ * own card, because each is a separate occurrence with its own timestamp and its own action.
+ *
+ * Flat fill, no gradient, in both. A ramp repeated down five cards stopped reading as material and
+ * started reading as five panels of slightly different colour, which is the look this redesign was
+ * pulling away from. The border and the raised fill are enough to group.
  */
-function Group({ children, label }: {
+function Group({ boxed = false, children, label }: {
+  readonly boxed?: boolean;
   readonly children: ReactNode;
   readonly label: string;
 }) {
   return (
     <View style={styles.group}>
-      <Text accessibilityRole="header" style={styles.groupLabel}>{label}</Text>
-      <View style={styles.card}>{children}</View>
+      <Text accessibilityRole="header" maxFontSizeMultiplier={1.35} style={styles.groupLabel}>
+        {label}
+      </Text>
+      <View style={boxed ? styles.card : styles.stack}>{children}</View>
     </View>
   );
 }
@@ -346,9 +352,14 @@ const styles = StyleSheet.create({
   groups: { gap: spacing.lg },
   group: { gap: spacing.xs },
   groupLabel: { ...typography.label, color: colors.textSecondary },
+  // Event rows, each carrying its own card. Spaced by the smallest step that still resolves two
+  // adjacent hairline rims into two edges rather than one thick line.
+  stack: { gap: spacing.xs },
+  // `radii.lg`, matching the row cards beside it, so every corner in the list is the same corner.
+  // At `radii.md` this block sat visibly squarer than the rows under it and read as older chrome.
   card: {
     overflow: 'hidden',
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,

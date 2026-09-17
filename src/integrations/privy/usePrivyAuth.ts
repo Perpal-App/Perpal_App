@@ -17,7 +17,7 @@ export type SocialLoginInput = {
   provider: SocialAuthProvider;
 };
 
-type PrivyAuthErrorKind =
+export type PrivyAuthErrorKind =
   | 'cancelled'
   | 'configuration'
   | 'network'

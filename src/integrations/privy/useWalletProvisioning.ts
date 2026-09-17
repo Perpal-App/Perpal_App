@@ -55,6 +55,12 @@ function useWalletProvisioningState(): WalletProvisioning {
   const [provisioning, setProvisioning] = useState(false);
 
   const isAuthenticated = isReady && user !== null;
+  // Whether the account already has M, as opposed to whether the SDK has
+  // connected to it yet. The SDK derives `wallets` from the user's linked
+  // accounts during render, so this is already true on the commit a login lands;
+  // `wallet.status` is a state machine that still reads `not-created` at that
+  // point. Only this value may authorize a create — see shouldProvisionWallet.
+  const hasEmbeddedWallet = (wallet.wallets?.length ?? 0) > 0;
 
   const provision = useCallback(async () => {
     if (!isAuthenticated || isConnected(wallet)) {
@@ -71,7 +77,7 @@ function useWalletProvisioningState(): WalletProvisioning {
             operation: 'recover' as const,
             run: () => recover({ recoveryMethod: 'privy' as const }),
           }
-        : isNotCreated(wallet)
+        : isNotCreated(wallet) && !hasEmbeddedWallet
           ? {
               operation: 'create' as const,
               run: () => wallet.create({ recoveryMethod: 'privy' as const }),
@@ -96,22 +102,26 @@ function useWalletProvisioningState(): WalletProvisioning {
     } finally {
       setProvisioning(false);
     }
-  }, [isAuthenticated, recover, wallet]);
+  }, [hasEmbeddedWallet, isAuthenticated, recover, wallet]);
 
   useEffect(() => {
-    const state = `${isAuthenticated}:${wallet.status}`;
+    const state = `${isAuthenticated}:${wallet.status}:${hasEmbeddedWallet}`;
 
     if (loggedStateRef.current === state) {
       return;
     }
 
     loggedStateRef.current = state;
+    // `hasWallet` is logged alongside `status` because the two disagree in the
+    // one case that matters: `not-created` with `hasWallet: true` means the SDK
+    // has not connected yet, not that the account needs a wallet.
     console.info('[Perpal Privy wallet]', JSON.stringify({
       authenticated: isAuthenticated,
       event: 'state',
+      hasWallet: hasEmbeddedWallet,
       status: wallet.status,
     }));
-  }, [isAuthenticated, wallet.status]);
+  }, [hasEmbeddedWallet, isAuthenticated, wallet.status]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -128,10 +138,16 @@ function useWalletProvisioningState(): WalletProvisioning {
       return;
     }
 
-    if (shouldProvisionWallet(isAuthenticated, wallet.status)) {
+    if (
+      shouldProvisionWallet({
+        hasEmbeddedWallet,
+        isAuthenticated,
+        walletStatus: wallet.status,
+      })
+    ) {
       void provision();
     }
-  }, [isAuthenticated, provision, wallet]);
+  }, [hasEmbeddedWallet, isAuthenticated, provision, wallet]);
 
   const retry = useCallback(async () => {
     attemptedRef.current = false;
