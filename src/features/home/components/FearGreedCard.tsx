@@ -127,7 +127,6 @@ export function FearGreedCard({ data }: FearGreedState) {
           >
             <SentimentGauge tone={tone} value={data.value} />
           </View>
-          <Text style={styles.source}>Source: {data.source}</Text>
         </>
       )}
     </View>
@@ -191,7 +190,6 @@ const styles = StyleSheet.create({
   },
   // Takes the leftover width so a long classification never squeezes the title.
   title: { ...typography.label, flex: 1, minWidth: 0, color: colors.textPrimary },
-  source: { ...typography.caption, color: colors.textMuted },
   // Clipped, so the three material layers take the badge's corners and none of them needs to
   // repeat the radius. Padding is symmetric: a capsule needed more room on its flat side than
   // its curved one, but a rounded box has two flat sides, and the optical difference between a

@@ -31,6 +31,16 @@ const TILE_RADIUS = 9;
 
 const CHEVRON_SIZE = 16;
 
+/**
+ * Ceiling on the OS text size for a row's headline.
+ *
+ * The row still scales with the reader's setting, but the label no longer shrinks to absorb overflow,
+ * so an uncapped multiplier would put the cropping back — at 2x the label alone is wider than the
+ * space between the tile and the chevron, and being unshrinkable it would push the value out of the
+ * row entirely rather than losing a few characters. Capped, the pair always has somewhere to go.
+ */
+const MAX_TEXT_SCALE = 1.25;
+
 export type SettingsTone = 'accent' | 'negative';
 
 /**
@@ -138,13 +148,20 @@ export function SettingsRow({
       <View style={styles.body}>
         <View style={styles.headline}>
           <Text
+            maxFontSizeMultiplier={MAX_TEXT_SCALE}
             numberOfLines={1}
             style={[styles.label, tone === 'destructive' && styles.destructive]}
           >
             {label}
           </Text>
           {value === undefined ? null : (
-            <Text numberOfLines={1} style={styles.value}>{value}</Text>
+            <Text
+              maxFontSizeMultiplier={MAX_TEXT_SCALE}
+              numberOfLines={1}
+              style={styles.value}
+            >
+              {value}
+            </Text>
           )}
           {loading ? (
             <ActivityIndicator
@@ -239,8 +256,35 @@ const styles = StyleSheet.create({
   },
   body: { flex: 1, minWidth: 0, gap: 2 },
   headline: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  label: { ...typography.bodyCompact, flex: 1, minWidth: 0, color: colors.textPrimary },
-  value: { ...typography.bodyCompact, flexShrink: 0, color: colors.textMuted },
+  // Grows to fill when the row carries no value, so a lone label still pushes the chevron to the
+  // right edge. Does not shrink, which is the half that was missing: the label had `flex: 1` and the
+  // value `flexShrink: 0`, so whenever the two together overran the row the label absorbed the whole
+  // deficit and "Email support" came out as "Email supp…". The row's own name is the last thing on it
+  // that should be sacrificed for space.
+  label: {
+    ...typography.bodyCompact,
+    flexGrow: 1,
+    flexShrink: 0,
+    minWidth: 0,
+    color: colors.textPrimary,
+  },
+  // `caption`, a step under the label rather than level with it.
+  //
+  // At `bodyCompact` the muted detail was set at the label's own size and weight, so a 20-character
+  // address like perpal.app@gmail.com claimed as much of the row as the thing it was qualifying —
+  // about 140pt of a 210pt budget on a 360pt screen. 12pt returns roughly 18pt of that and restores
+  // the hierarchy the two should have had: this line describes the row, it does not title it.
+  //
+  // `flexShrink: 1` makes it the side that gives way now. On a narrow device the address ellipsises
+  // instead of the label, which is the right trade — the full value is still in the row's
+  // accessibility label, and tapping the row acts on it either way.
+  value: {
+    ...typography.caption,
+    flexShrink: 1,
+    minWidth: 0,
+    color: colors.textMuted,
+    textAlign: 'right',
+  },
   destructive: { color: colors.negative },
   // Inset past the tile so it starts under the label, which is where iOS breaks a settings list: a
   // rule running the full width would cut the icons off from their own rows.
