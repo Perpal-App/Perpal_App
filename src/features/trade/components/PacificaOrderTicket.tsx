@@ -166,7 +166,7 @@ export function PacificaOrderTicket(props: {
       }
     } catch (cause) {
       showAppToast({
-        outcome: 'error', title: fundingOnly ? 'Review deposit' : 'Review order',
+        outcome: 'error', 
         message: cause instanceof Error ? cause.message : 'Review the order inputs.',
       });
       return;
@@ -237,11 +237,11 @@ export function PacificaOrderTicket(props: {
         if (cause instanceof TradeFundingRequirementError) {
           setFundingRequirement(cause.requirement);
         } else if (cause instanceof AmountError || cause instanceof PacificaOrderValidationError) {
-          showAppToast({ outcome: 'error', title: 'Review order', message: cause.message });
+          showAppToast({ outcome: 'error', message: cause.message });
         } else {
           logTradeError('pacifica', 'preparation', cause);
           showAppToast({
-            outcome: 'error', title: 'Preparation failed',
+            outcome: 'error', 
             message: cause instanceof Error ? cause.message : 'Pacifica order preview failed.',
           });
         }

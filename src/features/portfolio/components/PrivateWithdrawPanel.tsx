@@ -84,8 +84,8 @@ export function PrivateWithdrawPanel({
   const confirm = () => {
     if (asset === null) {
       showAppToast({
-        outcome: 'error', title: 'Withdrawal unavailable',
-        message: 'Withdrawal configuration is unavailable.',
+        outcome: 'error', 
+        message: 'Withdrawal is unavailable.',
       });
       return;
     }
@@ -119,8 +119,8 @@ export function PrivateWithdrawPanel({
       );
     } catch {
       showAppToast({
-        outcome: 'error', title: 'Review withdrawal',
-        message: `Enter a valid ${asset.symbol} amount and destination.`,
+        outcome: 'error', 
+        message: `Enter a valid ${asset.symbol} amount.`,
       });
     }
   };

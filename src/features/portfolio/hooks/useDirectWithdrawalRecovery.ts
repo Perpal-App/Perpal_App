@@ -64,16 +64,14 @@ export function useDirectWithdrawalRecovery({
         setPhase('pending');
         showAppToast({
           outcome: 'info',
-          title: 'Withdrawal confirming',
-          message: 'No balance is hidden or deducted locally while Solana confirms the transfer.',
+          message: 'Withdrawal is confirming on Solana.',
         });
         return;
       }
       setPhase('idle');
       showAppToast({
         outcome: 'info',
-        title: 'Withdrawal not confirmed',
-        message: 'The signed transfer expired. The amount remains in the source wallet.',
+        message: 'Transfer expired. Funds unmoved.',
       });
     }).catch((cause) => {
       if (abort.signal.aborted) return;

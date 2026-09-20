@@ -132,7 +132,7 @@ export function DirectWithdrawPanel({
       setAmount(formatTokenAmount(plan.amountBaseUnits, plan.decimals));
       setWithdrawMaximum(true);
       setPhase('idle');
-      showAppToast({ outcome: 'info', title: 'Maximum calculated', message: maxCostMessage(plan) });
+      showAppToast({ outcome: 'info', message: maxCostMessage(plan) });
       return;
     }
     review(plan);
@@ -179,7 +179,6 @@ export function DirectWithdrawPanel({
         onPacificaRefresh?.();
         showAppToast({
           outcome: 'error',
-          title: 'Withdrawal unavailable',
           message: directErrorMessage(cause),
         });
       }
@@ -200,8 +199,8 @@ export function DirectWithdrawPanel({
       availableBaseUnits === null
     ) {
       showAppToast({
-        outcome: 'error', title: 'Withdrawal unavailable',
-        message: `${source === 'public' ? 'Public wallet' : 'Private'} balances are still loading.`,
+        outcome: 'error', 
+        message: `${source === 'public' ? 'Public' : 'Private'} balances are still loading.`,
       });
       return;
     }
@@ -220,8 +219,8 @@ export function DirectWithdrawPanel({
       }
     } catch {
       showAppToast({
-        outcome: 'error', title: 'Review withdrawal',
-        message: `Enter up to ${formatTokenAmount(availableBaseUnits, asset.decimals)} ${asset.symbol} and a valid wallet.`,
+        outcome: 'error', 
+        message: `Enter up to ${formatTokenAmount(availableBaseUnits, asset.decimals)} ${asset.symbol}.`,
       });
       return;
     }
@@ -234,8 +233,7 @@ export function DirectWithdrawPanel({
       setPhase('idle');
       showAppToast({
         outcome: 'info',
-        title: 'Maximum selected',
-        message: `${formatTokenAmount(availableBaseUnits, asset.decimals)} USDC includes withdrawable Pacifica funds. Fees are reviewed before either step.`,
+        message: `Max set to ${formatTokenAmount(availableBaseUnits, asset.decimals)} USDC.`,
       });
       return;
     }
@@ -255,8 +253,8 @@ export function DirectWithdrawPanel({
       if (pending === 'pending') {
         setPhase('pending');
         showAppToast({
-          outcome: 'info', title: 'Withdrawal confirming',
-          message: 'Wait for the existing signed withdrawal to settle before preparing another.',
+          outcome: 'info', 
+          message: 'A signed withdrawal is still settling.',
         });
         return;
       }
@@ -264,8 +262,8 @@ export function DirectWithdrawPanel({
         setPhase('idle');
         onBalancesChanged();
         showAppToast({
-          outcome: 'success', title: 'Previous withdrawal confirmed',
-          message: 'Balances were refreshed. Review the next amount again.',
+          outcome: 'success', 
+          message: 'Previous withdrawal confirmed.',
         });
         return;
       }
@@ -312,7 +310,7 @@ export function DirectWithdrawPanel({
       if (!abort.signal.aborted) {
         setPhase('idle');
         onBalancesChanged();
-        showAppToast({ outcome: 'error', title: 'Withdrawal unavailable', message: directErrorMessage(cause) });
+        showAppToast({ outcome: 'error', message: directErrorMessage(cause) });
       }
     }
   };

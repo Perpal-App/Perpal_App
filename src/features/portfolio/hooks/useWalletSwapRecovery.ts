@@ -78,12 +78,11 @@ export function useWalletSwapRecovery({
             correlations: [{ namespace: 'solana-transaction', value: correlationSignature }],
             kind: 'wallet', outcome: 'success', status: 'settled',
             scopeToken: notificationScope,
-            title: 'Swap confirmed', message: `${walletLabel} balances were updated.`,
+            title: 'Swap confirmed', message: 'Swap confirmed.',
           });
         } else {
           showAppToast({
             outcome: 'success',
-            title: 'Swap confirmed',
             message: `${walletLabel} balances were updated.`,
           });
         }
@@ -100,13 +99,12 @@ export function useWalletSwapRecovery({
             correlations: [{ namespace: 'solana-transaction', value: correlationSignature }],
             kind: 'wallet', outcome: 'info', status: 'submitted',
             scopeToken: notificationScope,
-            title: 'Swap confirming', message: 'The signed swap is still confirming.',
+            title: 'Swap confirming', message: 'Swap is still confirming.',
           });
         } else {
           showAppToast({
             outcome: 'info',
-            title: 'Swap confirming',
-            message: 'The signed swap is still confirming.',
+            message: 'Swap is still confirming.',
           });
         }
       }
@@ -133,7 +131,6 @@ export function useWalletSwapRecovery({
         } else {
           showAppToast({
             outcome: 'error',
-            title: 'Swap recovery paused',
             message: cause instanceof Error ? cause.message : 'Swap recovery could not continue.',
           });
         }

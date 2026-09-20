@@ -111,8 +111,7 @@ export function WalletSwapPanel({
     if (!config.ok || owner === null || session.signer === null) {
       showAppToast({
         outcome: 'error',
-        title: 'Swap unavailable',
-        message: 'Wallet services are still getting ready.',
+        message: 'Wallet is still starting up.',
       });
       return;
     }
@@ -132,7 +131,7 @@ export function WalletSwapPanel({
         throw new Error(`No ${from} is available to swap.`);
       }
     } catch (cause) {
-      showAppToast({ outcome: 'error', title: 'Review swap', message: userMessage(cause) });
+      showAppToast({ outcome: 'error', message: userMessage(cause) });
       return;
     }
 
@@ -173,7 +172,7 @@ export function WalletSwapPanel({
       if (!controller.signal.aborted) {
         logSwapFailure('preparation', cause);
         setPhase('idle');
-        showAppToast({ outcome: 'error', title: 'Swap unavailable', message: userMessage(cause) });
+        showAppToast({ outcome: 'error', message: userMessage(cause) });
       }
     }
   };
@@ -185,8 +184,7 @@ export function WalletSwapPanel({
       setConfirmationVisible(false);
       showAppToast({
         outcome: 'error',
-        title: 'Swap unavailable',
-        message: 'Wallet services are still getting ready.',
+        message: 'Wallet is still starting up.',
       });
       return;
     }
@@ -226,7 +224,7 @@ export function WalletSwapPanel({
       setPhase('idle');
       setConfirmationVisible(false);
       if (errorCode(cause) === 'quote_stale') setPlan(null);
-      showAppToast({ outcome: 'error', title: 'Swap failed', message: userMessage(cause) });
+      showAppToast({ outcome: 'error', message: userMessage(cause) });
       recovery.resume();
     } finally {
       submitInFlight.current = false;

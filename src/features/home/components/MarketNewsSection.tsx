@@ -172,8 +172,7 @@ async function openArticle(url: string): Promise<void> {
   } catch {
     showAppToast({
       outcome: 'error',
-      title: 'Article unavailable',
-      message: 'The source link could not be opened.',
+      message: 'Could not open the article.',
     });
   }
 }

@@ -212,14 +212,12 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
       setError(null);
       showAppToast({
         outcome: 'info',
-        title: 'Withdrawal reset',
-        message: 'No transaction was submitted. Enter a new amount.',
+        message: 'Nothing was submitted.',
       });
     } catch {
       showAppToast({
         outcome: 'error',
-        title: 'Resume required',
-        message: 'This withdrawal may have been submitted and cannot be discarded.',
+        message: 'Withdrawal may be in flight.',
       });
     } finally {
       runningRef.current = false;

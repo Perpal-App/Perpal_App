@@ -43,7 +43,6 @@ export function PacificaPendingReleaseCard({
           setAmountBaseUnits(null);
           showAppToast({
             outcome: 'error',
-            title: 'Release recovery needs attention',
             message: message(cause),
           });
         });
@@ -76,8 +75,7 @@ export function PacificaPendingReleaseCard({
     if (!config.ok || session.address === null || session.signer === null || loading) {
       showAppToast({
         outcome: 'error',
-        title: 'Release unavailable',
-        message: 'Private wallet services are still loading.',
+        message: 'Private wallet is still loading.',
       });
       return;
     }
@@ -101,15 +99,13 @@ export function PacificaPendingReleaseCard({
       await Promise.all([onBalancesChanged(), onPacificaRefresh()]);
       showAppToast({
         outcome: 'success',
-        title: 'USDC released',
-        message: 'Pacifica confirmed the saved release. Private balances were refreshed.',
+        message: 'USDC released from Pacifica.',
       });
     } catch (cause) {
       if (!abort.signal.aborted) {
         await Promise.all([onBalancesChanged(), onPacificaRefresh()]);
         showAppToast({
           outcome: 'error',
-          title: 'Release still pending',
           message: message(cause),
         });
       }

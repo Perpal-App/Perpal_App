@@ -94,7 +94,6 @@ export function AccountScreen() {
     } catch (cause) {
       showAppToast({
         outcome: 'error',
-        title: 'Rotation unavailable',
         message: cause instanceof Error ? cause.message : 'Rotation could not be reviewed.',
       });
     } finally {
@@ -123,8 +122,7 @@ export function AccountScreen() {
     } catch (cause) {
       showAppToast({
         outcome: 'error',
-        title: 'Recovery paused',
-        message: cause instanceof Error ? cause.message : 'The recorded identity was preserved.',
+        message: cause instanceof Error ? cause.message : 'Recovery paused. Identity kept.',
       });
     } finally {
       setWalletActionLoading(false);
@@ -141,8 +139,7 @@ export function AccountScreen() {
     void auth.logout()
       .catch(() => showAppToast({
         outcome: 'error',
-        title: 'Sign out paused',
-        message: 'Sign out could not be completed. Try again.',
+        message: 'Sign out did not complete.',
       }))
       .finally(() => {
         signOutInFlight.current = false;
@@ -321,7 +318,7 @@ async function openLink(url: string, unavailable: string): Promise<void> {
   try {
     await Linking.openURL(url);
   } catch {
-    showAppToast({ outcome: 'error', title: 'Could not open', message: unavailable });
+    showAppToast({ outcome: 'error', message: unavailable });
   }
 }
 
