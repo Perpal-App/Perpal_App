@@ -6,10 +6,11 @@ import { useConcealProgress } from '@/components/motion/useConcealProgress';
 import { colors } from '@/theme/tokens';
 
 /**
- * Render size. The box it sits in is 34 in both callers, so this still clears 3pt on every side and
- * no layout moves.
+ * Render size. 28 was too much for the 34pt box it sits in — 3pt of clearance reads as a glyph
+ * straining against its own tap target. 24 leaves 5pt and keeps the heavier stroke, which is what was
+ * actually missing at 22.
  */
-const DEFAULT_SIZE = 28;
+const DEFAULT_SIZE = 24;
 
 /** How small the slash starts before it settles at full length. */
 const SLASH_ENTER_SCALE = 0.4;

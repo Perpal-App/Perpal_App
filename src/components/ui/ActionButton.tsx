@@ -54,6 +54,7 @@ export function ActionButton({
   label,
   loading = false,
   onPress,
+  radius,
   selected,
   style,
   tone = 'accent',
@@ -72,6 +73,12 @@ export function ActionButton({
    * destinations is chosen, and a fill is not something a screen reader can read.
    */
   readonly selected?: boolean;
+  /**
+   * Overrides the corner. Defaults to the app's action radius; pass a rounder one where a whole
+   * surface of controls needs to agree with a softer container than the page — the withdraw sheet
+   * sits inside a `radii.panel` shell, and at the default its buttons read as hard against it.
+   */
+  readonly radius?: number;
   readonly style?: StyleProp<ViewStyle>;
   readonly tone?: ActionButtonTone;
 }) {
@@ -91,7 +98,13 @@ export function ActionButton({
       // Shallower than the app's default press. These sit in pairs, and at 4% the gap between two
       // buttons visibly opens when either one is held.
       pressedScale={0.98}
-      style={[styles.button, { borderColor: material.edge }, unavailable && styles.disabled, style]}
+      style={[
+        styles.button,
+        { borderColor: material.edge },
+        radius === undefined ? null : { borderRadius: radius },
+        unavailable && styles.disabled,
+        style,
+      ]}
     >
       <LinearGradient
         colors={material.ramp.colors}

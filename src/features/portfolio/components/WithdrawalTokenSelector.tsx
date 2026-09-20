@@ -14,7 +14,8 @@ import {
   formatTokenAmount,
   type WithdrawableToken,
 } from '@/features/portfolio/components/withdrawalAssets';
-import { colors, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
+import { WITHDRAW_RADIUS } from '@/features/portfolio/components/withdrawSheetStyles';
+import { colors, gradients, layout, spacing, typography } from '@/theme/tokens';
 
 const MIN_MENU_WIDTH = 196;
 
@@ -102,13 +103,16 @@ export function WithdrawalTokenSelector({
 }
 
 const styles = StyleSheet.create({
+  // `WITHDRAW_RADIUS`, not `radii.sm`: this sits between the amount field and the Max button, and a
+  // tighter corner than either of them made the row read as three unrelated controls.
   control: {
     minHeight: layout.minTouchTarget,
     flexShrink: 0,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radii.sm,
+    borderRadius: WITHDRAW_RADIUS,
+    borderCurve: 'continuous',
   },
   disabled: { opacity: 0.4 },
   fill: {

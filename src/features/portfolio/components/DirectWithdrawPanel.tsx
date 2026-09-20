@@ -1,13 +1,20 @@
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Text, TextInput, View } from 'react-native';
+import { Alert, TextInput, View } from 'react-native';
 import { PublicKey } from '@solana/web3.js';
 
 import { ActionButton } from '@/components/ui/ActionButton';
 import { readAppConfig } from '@/config/appConfig';
-import { directWithdrawPanelStyles as styles } from '@/features/portfolio/components/directWithdrawPanelStyles';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
+import {
+  WithdrawChoice,
+  withdrawOptionStyle,
+} from '@/features/portfolio/components/WithdrawChoice';
 import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
+import {
+  WITHDRAW_RADIUS,
+  withdrawSheetStyles as styles,
+} from '@/features/portfolio/components/withdrawSheetStyles';
 import {
   formatTokenAmount,
   parseTokenAmount,
@@ -378,32 +385,35 @@ export function DirectWithdrawPanel({
 
   return (
     <View style={styles.panel}>
-      <Text accessibilityRole="header" style={styles.title}>
-        {source === 'public' ? 'Send' : 'Direct withdrawal'}
-      </Text>
-      <Text style={styles.note}>
-        {source === 'public'
-          ? 'Send supported tokens. Fees and account rent are shown before approval.'
-          : 'Pacifica USDC is released automatically when needed.'}
-      </Text>
-      {source === 'private' ? <View style={styles.buttons}>
-        <ActionButton
-          disabled={running}
-          label="Public wallet"
-          onPress={() => setDestinationMode('privy')}
-          selected={destinationMode === 'privy'}
-          style={styles.button}
-          tone={destinationMode === 'privy' ? 'accent' : 'neutral'}
-        />
-        <ActionButton
-          disabled={running}
-          label="Other wallet"
-          onPress={() => setDestinationMode('external')}
-          selected={destinationMode === 'external'}
-          style={styles.button}
-          tone={destinationMode === 'external' ? 'accent' : 'neutral'}
-        />
-      </View> : null}
+      {/* No heading and no note. "Direct withdrawal" restated the route button selected directly
+          above it, and "Pacifica USDC is released automatically when needed" described plumbing the
+          reader has no decision to make about — it happens either way. The public variant's note
+          promised that fees and rent are shown before approval, which the review step it leads to
+          already does; saying so in advance only added a line to get past. */}
+      {source === 'private' ? (
+        <WithdrawChoice label="To">
+          <ActionButton
+            accessibilityHint="Sends the withdrawal to your Privy public wallet"
+            disabled={running}
+            label="Public wallet"
+            onPress={() => setDestinationMode('privy')}
+            radius={WITHDRAW_RADIUS}
+            selected={destinationMode === 'privy'}
+            style={withdrawOptionStyle}
+            tone={destinationMode === 'privy' ? 'accent' : 'neutral'}
+          />
+          <ActionButton
+            accessibilityHint="Sends the withdrawal to an address you enter"
+            disabled={running}
+            label="Other wallet"
+            onPress={() => setDestinationMode('external')}
+            radius={WITHDRAW_RADIUS}
+            selected={destinationMode === 'external'}
+            style={withdrawOptionStyle}
+            tone={destinationMode === 'external' ? 'accent' : 'neutral'}
+          />
+        </WithdrawChoice>
+      ) : null}
       <View style={styles.amountRow}>
         <TextInput
           accessibilityLabel={`${asset?.symbol ?? 'Token'} withdrawal amount`}
@@ -436,6 +446,7 @@ export function DirectWithdrawPanel({
           label="Max"
           loading={phase === 'quoting'}
           onPress={() => void prepare(true, true)}
+          radius={WITHDRAW_RADIUS}
           style={styles.max}
           tone="neutral"
         />
@@ -467,6 +478,8 @@ export function DirectWithdrawPanel({
               : source === 'public' ? 'Review send' : 'Review direct withdrawal'}
         loading={phase === 'preparing' || phase === 'submitting'}
         onPress={() => void prepare()}
+        radius={WITHDRAW_RADIUS}
+        style={styles.cta}
       />
     </View>
   );

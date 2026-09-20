@@ -1,16 +1,30 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { DirectWithdrawPanel } from '@/features/portfolio/components/DirectWithdrawPanel';
+import {
+  WithdrawChoice,
+  withdrawOptionStyle,
+} from '@/features/portfolio/components/WithdrawChoice';
 import { WithdrawPanel } from '@/features/portfolio/components/WithdrawPanel';
+import {
+  WITHDRAW_RADIUS,
+  withdrawSheetStyles,
+} from '@/features/portfolio/components/withdrawSheetStyles';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { colors, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 type Source = 'private' | 'public';
 
+/**
+ * The withdraw sheet's outermost decision: which balance the money is coming out of.
+ *
+ * It owns the sheet's only title. "Choose where the funds are held." came off it — a sentence
+ * explaining a two-button choice whose buttons already read "Public wallet" and "Private funds", set
+ * directly above them at the same size as the paragraph the next panel down also opened with.
+ */
 export function WalletWithdrawPanel({
   balances,
   onBalancesChanged,
@@ -26,24 +40,22 @@ export function WalletWithdrawPanel({
   const [source, setSource] = useState<Source>('public');
 
   return (
-    <View style={styles.container}>
-      <View style={styles.heading}>
-        <Text accessibilityRole="header" style={styles.title}>Withdraw</Text>
-        <Text style={styles.note}>Choose where the funds are held.</Text>
-      </View>
+    <View style={withdrawSheetStyles.stack}>
+      <Text accessibilityRole="header" style={withdrawSheetStyles.title}>Withdraw</Text>
 
-      <View accessibilityRole="radiogroup" style={styles.sources}>
+      <WithdrawChoice label="From">
         {(['public', 'private'] as const).map((value) => (
           <ActionButton
             key={value}
             label={value === 'public' ? 'Public wallet' : 'Private funds'}
             onPress={() => setSource(value)}
+            radius={WITHDRAW_RADIUS}
             selected={source === value}
-            style={styles.source}
+            style={withdrawOptionStyle}
             tone={source === value ? 'accent' : 'neutral'}
           />
         ))}
-      </View>
+      </WithdrawChoice>
 
       {source === 'public' ? (
         <DirectWithdrawPanel
@@ -63,12 +75,3 @@ export function WalletWithdrawPanel({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { gap: spacing.lg },
-  heading: { gap: 2 },
-  title: { ...typography.heading, color: colors.textPrimary },
-  note: { ...typography.bodyCompact, color: colors.textSecondary },
-  sources: { flexDirection: 'row', gap: spacing.sm },
-  source: { flex: 1, minWidth: 0 },
-});

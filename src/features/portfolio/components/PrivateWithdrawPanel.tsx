@@ -8,7 +8,15 @@ import { ActionButton } from '@/components/ui/ActionButton';
 import { readAppConfig } from '@/config/appConfig';
 import { amountFromBaseUnits, formatAmount, parseAmount } from '@/domain/money/amount';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
+import {
+  WithdrawChoice,
+  withdrawOptionStyle,
+} from '@/features/portfolio/components/WithdrawChoice';
 import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
+import {
+  WITHDRAW_RADIUS,
+  withdrawSheetStyles,
+} from '@/features/portfolio/components/withdrawSheetStyles';
 import {
   parseTokenAmount,
   type WithdrawableToken,
@@ -21,7 +29,7 @@ import {
   usePrivateExit,
   type PrivateExitAsset,
 } from '@/integrations/umbra/PrivateExitProvider';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, spacing } from '@/theme/tokens';
 import { showAppToast } from '@/storage/appToast';
 
 /**
@@ -119,35 +127,37 @@ export function PrivateWithdrawPanel({
 
   return (
     <View style={styles.panel}>
-      <Text accessibilityRole="header" style={styles.title}>Withdraw</Text>
-      <Text selectable style={styles.note}>
-        {empty
-          ? 'Nothing to withdraw yet. Deposited collateral and closed margin appear here.'
-          : collectsFromVenue
-            ? 'One withdrawal collects the USDC into your private balance, then delivers it privately.'
-            : nativeSol
-              ? 'SOL is delivered privately through Umbra and arrives as native SOL.'
-            : `${symbol} is already in your private balance and is delivered privately in one step.`}
-      </Text>
+      {/* The second "Withdraw" heading is gone — the sheet already carries that word at the top, and
+          this panel is three levels inside it. Of the four notes that used to sit here, three
+          described delivery mechanics that are identical whatever the reader does, so they were
+          narration; the one that says something actionable is the empty state, which stays because
+          without it the sheet is a form with nothing to put in it and no explanation. */}
+      {empty ? (
+        <Text selectable style={styles.note}>
+          Nothing to withdraw yet. Deposited collateral and closed margin appear here.
+        </Text>
+      ) : null}
 
-      <View style={styles.buttons}>
+      <WithdrawChoice label="To">
         <ActionButton
           accessibilityHint="Sends the withdrawal to your Privy public wallet"
           label="Public wallet"
           onPress={() => setDestinationMode('privy')}
+          radius={WITHDRAW_RADIUS}
           selected={destinationMode === 'privy'}
-          style={styles.button}
+          style={withdrawOptionStyle}
           tone={destinationMode === 'privy' ? 'accent' : 'neutral'}
         />
         <ActionButton
           accessibilityHint="Sends the withdrawal to an address you enter"
           label="Other wallet"
           onPress={() => setDestinationMode('external')}
+          radius={WITHDRAW_RADIUS}
           selected={destinationMode === 'external'}
-          style={styles.button}
+          style={withdrawOptionStyle}
           tone={destinationMode === 'external' ? 'accent' : 'neutral'}
         />
-      </View>
+      </WithdrawChoice>
 
       {/* Amount and token on one row, the same pairing the activity search uses. The token sets what
           the amount means, so putting it anywhere else would leave the field ambiguous while the
@@ -168,6 +178,7 @@ export function PrivateWithdrawPanel({
           // token still has a figure worth reading. Only a run in flight or nothing at all locks it.
           disabled={privateExit.isRunning || pending || empty}
           onSelect={setChosenMint}
+
           selectedMint={asset?.mint ?? ''}
           symbol={symbol}
           tokens={withdrawable}
@@ -188,7 +199,7 @@ export function PrivateWithdrawPanel({
       ) : null}
 
       {pending ? (
-        <View style={styles.buttons}>
+        <View style={styles.resume}>
           <ActionButton
             disabled={privateExit.isRunning}
             label={privateExit.isRunning
@@ -198,7 +209,8 @@ export function PrivateWithdrawPanel({
                 : 'Retry withdrawal'}
             loading={privateExit.isRunning}
             onPress={() => void privateExit.resume()}
-            style={styles.button}
+            radius={WITHDRAW_RADIUS}
+            style={[withdrawOptionStyle, styles.cta]}
             tone="neutral"
           />
           {privateExit.canReset ? (
@@ -206,7 +218,8 @@ export function PrivateWithdrawPanel({
               disabled={privateExit.isRunning}
               label="Change amount"
               onPress={() => void privateExit.reset()}
-              style={styles.button}
+              radius={WITHDRAW_RADIUS}
+              style={[withdrawOptionStyle, styles.cta]}
               tone="neutral"
             />
           ) : null}
@@ -217,6 +230,8 @@ export function PrivateWithdrawPanel({
           label={nativeSol ? 'Withdraw SOL privately' : 'Withdraw privately'}
           loading={privateExit.isRunning}
           onPress={confirm}
+          radius={WITHDRAW_RADIUS}
+          style={styles.cta}
         />
       )}
     </View>
@@ -302,32 +317,11 @@ function feeLabel(): string {
 }
 
 /**
- * Floor for a field's height.
- *
- * The row is `stretch`, so the field and the token control take whichever of them is taller and can
- * never disagree — this only sets how short the pair may be when the text inside is small. It grows on
- * its own with the reader's text size.
+ * Panel, note, row and input now come from `withdrawSheetStyles`, which every panel in this sheet
+ * shares. This file used to carry a byte-for-byte copy of them, as did two of its siblings — four
+ * independent definitions of the same block, already drifting.
  */
-const FIELD_MIN_HEIGHT = layout.minTouchTarget;
-
 const styles = StyleSheet.create({
-  panel: { gap: spacing.md },
-  title: { ...typography.heading, color: colors.textPrimary },
-  note: { ...typography.bodyCompact, color: colors.textSecondary },
-  buttons: { flexDirection: 'row', gap: spacing.sm },
-  button: { flex: 1 },
-  amountRow: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.xs },
-  // A hairline rim rather than a full point: an input is a recess, and a full-point edge belongs to a
-  // raised surface. Height matched to the buttons above and below so the stack reads evenly.
-  input: {
-    minHeight: FIELD_MIN_HEIGHT,
-    paddingHorizontal: spacing.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.sm,
-    color: colors.textPrimary,
-    backgroundColor: colors.background,
-    ...typography.bodyCompact,
-  },
-  amountInput: { flex: 1, minWidth: 0 },
+  ...withdrawSheetStyles,
+  resume: { flexDirection: 'row', gap: spacing.sm },
 });
