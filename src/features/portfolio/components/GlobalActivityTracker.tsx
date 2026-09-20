@@ -19,6 +19,7 @@ import {
 import { usePacificaActivity } from '@/features/portfolio/hooks/usePacificaActivity';
 import { useSolanaWalletActivity } from '@/features/portfolio/hooks/useSolanaWalletActivity';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
+import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
 import {
   readInAppNotifications,
   subscribeInAppNotifications,
@@ -43,6 +44,7 @@ export function GlobalActivityTracker({
   account,
   apiOrigin,
   generation,
+  metadata,
   pacificaProgramId,
   publicAccount,
   rpcUrl,
@@ -53,6 +55,15 @@ export function GlobalActivityTracker({
   readonly account: string;
   readonly apiOrigin: string;
   readonly generation: number;
+  /**
+   * Token artwork, from the map the balance refresh already fetches.
+   *
+   * Passed to the rows rather than folded into `mergeActivity`, which is a pure transform over the
+   * activity sources. Threading a network-derived map through it would put an image URL inside
+   * `ActivityItem` — coupling the item model to RPC state — and add the map to that memo's deps, so a
+   * forty-row list would rebuild on every balance refresh even when no activity had changed.
+   */
+  readonly metadata: TokenMetadataMap;
   readonly pacificaProgramId: string;
   readonly publicAccount: string | null;
   readonly rpcUrl: string;
@@ -195,7 +206,9 @@ export function GlobalActivityTracker({
               : 'No activity of this kind yet.'}
           </Text>
         ) : (
-          displayed.map((item) => <ActivityRow item={item} key={item.id} />)
+          displayed.map((item) => (
+            <ActivityRow item={item} key={item.id} metadata={metadata} />
+          ))
         )}
       </View>
 

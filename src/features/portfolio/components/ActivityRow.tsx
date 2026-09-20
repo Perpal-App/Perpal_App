@@ -13,6 +13,7 @@ import {
   TOKEN_PAIR_WIDTH,
 } from '@/features/portfolio/components/TokenMark';
 import type { ActivityItem } from '@/features/portfolio/components/activityItems';
+import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
 import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
 /** Matched to the notification rows' mark, so one leading glyph size runs through the app. */
@@ -82,8 +83,30 @@ const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
  * bounded by its own rim and by a gap of page darker than the ramp's own base, so it reads as forty
  * surfaces rather than as a striped one.
  */
-export function ActivityRow({ item }: { readonly item: ActivityItem }) {
+function bothLogos(
+  metadata: TokenMetadataMap,
+  pair: NonNullable<ActivityItem['pair']>,
+): { readonly received: string; readonly spent: string } | null {
+  const spent = metadata.get(pair.spentMint)?.imageUrl;
+  const received = metadata.get(pair.receivedMint)?.imageUrl;
+
+  return spent == null || received == null ? null : { received, spent };
+}
+
+export function ActivityRow({
+  item,
+  metadata,
+}: {
+  readonly item: ActivityItem;
+  readonly metadata: TokenMetadataMap;
+}) {
   const direction = activityDirection(item);
+  // Both or neither. A pair showing one real logo beside an empty gap is worse than the generic
+  // exchange glyph, and `TokenLogo` contributes no width when it has nothing to draw, so a half-
+  // resolved pair would also shift the title. Resolved here rather than inside the mark because
+  // `tokenMetadata` is explicit that a missing image stays missing — the substitute has to be the
+  // action, which this row already owns a glyph for, and never a guess at the asset.
+  const pairLogos = item.pair === undefined ? null : bothLogos(metadata, item.pair);
 
   return (
     <LinearGradient
@@ -99,10 +122,10 @@ export function ActivityRow({ item }: { readonly item: ActivityItem }) {
         pointerEvents="none"
         style={styles.mark}
       >
-        {item.pair === undefined ? (
+        {pairLogos === null ? (
           <ActivityMark direction={direction} item={item} size={MARK} />
         ) : (
-          <TokenPairMark received={item.pair.received} spent={item.pair.spent} />
+          <TokenPairMark receivedUrl={pairLogos.received} spentUrl={pairLogos.spent} />
         )}
       </View>
 

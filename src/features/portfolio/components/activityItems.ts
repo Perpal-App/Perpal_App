@@ -40,8 +40,15 @@ export type ActivityItem = {
    * marks in place of a direction glyph. Everything else names its single asset once, on its amount.
    */
   readonly pair?: {
-    readonly received: WalletAssetAmount['symbol'];
-    readonly spent: WalletAssetAmount['symbol'];
+    /**
+     * Mints, not symbols.
+     *
+     * The mint is the only key the token-metadata map accepts, and that map is the only place a logo
+     * may come from. Carrying symbols here forced the row to decide what each one looks like, which is
+     * how three hardcoded marks got drawn in the first place.
+     */
+    readonly receivedMint: string;
+    readonly spentMint: string;
   };
   readonly title: string;
   readonly value: string | null;
@@ -236,7 +243,7 @@ function walletItem(item: SolanaWalletActivity): ActivityItem {
       // The pair moves to the row's mark, as two brand discs. It was being stated three times over:
       // once in prose here, once on the amount, and once on a second line carrying the other leg —
       // and that second line was what pushed the title to wrap and then ellipsise to "Swapped …".
-      pair: { received: action.received.symbol, spent: action.spent.symbol },
+      pair: { receivedMint: action.received.mint, spentMint: action.spent.mint },
       title: 'Swapped',
       // Unsigned: an exchange is neither a gain nor a loss, and the row's neutral tone says so.
       value: assetAmount(action.spent),

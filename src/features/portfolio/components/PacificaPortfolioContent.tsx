@@ -23,9 +23,13 @@ import {
   captureInAppNotificationScope,
   publishInAppNotification,
 } from '@/storage/inAppNotifications';
+import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
 import { colors, layout, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
+
+/** Stable empty map, so a render before balances land does not churn the rows' props. */
+const EMPTY_METADATA: TokenMetadataMap = new Map();
 
 
 type Props = {
@@ -163,6 +167,7 @@ export function PacificaPortfolioContent({
         account={session.address ?? ''}
         apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
         generation={session.generation}
+        metadata={balances?.tokenMetadata ?? EMPTY_METADATA}
         pacificaProgramId={config.ok ? config.value.perps.pacificaProgramId : ''}
         publicAccount={session.mainWalletAddress}
         rpcUrl={config.ok ? config.value.api.rpcUrl : ''}
