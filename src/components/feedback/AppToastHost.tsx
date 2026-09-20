@@ -12,7 +12,18 @@ import {
 } from '@/storage/appToast';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
-const DISMISS_AFTER_MS = 3_500;
+/**
+ * How long a toast stays before it closes itself.
+ *
+ * Every outcome, errors included. Errors used to be exempt from this entirely — the effect returned
+ * early for them — so an error bar sat over the screen until it was tapped, which is why a failed RPC
+ * notice could still be covering the balance header minutes later.
+ *
+ * Measured from when the bar is up, not from when it was raised: the entry and exit fades are on top
+ * of this, so the message is readable for the full two seconds and then takes `motion.fade.duration`
+ * to leave.
+ */
+const DISMISS_AFTER_MS = 2_000;
 
 /** Bar height. One line of `bodyCompact` plus symmetric padding, and enough to seat a 20pt mark. */
 const BAR_HEIGHT = 52;
@@ -46,8 +57,13 @@ export function AppToastHost() {
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    if (toast === null || toast.outcome === 'error') return;
+    if (toast === null) return;
+
+    // Keyed by id, and `dismissAppToast` checks that id before clearing, so a timer left over from a
+    // toast that was already replaced cannot cut the current one short. Two toasts in quick succession
+    // each get their own full two seconds.
     const timer = setTimeout(() => dismissAppToast(toast.id), DISMISS_AFTER_MS);
+
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -64,9 +80,8 @@ export function AppToastHost() {
           >
             {/* The whole bar dismisses, which is what let the close button go. At 36pt plus its gap
                 that button was taking 48 of the 264pt a 360pt screen has for this line — a fifth of
-                the message, spent on a target the entire bar can be. Errors are the case that needs
-                it, since they never time out, and they get the largest possible target instead of the
-                smallest. */}
+                the message, spent on a target the entire bar can be. It is now a way to clear a
+                message early rather than the only way to clear it at all. */}
             <Pressable
               accessibilityHint="Dismisses this message"
               accessibilityLabel={toast.message}

@@ -172,10 +172,17 @@ export function useWalletBalances(input: {
               return null;
             }),
             fetchTokenMetadata(
+              // The three the app trades are requested unconditionally, where SOL and USDT used to
+              // arrive only if the wallet happened to hold some right now. History outlives holdings:
+              // a swap that sold an entire USDT balance leaves a row whose token no longer appears in
+              // `holdings`, and that row had no logo to show. Asking for them always costs no extra
+              // request — same batched `getAssetBatch`, three more ids in a hundred-id batch, and the
+              // module cache serves them for 24 hours after the first call.
               uniqueMintStrings([
                 ...holdings.map((holding) => holding.mint),
-                ...(hasNativeSol ? [nativeMint] : []),
+                nativeMint,
                 config.value.perps.usdcMint,
+                config.value.perps.usdtMint,
               ]),
               config.value.api.rpcUrl,
               signer,

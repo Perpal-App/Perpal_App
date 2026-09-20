@@ -1,3 +1,5 @@
+import { NATIVE_MINT } from '@solana/spl-token';
+
 import { JUPITER_SWAP_PROGRAM_ID } from '@/integrations/solana/programIds';
 
 export type WalletScope = 'private' | 'public';
@@ -5,6 +7,19 @@ export type WalletScope = 'private' | 'public';
 export type WalletAssetAmount = {
   readonly baseUnits: bigint;
   readonly decimals: 6 | 9;
+  /**
+   * The asset's mint, carried so the UI can resolve real artwork for it.
+   *
+   * It was already here at runtime and thrown away. `AssetDefinition` holds the configured mint and
+   * the token deltas are built by spreading that definition, so every USDC and USDT delta arrived with
+   * a mint on it — `Delta` just omitted it from the type and `magnitude` dropped it on the way out.
+   * Declaring it makes the compiler supply the one that was genuinely missing, SOL's.
+   *
+   * It is the only key the token-metadata map accepts, and that map is the only place a logo may come
+   * from: a symbol cannot be turned into a mint anywhere downstream without re-reading config, which
+   * is how a hardcoded mark creeps back in.
+   */
+  readonly mint: string;
   readonly symbol: 'SOL' | 'USDC' | 'USDT';
 };
 
@@ -219,7 +234,9 @@ function walletDeltas(
   const delta = after - before + fee;
   return delta === 0n
     ? tokenDeltas
-    : [...tokenDeltas, { decimals: 9, delta, symbol: 'SOL' }];
+    // The one delta with no configured mint behind it. Native SOL's is a protocol constant, taken from
+    // the SPL helper the rest of the app already uses for it rather than written out as a literal.
+    : [...tokenDeltas, { decimals: 9, delta, mint: NATIVE_MINT.toBase58(), symbol: 'SOL' }];
 }
 
 function tokenTotal(
@@ -261,6 +278,7 @@ function magnitude(delta: Delta): WalletAssetAmount {
   return {
     baseUnits: delta.delta < 0n ? -delta.delta : delta.delta,
     decimals: delta.decimals,
+    mint: delta.mint,
     symbol: delta.symbol,
   };
 }

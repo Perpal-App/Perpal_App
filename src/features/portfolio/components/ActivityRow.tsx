@@ -7,7 +7,11 @@ import {
   activityAmountColor,
   activityDirection,
 } from '@/features/portfolio/components/ActivityMark';
-import { TokenPairMark, tokenPairWidth } from '@/features/portfolio/components/TokenMark';
+import {
+  TokenPairMark,
+  TOKEN_PAIR_HEIGHT,
+  TOKEN_PAIR_WIDTH,
+} from '@/features/portfolio/components/TokenMark';
 import type { ActivityItem } from '@/features/portfolio/components/activityItems';
 import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
@@ -15,26 +19,30 @@ import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 const MARK = 26;
 
 /**
- * Disc size for a swap's asset pair, and the slot both it and a single glyph sit in.
+ * The slot both a direction glyph and a swap's asset pair sit in.
  *
- * The pair overlaps to about 1.66 discs wide, so dividing the mark size by that lands a pair inside a
- * single glyph's footprint; floored rather than rounded so it can only ever come in under the slot.
- * The slot then takes whichever is wider, asked of `tokenPairWidth` instead of assumed — if the
- * overlap is ever retuned, the two stay in agreement rather than drifting a point apart, and the
- * column of titles cannot start at two different x positions depending on the row.
+ * Width is pinned to the single glyph and deliberately not widened for the pair, because the title
+ * column has no room to give: `Moved to public wallet` measures within a few points of the space it
+ * has, and a wrapped title is the one thing on this row that does make the card taller.
+ *
+ * Height is the taller of the two. This is the free dimension — the row is sized by its trailing
+ * column, an amount over a timestamp, so anything up to that height costs nothing.
  */
-const PAIR_DISC = Math.floor(MARK / 1.66);
-const MARK_SLOT = Math.max(MARK, tokenPairWidth(PAIR_DISC));
+const MARK_SLOT = Math.max(MARK, TOKEN_PAIR_WIDTH);
+const MARK_SLOT_HEIGHT = Math.max(MARK, TOKEN_PAIR_HEIGHT);
+
+/** What the row is actually as tall as, and therefore the budget the mark has to stay inside. */
+const TRAILING_HEIGHT = typography.label.lineHeight + typography.eyebrow.lineHeight;
 
 /**
- * Centres the mark on the title's own line rather than on the block beneath it.
+ * Centres the slot in the height the row already has.
  *
- * A line box is taller than the letters in it — `label` leads at 21 for a 14pt face — so a shape set
- * flush with the text's top edge sits visibly high. Half the leading puts the two on the same
- * optical line.
+ * It used to centre on the title's single line, which was right for a 26pt mark and impossible for a
+ * 34pt one — the arithmetic went negative and would have pulled the mark up into the card's padding.
+ * Centring on the trailing column instead keeps both mark sizes inside a box the row was going to be
+ * anyway, so neither can change its height.
  */
-const MARK_TOP = (typography.label.lineHeight - MARK) / 2
-  + (typography.label.lineHeight - typography.label.fontSize) / 2;
+const MARK_TOP = (TRAILING_HEIGHT - MARK_SLOT_HEIGHT) / 2;
 
 /**
  * How much of the row the amount may claim.
@@ -94,11 +102,7 @@ export function ActivityRow({ item }: { readonly item: ActivityItem }) {
         {item.pair === undefined ? (
           <ActivityMark direction={direction} item={item} size={MARK} />
         ) : (
-          <TokenPairMark
-            received={item.pair.received}
-            size={PAIR_DISC}
-            spent={item.pair.spent}
-          />
+          <TokenPairMark received={item.pair.received} spent={item.pair.spent} />
         )}
       </View>
 
@@ -188,7 +192,7 @@ const styles = StyleSheet.create({
   // taller glyph's optical line without a second offset to keep in step.
   mark: {
     width: MARK_SLOT,
-    height: MARK,
+    height: MARK_SLOT_HEIGHT,
     marginTop: MARK_TOP,
     flexShrink: 0,
     alignItems: 'flex-start',

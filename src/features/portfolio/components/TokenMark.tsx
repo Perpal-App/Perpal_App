@@ -1,8 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import { StyleSheet, View } from 'react-native';
+import Svg, { Path, Rect } from 'react-native-svg';
 
 import type { WalletAssetAmount } from '@/integrations/solana/solanaWalletActivityParser';
-import { colors, fonts, radii } from '@/theme/tokens';
+import { colors, radii } from '@/theme/tokens';
 
 type TokenSymbol = WalletAssetAmount['symbol'];
 
@@ -20,117 +20,146 @@ const BRAND: Readonly<Record<TokenSymbol, string>> = {
 };
 
 /**
- * Solana's three bars, alternating lean, on the 3–21 ink grid shared by every mark in the app.
+ * The disc, at 22 rather than the 15 it started at.
  *
- * Drawn rather than fetched. `WalletAssetAmount` carries a symbol from a closed three-value union and
- * no mint, so the remote logo the balance tiles use would need a config lookup to resolve a mint and
- * a metadata response to resolve a URL — and `TokenLogo` renders nothing when either is missing, so
- * the pair would silently vanish on a cold cache. A local mark cannot be absent.
+ * What paid for it: the row's title column is squeezed by the amount beside it, so widening the mark
+ * slot costs title width — but 7 of the feed's 22 titles were already over that column at the old
+ * width and already wrapping to two lines. The one title that shares a row with a *pair* is
+ * "Swapped", at 67pt against a 144pt column, so the row this actually appears on has width to spare.
+ * 36pt of slot is where the disc gets meaningfully bigger while only two more of the long
+ * balance-event titles cross the wrap threshold.
  */
-const SOL_BARS = 'M6.2 6H21L17.8 8.6H3ZM3 10.7H17.8L21 13.3H6.2ZM6.2 15.4H21L17.8 18H3Z';
+export const TOKEN_DISC = 22;
 
 /**
- * A stablecoin's sign, for the two marks a glyph would not tell apart.
+ * How much the second disc sits over the first.
  *
- * `$` and `₮` as characters rather than paths. Blocked out as rectangles the two are near enough to
- * each other to be a coin toss at 16pt, where the real signs are unmistakable, and the bundled
- * Poppins carries both.
+ * A third of the diameter: enough that the two read as a linked pair rather than two separate marks,
+ * and little enough that neither brand colour is mostly hidden behind the other.
  */
-const SIGN: Readonly<Record<TokenSymbol, string | null>> = {
-  SOL: null,
-  USDC: '$',
-  USDT: '₮',
-};
+const OVERLAP = 8;
+
+export const TOKEN_PAIR_WIDTH = TOKEN_DISC * 2 - OVERLAP;
+export const TOKEN_PAIR_HEIGHT = TOKEN_DISC;
 
 /**
- * One asset, as a brand-coloured disc.
+ * Render size of each glyph's 24-unit box inside the disc.
  *
- * Used where an amount's symbol would otherwise be spelled out twice on the same row — a swap names
- * two assets, and printing the pair in the title as well as on the figures said each one three times
- * over. The disc states it once.
+ * Solved rather than picked. The three marks ink different amounts of their box — Solana's bars are
+ * 18x15 units, Tether's sign 15x16, the dollar 10x18 — and at 0.64 all three land within a point of
+ * the same ink height, so no one token looks bigger than the others in the column. Comfortably under
+ * the disc, which is what makes clipping impossible rather than merely unlikely.
+ */
+const GLYPH = Math.round(TOKEN_DISC * 0.64);
+
+/** Solana's three bars, alternating lean, on the 3–21 ink grid every mark in the app uses. */
+const SOL_BARS = 'M6 4.5H21L18 7.5H3ZM3 10.5H18L21 13.5H6ZM6 16.5H21L18 19.5H3Z';
+
+/**
+ * A dollar sign, drawn.
+ *
+ * It was the character in a `Text` sized at 1.15 of the box it sat in — a 23pt glyph inside a 20pt
+ * view — so the bottom of it was cut off. Drawing it on the same 24-unit grid as its neighbours
+ * removes the whole class of problem: no font metric, no line box, no ascent to reconcile, and nothing
+ * that can overflow its frame.
+ */
+const DOLLAR_STEM = 'M12 3.2V20.8';
+const DOLLAR_S = 'M16.8 6.8H10.4a3.3 3.3 0 0 0 0 6.6h3.2a3.3 3.3 0 0 1 0 6.6H7.2';
+
+/**
+ * Tether's sign, drawn.
+ *
+ * It was the character `₮`, over a comment asserting the bundled Poppins carried it. It does not —
+ * U+20AE is absent from all four bundled faces — so every USDT mark was falling through to whatever
+ * the platform substituted, in a typeface that is not this app's.
+ */
+function TetherMark() {
+  return (
+    <>
+      <Rect fill={colors.onAccent} height={3} rx={1.5} width={15} x={4.5} y={4} />
+      <Rect fill={colors.onAccent} height={16} rx={1.5} width={3} x={10.5} y={4} />
+      <Rect fill={colors.onAccent} height={2.5} rx={1.25} width={10} x={7} y={10.5} />
+    </>
+  );
+}
+
+function DollarMark() {
+  const stroke = { fill: 'none', stroke: colors.onAccent, strokeLinecap: 'round', strokeWidth: 3.2 } as const;
+
+  return (
+    <>
+      <Path {...stroke} d={DOLLAR_STEM} />
+      <Path {...stroke} d={DOLLAR_S} />
+    </>
+  );
+}
+
+/**
+ * One asset, as its brand disc with a white mark in it.
+ *
+ * The disc is the logo for two of the three — USDC and USDT are both a sign inside a filled circle —
+ * so drawing them bare made them less recognisable, not more. What it needed was to be bigger.
+ *
+ * All three glyphs are drawn rather than set, which is what makes the disc authoritative: the mark is
+ * exactly `GLYPH` across and the disc `TOKEN_DISC`, so it cannot be clipped by the circle that clips
+ * the fill.
  */
 export function TokenMark({
-  size,
   style,
   symbol,
 }: {
-  readonly size: number;
   readonly style?: object;
   readonly symbol: TokenSymbol;
 }) {
-  const sign = SIGN[symbol];
-
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[
-        styles.disc,
-        { width: size, height: size, backgroundColor: BRAND[symbol] },
-        style,
-      ]}
+      style={[styles.disc, { backgroundColor: BRAND[symbol] }, style]}
     >
-      {sign === null ? (
-        <Svg height={size * 0.6} viewBox="0 0 24 24" width={size * 0.6}>
-          <Path d={SOL_BARS} fill={colors.onAccent} />
-        </Svg>
-      ) : (
-        <Text
-          // Never scales with the OS text setting: this is a mark, and a sign that grew past its own
-          // disc would be clipped by it rather than becoming easier to read.
-          allowFontScaling={false}
-          style={[styles.sign, { fontSize: Math.round(size * 0.62) }]}
-        >
-          {sign}
-        </Text>
-      )}
+      <Svg height={GLYPH} viewBox="0 0 24 24" width={GLYPH}>
+        {symbol === 'SOL' ? <Path d={SOL_BARS} fill={colors.onAccent} /> : null}
+        {symbol === 'USDT' ? <TetherMark /> : null}
+        {symbol === 'USDC' ? <DollarMark /> : null}
+      </Svg>
     </View>
   );
 }
 
 /**
- * A swap's two assets, the second overlapping the first.
+ * A swap's two assets, side by side, the received one overlapping the spent.
  *
- * Overlapped rather than spaced so the pair occupies one mark slot: every title in the feed starts at
- * the same x, and a pair that was wider than the single glyphs beside it would step the whole column
- * in and out row by row.
+ * Horizontal, sharing a baseline, which is the arrangement a pair of tokens is read in everywhere
+ * else. A previous attempt stacked them vertically to avoid spending any title width at all; the
+ * saving was not worth a pair that reads as two unrelated marks in a column.
  */
 export function TokenPairMark({
   received,
-  size,
   spent,
 }: {
   readonly received: TokenSymbol;
-  readonly size: number;
   readonly spent: TokenSymbol;
 }) {
   return (
     <View style={styles.pair}>
-      <TokenMark size={size} symbol={spent} />
-      <TokenMark size={size} style={{ marginLeft: -Math.round(size * 0.34) }} symbol={received} />
+      <TokenMark symbol={spent} />
+      <TokenMark style={styles.second} symbol={received} />
     </View>
   );
 }
 
-/** Width of a pair at a given disc size, so a caller can size the slot without guessing. */
-export function tokenPairWidth(size: number): number {
-  return size * 2 - Math.round(size * 0.34);
-}
-
 const styles = StyleSheet.create({
   disc: {
+    width: TOKEN_DISC,
+    height: TOKEN_DISC,
     flexShrink: 0,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
     borderRadius: radii.pill,
   },
-  sign: {
-    fontFamily: fonts.semiBold,
-    color: colors.onAccent,
-    // Matches the glyph box so the sign sits on the disc's centre rather than on its own baseline.
-    textAlign: 'center',
-    includeFontPadding: false,
-  },
-  pair: { flexDirection: 'row', alignItems: 'center' },
+  pair: { width: TOKEN_PAIR_WIDTH, height: TOKEN_PAIR_HEIGHT, flexDirection: 'row' },
+  // Negative margin rather than absolute positioning: both discs stay in flow, so the row measures
+  // the pair's real width and the second cannot escape the box the way an absolute child can.
+  second: { marginLeft: -OVERLAP },
 });
