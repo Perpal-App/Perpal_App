@@ -52,11 +52,19 @@ export type SettingsTone = 'accent' | 'negative';
  * What colour a glyph takes.
  *
  * Two tones, and only one of them is a colour: a destructive row's mark is red because that is
- * information, and everything else is the same quiet grey. Previously both were saturated gradient
- * fills, which spent the panel's entire colour budget on marks that all said "this is a setting".
+ * information, and everything else matches the label beside it. Previously both were saturated
+ * gradient fills, which spent the panel's entire colour budget on marks that all said "this is a
+ * setting".
+ *
+ * Each tone is the exact colour of the text it opens — `textPrimary` against the label, `negative`
+ * against a destructive one. At `textSecondary` the marks read as dull rather than as quiet, and the
+ * reason is that a stroked glyph puts far less ink on the screen than a word does: Ionicons' outline
+ * stroke is 32 of 512 em units, about 1.4pt at this size, which is roughly one stem of Poppins Medium
+ * at 15. A mark carrying a fraction of the ink also has to carry the same value, or it looks switched
+ * off next to its own label.
  */
 const GLYPH_TONES = {
-  accent: colors.textSecondary,
+  accent: colors.textPrimary,
   negative: colors.negative,
 } as const;
 

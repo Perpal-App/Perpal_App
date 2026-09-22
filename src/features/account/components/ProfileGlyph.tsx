@@ -64,7 +64,7 @@ const IONICONS: Readonly<Record<Exclude<ProfileGlyphName, 'x'>, IoniconName>> = 
 export function ProfileGlyph({
   name,
   size = PROFILE_GLYPH_SIZE,
-  tone = colors.textSecondary,
+  tone = colors.textPrimary,
 }: {
   readonly name: ProfileGlyphName;
   readonly size?: number;
