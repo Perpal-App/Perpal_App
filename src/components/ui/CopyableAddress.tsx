@@ -10,7 +10,7 @@ import Animated, {
 import Svg, { Path } from 'react-native-svg';
 
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, motion, spacing, typography } from '@/theme/tokens';
+import { colors, fonts, motion, spacing, typography } from '@/theme/tokens';
 
 /** Glyph size per role, so the copy mark stays proportional to the text it sits beside. */
 const ICON_SIZE = { caption: 16, label: 16, micro: 14 } as const;
@@ -184,8 +184,13 @@ const styles = StyleSheet.create({
   // the same borrowing the leverage badge and the state pill already make. Not a new size in the
   // scale: an address is a run of base58 and the letter-spacing meant for all-caps labels would
   // stretch it into something harder to read at a glance, not easier.
+  //
+  // Medium rather than the SemiBold `eyebrow` carries. This role sits under a heading, and at SemiBold
+  // it was the heavier of the two lines — a value outweighing its own label. One step down is enough
+  // to put them in order while keeping base58 legible, which a Regular face at 11pt would not.
   micro: {
     ...typography.eyebrow,
+    fontFamily: fonts.medium,
     letterSpacing: 0,
     flexShrink: 1,
     color: colors.textPrimary,

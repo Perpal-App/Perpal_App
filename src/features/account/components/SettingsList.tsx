@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { Children, Fragment, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -8,26 +7,20 @@ import {
   ProfileGlyph,
   type ProfileGlyphName,
 } from '@/features/account/components/ProfileGlyph';
-import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
+import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 /**
- * Tile size.
+ * Width reserved for the glyph.
  *
- * Up from the 29 iOS uses, because these rows are not iOS's: a wallet row carries a label over an
- * address, so the tile is centred against two lines rather than one and at 29 it read as a small mark
- * floating beside a taller block. 34 is a little over half the two-line block's height, which is the
- * proportion that makes it read as the row's own mark rather than as decoration on it.
- */
-const TILE_SIZE = 34;
-
-/**
- * Tile corner, held at the order buttons' proportion rather than their exact value.
+ * The 34pt gradient tile is gone. Three saturated violet squares down one panel were the loudest thing
+ * on the screen, and they were competing with each other rather than with anything worth looking at —
+ * a settings row's subject is its label and its value, and the mark is there to let the eye find the
+ * row, not to decorate it.
  *
- * Those are 42pt tall on `radii.sm`, a touch under a quarter of their height. The same token on a tile
- * this size would be closer to a third, which starts to read as a pill; 9 keeps the ratio, so the tile
- * and the buy button look like the same material cut to different sizes.
+ * The slot is narrower than the tile was, so the label and the separator inset both move left with it
+ * — a bare 22pt glyph floating in the middle of a 34pt box reads as a mark that lost its container.
  */
-const TILE_RADIUS = 9;
+const GLYPH_SLOT = 26;
 
 const CHEVRON_SIZE = 16;
 
@@ -44,24 +37,15 @@ const MAX_TEXT_SCALE = 1.25;
 export type SettingsTone = 'accent' | 'negative';
 
 /**
- * The material a tile is cut from.
+ * What colour a glyph takes.
  *
- * The same recipe as the order buttons: a ramp from a lit top edge to a deeper base, rimmed one
- * step darker on all four sides. That is what gives a small square its dimension — the fill reads
- * as a curved surface catching light rather than as a flat block of colour, which is what the
- * solid violet squares this replaced looked like.
- *
- * Destructive rows take the app's red action material, the same one the sell button uses. There
- * is one red action material, not two: a second red gradient a shade off this one would be a
- * palette with a bug in it.
- *
- * Left to infer rather than annotated, deliberately: `LinearGradient` wants its stops as tuples of
- * at least two entries, and widening them to `readonly string[]` on the way through a record type
- * is enough to lose that and fail the call.
+ * Two tones, and only one of them is a colour: a destructive row's mark is red because that is
+ * information, and everything else is the same quiet grey. Previously both were saturated gradient
+ * fills, which spent the panel's entire colour budget on marks that all said "this is a setting".
  */
-const TILE_MATERIALS = {
-  accent: { edge: colors.accentEdge, ramp: gradients.accentAction },
-  negative: { edge: colors.shortEdge, ramp: gradients.shortAction },
+const GLYPH_TONES = {
+  accent: colors.textSecondary,
+  negative: colors.negative,
 } as const;
 
 /**
@@ -131,20 +115,16 @@ export function SettingsRow({
   readonly tone?: 'default' | 'destructive';
   readonly value?: string;
 }) {
-  const material = TILE_MATERIALS[iconTone];
   const content = (
     <>
-      <LinearGradient
+      <View
         accessibilityElementsHidden
-        colors={material.ramp.colors}
-        end={{ x: 0.5, y: 1 }}
         importantForAccessibility="no-hide-descendants"
-        locations={material.ramp.locations}
-        start={{ x: 0.5, y: 0 }}
-        style={[styles.tile, { borderColor: material.edge }]}
+        pointerEvents="none"
+        style={styles.glyph}
       >
-        <ProfileGlyph name={icon} />
-      </LinearGradient>
+        <ProfileGlyph name={icon} tone={GLYPH_TONES[iconTone]} />
+      </View>
       <View style={styles.body}>
         <View style={styles.headline}>
           <Text
@@ -240,19 +220,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
   },
-  // Clipped, so the ramp takes the tile's corners, and rimmed at a full point rather than a
-  // hairline — the same weight the order buttons carry, which is what makes the edge read as the
-  // side of a raised surface instead of an outline drawn around it.
-  tile: {
-    width: TILE_SIZE,
-    height: TILE_SIZE,
+  glyph: {
+    width: GLYPH_SLOT,
     flexShrink: 0,
-    overflow: 'hidden',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: TILE_RADIUS,
-    borderCurve: 'continuous',
   },
   body: { flex: 1, minWidth: 0, gap: 2 },
   headline: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
@@ -261,8 +232,12 @@ const styles = StyleSheet.create({
   // value `flexShrink: 0`, so whenever the two together overran the row the label absorbed the whole
   // deficit and "Email support" came out as "Email supp…". The row's own name is the last thing on it
   // that should be sacrificed for space.
+  // `label`, not `bodyCompact`. Both are 14pt, but `bodyCompact` is Regular and the address beneath it
+  // borrows `eyebrow`'s SemiBold — so a row's heading was set lighter than its own value, and the eye
+  // went to the base58 before the word telling it which wallet it belonged to. SemiBold here and Medium
+  // below restores the order without changing either size.
   label: {
-    ...typography.bodyCompact,
+    ...typography.label,
     flexGrow: 1,
     flexShrink: 0,
     minWidth: 0,
@@ -286,10 +261,11 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   destructive: { color: colors.negative },
-  // Inset past the tile so it starts under the label, which is where iOS breaks a settings list: a
-  // rule running the full width would cut the icons off from their own rows.
+  // Inset past the glyph so it starts under the label, which is where iOS breaks a settings list: a
+  // rule running the full width would cut the icons off from their own rows. Derived from the slot, so
+  // it followed the tile's removal on its own.
   separator: {
-    marginLeft: spacing.sm + TILE_SIZE + spacing.sm,
+    marginLeft: spacing.sm + GLYPH_SLOT + spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
