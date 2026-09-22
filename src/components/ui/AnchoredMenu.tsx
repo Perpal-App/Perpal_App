@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, {
+  Extrapolation,
+  interpolate,
   runOnJS,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radii, spacing, typography } from '@/theme/tokens';
@@ -40,45 +43,69 @@ export type MenuOption<Id extends string> = {
   readonly detail?: string;
 };
 
-/** Default width, for a menu whose control is narrower than its longest option. */
-export const MENU_WIDTH = 224;
+/**
+ * Default width, for a menu whose control is narrower than its longest option.
+ *
+ * 196 rather than the 224 this was. Measured against the bundled Poppins, the longest option any
+ * caller on the default carries is "Wallet transfers" at 110pt, which with the row's padding, gap and
+ * tick needs 170pt — the old default was 54pt of empty card, and a dropdown that is visibly wider than
+ * anything in it reads as detached from the control it belongs to. 196 keeps 26pt of slack, so the
+ * label only ellipsises past about a 1.2x text setting, and it has `flexShrink` for that case.
+ */
+export const MENU_WIDTH = 196;
 
 /** How far from the control the menu sits. Enough to read as detached, not as floating. */
 const ANCHOR_GAP = 6;
 
-/** Scale the card grows from. Well above zero: a menu that starts at nothing reads as a zoom. */
-const FROM_SCALE = 0.9;
-/** How far the card travels into place, in px. Composited, never a layout offset. */
-const DROP = 8;
+/**
+ * Where the card starts, as a fraction of its final size, and why the two axes differ.
+ *
+ * Scaled from the corner nearest the control, so a card that starts shorter than it is narrow appears
+ * to unfold out of that corner rather than to zoom toward the reader — the apparent corner radius
+ * grows with it for free, because scaling a rounded rectangle scales its rounding, which is the whole
+ * of the shape morph without animating `borderRadius` and without touching layout.
+ *
+ * Both are well above zero. A card that starts at nothing is a zoom, and a zoom has no corner to grow
+ * from.
+ */
+const FROM_SCALE_X = 0.86;
+const FROM_SCALE_Y = 0.66;
 
 /**
  * One spring, both directions.
  *
- * Stiffer and better damped than the app's press spring, which is the difference between a control
- * responding to a finger and a surface arriving: damping ratio works out just over 1, so the card
- * settles with no overshoot. A menu that bounces past its own edge looks like a bug.
+ * Damping ratio works out at 0.95 — `damping / (2 * sqrt(stiffness * mass))` — so the card arrives
+ * without overshoot, and settles in about 150ms. The previous config claimed to be critically damped
+ * and was not: at damping 22, stiffness 320, mass 0.6 the ratio was 0.79, which is enough bounce to
+ * read as the card passing its own edge and coming back.
  *
  * The same config runs the dismissal, so opening and closing are the same movement in reverse rather
  * than a spring in and a fade out.
  */
-const MENU_SPRING = { damping: 22, stiffness: 320, mass: 0.6 } as const;
+const MENU_SPRING = { damping: 29, mass: 0.55, stiffness: 420 } as const;
 
 /**
- * A menu that grows out of the control that opened it.
+ * A menu that unfolds out of the control that opened it.
  *
  * Scaling from the corner nearest the control is what supplies the connection: the card reads as the
  * button unfolding rather than as a new surface arriving. The origin follows the placement, so a menu
  * above its control grows upward from its bottom edge.
  *
+ * The card and its contents are animated separately on purpose. The surface reaches full opacity in
+ * the first third of the movement while the options only begin to appear after it — so opening shows a
+ * shape growing and then filling, and closing empties before it collapses. Fading the card and its
+ * text together is what made the old transition read as a cross-dissolve: half-transparent squashed
+ * labels were visible for the whole of it.
+ *
  * It lives in a `Modal` because it has to draw over the scroll view it sits in and take touches
  * outside itself. That means window coordinates, which is why the caller measures rather than the
  * menu positioning itself relative to a parent.
  *
- * Placement is the caller's call rather than something measured here, and deliberately: only the
- * caller knows whether its control sits low in a bottom sheet. Deciding it here would mean reading the
- * viewport's height to compare against, which is the measurement that breaks across devices with
- * different insets — `anchorAbove` instead builds a box as tall as the control's own offset and pins
- * the card to the bottom of it, so nothing has to know how tall the screen is.
+ * Which *side* the menu takes is still the caller's call — only the caller knows whether its control
+ * sits low in a bottom sheet. But it can no longer run off the screen on whichever side it took: the
+ * layer below is pinned to the window's far edge, the card shrinks inside it, and the options scroll
+ * once they no longer fit. That containment is flexbox reading the space it was given, not this
+ * component measuring the viewport.
  *
  * Generic over the option id so a caller filtering by a union gets that union back in `onSelect`
  * instead of a bare `string` it has to widen a `useState` to accept.
@@ -101,6 +128,11 @@ export function AnchoredMenu<Id extends string>({
   readonly title?: string;
   readonly visible: boolean;
 }) {
+  // Read here rather than taken from a screen, for the same reason the toast host and the tab bar read
+  // them: this draws inside a `statusBarTranslucent` Modal, outside `AppScreen` entirely, so there is
+  // no safe area above it to inherit. They are used only to keep the card off the system bars — no
+  // height is derived from them.
+  const insets = useSafeAreaInsets();
   const reduceMotion = useReducedMotion();
   // `mounted` keeps the modal in the tree; `progress` is how far open the card is. A dismissal has to
   // finish travelling before the modal can unmount, so one boolean cannot express both.
@@ -126,16 +158,16 @@ export function AnchoredMenu<Id extends string>({
     }));
   }, [progress, reduceMotion, visible]);
 
-  const above = anchor?.above ?? false;
-
   const cardStyle = useAnimatedStyle(() => ({
-    // Clamped, because a spring can undershoot past zero and a negative opacity is a warning on some
-    // platforms rather than simply invisible.
-    opacity: Math.max(progress.value, 0),
+    opacity: interpolate(progress.value, [0, 0.3, 1], [0, 1, 1], Extrapolation.CLAMP),
     transform: [
-      { scale: FROM_SCALE + (1 - FROM_SCALE) * progress.value },
-      { translateY: (1 - progress.value) * (above ? DROP : -DROP) },
+      { scaleX: FROM_SCALE_X + (1 - FROM_SCALE_X) * progress.value },
+      { scaleY: FROM_SCALE_Y + (1 - FROM_SCALE_Y) * progress.value },
     ],
+  }));
+
+  const contentStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0.35, 0.9], [0, 1], Extrapolation.CLAMP),
   }));
 
   const backdropStyle = useAnimatedStyle(() => ({
@@ -165,16 +197,26 @@ export function AnchoredMenu<Id extends string>({
         />
       </Animated.View>
 
-      {/* Two placements, one with padding above the card and one with a box the card sits at the
-          bottom of. Both are built from the control's measured offset alone, so neither needs the
-          window's height. */}
+      {/* The box the card is allowed to occupy, and the reason it can no longer be cropped.
+          Below a control it runs from the anchor to the bottom of the window; above one it is a box as
+          tall as the control's own offset with the card pinned to its lower edge. Either way the far
+          edge is a real boundary rather than open space, so the card's `flexShrink` has something to
+          shrink against. Neither branch knows how tall the screen is. */}
       <View
         pointerEvents="box-none"
         style={[
           styles.layer,
           anchor.above
-            ? { height: anchor.offset, justifyContent: 'flex-end' }
-            : { paddingTop: anchor.offset },
+            ? {
+              height: anchor.offset,
+              justifyContent: 'flex-end',
+              paddingTop: insets.top + spacing.sm,
+            }
+            : {
+              top: anchor.offset,
+              bottom: 0,
+              paddingBottom: insets.bottom + spacing.sm,
+            },
         ]}
       >
         <Animated.View
@@ -186,37 +228,45 @@ export function AnchoredMenu<Id extends string>({
             cardStyle,
           ]}
         >
-          {title === undefined ? null : (
-            <Text accessibilityRole="header" style={styles.title}>{title}</Text>
-          )}
-          {options.map((option, index) => {
-            const checked = option.id === selected;
+          <Animated.View style={[styles.content, contentStyle]}>
+            {title === undefined ? null : (
+              <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+            )}
+            {/* Scrolls only when it has to. With `flexShrink` and no `flexGrow` it sizes to its
+                options while they fit and gives way once the card is capped, so a menu of four is the
+                height of four and a menu opened from the bottom of a long list becomes scrollable
+                instead of losing its last rows off the screen. */}
+            <ScrollView
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              style={styles.scroller}
+            >
+              {options.map((option) => {
+                const checked = option.id === selected;
 
-            return (
-              <Pressable
-                accessibilityRole="radio"
-                accessibilityState={{ checked }}
-                key={option.id}
-                onPress={() => onSelect(option.id)}
-                style={({ pressed }) => [
-                  styles.option,
-                  index > 0 && styles.divided,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[styles.label, checked && styles.labelChecked]}
-                >
-                  {option.label}
-                </Text>
-                {option.detail === undefined ? null : (
-                  <Text numberOfLines={1} style={styles.detail}>{option.detail}</Text>
-                )}
-                {checked ? <TickGlyph /> : null}
-              </Pressable>
-            );
-          })}
+                return (
+                  <Pressable
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked }}
+                    key={option.id}
+                    onPress={() => onSelect(option.id)}
+                    style={({ pressed }) => [styles.option, pressed && styles.pressed]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.label, checked && styles.labelChecked]}
+                    >
+                      {option.label}
+                    </Text>
+                    {option.detail === undefined ? null : (
+                      <Text numberOfLines={1} style={styles.detail}>{option.detail}</Text>
+                    )}
+                    {checked ? <TickGlyph /> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
         </Animated.View>
       </View>
     </Modal>
@@ -228,10 +278,11 @@ export function AnchoredMenu<Id extends string>({
  *
  * `width` defaults to the wider card, for a control too narrow to carry its own options. Pass the
  * control's measured width — clamped to something the options fit in — when the two should match; a
- * 224pt card under a 120pt button is what makes a dropdown look detached from the thing it belongs to.
+ * wide card under a narrow button is what makes a dropdown look detached from the thing it belongs to.
  *
  * It can never overflow to the right: the card's right edge is the control's right edge, and that is
- * on screen by definition. The left edge is clamped for the case where the card is wider.
+ * on screen by definition. The left edge is clamped for the case where the card is wider. Overflow
+ * *downward* is handled by the menu itself, which bounds the card and scrolls its options.
  */
 export function anchorBelow(
   x: number,
@@ -252,9 +303,9 @@ export function anchorBelow(
  * Sits the menu above a control, right-aligned to it.
  *
  * For a control near the bottom of the screen or of a bottom sheet, where a menu hanging below would
- * run off the edge. `offset` is the control's own top less the gap, and the card is pinned to the
- * bottom of a box that tall — so the card's bottom edge lands just above the control without anything
- * measuring the card or the viewport.
+ * have little room to open into. `offset` is the control's own top less the gap, and the card is
+ * pinned to the bottom of a box that tall — so the card's bottom edge lands just above the control
+ * without anything measuring the card or the viewport.
  */
 export function anchorAbove(
   x: number,
@@ -290,8 +341,8 @@ const styles = StyleSheet.create({
   // Its own layer, so the fade never touches the card's opacity: dimming the card as it grew would
   // make it read as a projection rather than as a surface.
   backdrop: { backgroundColor: 'rgba(5, 5, 9, 0.44)' },
-  // Anchored to the top of the window and full width, so the card's own margin places it
-  // horizontally and the layer's height or padding places it vertically.
+  // Anchored to the window and full width, so the card's own margin places it horizontally while the
+  // layer's own edges decide how much room it has vertically.
   layer: {
     position: 'absolute',
     top: 0,
@@ -299,36 +350,58 @@ const styles = StyleSheet.create({
     left: 0,
     alignItems: 'flex-start',
   },
+  // `flexShrink` is the containment: the card takes its content's height while there is room for it and
+  // is capped by the layer when there is not. `overflow: hidden` then does double duty — it clips the
+  // ramp and the pressed row highlights to the rounded corners, and it guarantees that a card at its
+  // cap can never paint outside itself even if its contents disagree about how tall they are.
   card: {
+    flexShrink: 1,
     overflow: 'hidden',
-    paddingVertical: spacing.xxs,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderStrong,
-    borderRadius: radii.md,
+    // `lg`, a step up from the `md` this was. A menu is a floating object rather than chrome framing
+    // data, and at this width the larger radius is what makes it read as one — with
+    // `borderCurve: 'continuous'` the corner is a squircle rather than a quarter circle.
+    borderRadius: radii.lg,
     borderCurve: 'continuous',
     backgroundColor: colors.surfaceElevated,
   },
-  // The corner nearest the control, so the card unfolds from the button instead of swelling from its
-  // own middle.
+  // The corner nearest the control, so the card unfolds out of the button instead of swelling from its
+  // own middle. This is what the anisotropic scale is anchored to, and without it the asymmetry would
+  // read as a stretch rather than as an unfold.
   cardBelow: { transformOrigin: 'top right' },
   cardAbove: { transformOrigin: 'bottom right' },
+  // Carries the card's inner padding as well as the content fade, so the scroller between the title
+  // and the card's lower edge has somewhere to sit without the padding scrolling with the options.
+  content: { flexShrink: 1, paddingVertical: spacing.xxs },
+  // No `flexGrow`: it must not claim the space left over when the options already fit, or every menu
+  // would be as tall as the room below its control.
+  scroller: { flexGrow: 0, flexShrink: 1 },
+  // `xxs` vertical, against the `xs` it was. A caps label at 11pt does not need 8pt above and below it
+  // to separate from the row under it; its own tracking and colour already do that.
   title: {
     ...typography.eyebrow,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.xxs,
     color: colors.textMuted,
   },
+  // 40 rather than 44, and no rule between rows.
+  //
+  // The separators were the bulk. A hairline under every option turns a menu into a table, and a table
+  // of six reads as something to work through rather than a choice to make — which is most of why this
+  // card felt oversized when the tallest instance of it is only six rows. Apple's own menus rule
+  // between groups, never between the items of one, and every option here belongs to the same group.
+  //
+  // 40pt is under the 44 usually quoted for a primary target and deliberately so: these are radio
+  // options in a list that reopens with one tap, where a mis-tap costs a correction rather than a
+  // transaction. Nothing on a signing path uses this height.
   option: {
-    minHeight: 44,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
-  },
-  divided: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
   },
   label: { ...typography.bodyCompact, flexShrink: 1, color: colors.textPrimary },
   labelChecked: { color: colors.accentSoft },

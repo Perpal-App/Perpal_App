@@ -1,10 +1,8 @@
 import * as Crypto from 'expo-crypto';
-import { base64 } from '@scure/base';
 import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 
 import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
-import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import {
   readSubmittedTransactionStatus,
   signAndSubmitLegacyTransaction,
@@ -27,6 +25,12 @@ import {
 import {
   assertNoPendingRotationActivity,
 } from '@/wallet/trading/rotationReadiness';
+import {
+  latestBlockhash,
+  simulate,
+  solBalance,
+  transactionFee,
+} from '@/wallet/trading/rotationRpc';
 import {
   TradingWalletRotationError,
   type TradingWalletRotationPlan,
@@ -74,12 +78,14 @@ export async function prepareTradingWalletRotation(
     ),
     latestBlockhash(rpcInput),
   ]);
-  const ordered = orderTokenMigrations(accounts);
+  // Built up front so the fee estimate, the affordability gate, and the simulation all run against
+  // the same set of transactions rather than rebuilding them per pass.
+  const migrations = orderTokenMigrations(accounts).map(
+    (account) => tokenTransaction(account, input, input.nextWalletAddress, blockhash),
+  );
   let estimatedFeeLamports = 0n;
-  for (const account of ordered) {
-    const transaction = tokenTransaction(account, input, input.nextWalletAddress, blockhash);
+  for (const transaction of migrations) {
     estimatedFeeLamports += await transactionFee(transaction, rpcInput);
-    await simulate(transaction, rpcInput, 'A token migration preview failed.');
   }
   estimatedFeeLamports += await estimatedSweepFee(input, blockhash, rpcInput);
 
@@ -102,9 +108,23 @@ export async function prepareTradingWalletRotation(
   if ((sourceSolLamports > 0n || accounts.length > 0) && (
     sourceSolLamports === 0n || finalLamports < 0n
   )) {
-    throw new TradingWalletRotationError(
-      'Private wallet T needs more SOL for live token-account rent and rotation fees.',
-    );
+    throw new TradingWalletRotationError('Not enough SOL to rotate.');
+  }
+
+  // Simulation runs last, after the wallet is known to be able to pay.
+  //
+  // It used to run inside the fee loop above, which put it before this gate, and that inverted the
+  // diagnosis on the most likely failure of all: the source wallet is the fee payer for every one of
+  // these transactions, so a wallet with no SOL does not exist as an account on chain, and the
+  // validator rejects the transaction at account-loading time with `AccountNotFound` — before any
+  // program runs, which is why such a failure carries no logs. The reader was told "a token migration
+  // preview failed" when the actionable fact was that the wallet needs funding, and that fact was
+  // already sitting in `sourceSolLamports` one branch further down.
+  //
+  // Nothing else moved: the fee estimate above uses `getFeeForMessage`, which is computed from the
+  // message alone and does not care whether the fee payer exists yet, so it is safe to run first.
+  for (const transaction of migrations) {
+    await simulate(transaction, rpcInput, 'A token migration preview failed.');
   }
 
   return {
@@ -347,7 +367,7 @@ async function sweepTransaction(
   transaction.add(SystemProgram.transfer({ fromPubkey: source, toPubkey: destination, lamports: 0n }));
   const fee = await transactionFee(transaction, rotationRpcInput(input));
   if (balance < fee) {
-    throw new TradingWalletRotationError('Private wallet T needs more SOL for the final rotation fee.');
+    throw new TradingWalletRotationError('Not enough SOL for the final fee.');
   }
   transaction.instructions[0] = SystemProgram.transfer({
     fromPubkey: source,
@@ -366,59 +386,6 @@ async function estimatedSweepFee(
   const transaction = new Transaction({ feePayer: source, recentBlockhash: blockhash });
   transaction.add(SystemProgram.transfer({ fromPubkey: source, toPubkey: source, lamports: 0n }));
   return transactionFee(transaction, rpcInput);
-}
-
-async function latestBlockhash(input: RotationRpcInput): Promise<string> {
-  const result = await signedSolanaRpc<{ readonly value: { readonly blockhash: string } }>({
-    method: 'getLatestBlockhash',
-    params: [{ commitment: 'confirmed' }],
-    rpcUrl: input.rpcUrl,
-    signer: input.signer,
-  });
-  return result.value.blockhash;
-}
-
-async function transactionFee(transaction: Transaction, input: RotationRpcInput): Promise<bigint> {
-  const result = await signedSolanaRpc<{ readonly value: number | null }>({
-    method: 'getFeeForMessage',
-    params: [base64.encode(transaction.serializeMessage()), { commitment: 'confirmed' }],
-    rpcUrl: input.rpcUrl,
-    signer: input.signer,
-  });
-  if (result.value === null || !Number.isSafeInteger(result.value) || result.value < 0) {
-    throw new TradingWalletRotationError('The live rotation fee could not be verified.');
-  }
-  return BigInt(result.value);
-}
-
-async function solBalance(address: string, input: RotationRpcInput): Promise<bigint> {
-  const result = await signedSolanaRpc<{ readonly value: number }>({
-    method: 'getBalance',
-    params: [address, { commitment: 'confirmed' }],
-    rpcUrl: input.rpcUrl,
-    signer: input.signer,
-  });
-  if (!Number.isSafeInteger(result.value) || result.value < 0) {
-    throw new TradingWalletRotationError('A private-wallet SOL balance could not be verified.');
-  }
-  return BigInt(result.value);
-}
-
-async function simulate(
-  transaction: Transaction,
-  input: RotationRpcInput,
-  message: string,
-): Promise<void> {
-  const result = await signedSolanaRpc<{ readonly value: { readonly err: unknown } }>({
-    method: 'simulateTransaction',
-    params: [
-      base64.encode(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })),
-      { commitment: 'confirmed', encoding: 'base64', sigVerify: false },
-    ],
-    rpcUrl: input.rpcUrl,
-    signer: input.signer,
-  });
-  if (result.value.err !== null) throw new TradingWalletRotationError(message);
 }
 
 async function updateCheckpoint(
