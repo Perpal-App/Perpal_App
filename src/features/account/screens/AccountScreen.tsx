@@ -1,9 +1,10 @@
 import * as Application from 'expo-application';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { AppScreen } from '@/components/layout/AppScreen';
+import { useContentGutter } from '@/components/layout/useContentGutter';
 import { layoutMorph } from '@/components/motion/layoutMorph';
 import { RiseInView } from '@/components/motion/RiseInView';
 import { CopyableAddress } from '@/components/ui/CopyableAddress';
@@ -13,6 +14,7 @@ import {
   TradingWalletRotationDialog,
 } from '@/features/account/components/TradingWalletDialogs';
 import {
+  SETTINGS_ROW_TEXT_SCALE,
   SettingsGroup,
   SettingsRow,
 } from '@/features/account/components/SettingsList';
@@ -148,14 +150,23 @@ export function AccountScreen() {
   };
 
   const publicFallback = publicWalletFallback(wallet.status);
+  // Memoized because it is a style object handed to four `RiseInView`s: a fresh literal every render
+  // would give each of them a new style identity and defeat the layout spring they animate with.
+  const gutterWidth = useContentGutter();
+  const gutter = useMemo(
+    () => ({ paddingHorizontal: gutterWidth }),
+    [gutterWidth],
+  );
+
   const privateAction = readPrivateAction(session.status, session.rotationPending);
-  // A wallet still being derived has an address on its way, so its row shimmers. A wallet that is
-  // inactive or unrecoverable has none coming, and the state on the right says so without a line
-  // of placeholder pretending otherwise.
-  const privatePending = session.address === null && isDeriving(session.status);
   // Only when something is off or in flight. A wallet that is simply working needs no word beside
-  // it — the address under the label is the proof, and a standing "Active" was one more thing to
+  // it — the address beside the label is the proof, and a standing "Active" was one more thing to
   // read on a screen that has nothing to report.
+  //
+  // This row no longer shimmers while the key is being derived. It used to show a skeleton *and* the
+  // word "Restoring", which was the same fact told twice in two places; with one slot to spend, the
+  // word is the half worth keeping — it names which stage the wallet is at, where a shimmer only says
+  // that something is happening.
   const privateState = session.status === 'ready'
     ? undefined
     : privateWalletState(session.status);
@@ -174,23 +185,23 @@ export function AccountScreen() {
         <ProfileHeader address={wallet.embeddedWalletAddress} />
       </RiseInView>
 
-      <RiseInView delay={motion.rise.stagger} layout={layoutMorph()} style={styles.group}>
+      <RiseInView delay={motion.rise.stagger} layout={layoutMorph()} style={gutter}>
         <SettingsGroup title="WALLETS">
           <SettingsRow
             accessibilityLabel="Public wallet"
-            icon="wallet"
-            label="Public wallet"
-            subtitle={wallet.status === 'provisioning' ? (
-              <SkeletonText role="eyebrow" width={124} />
+            accessory={wallet.status === 'provisioning' ? (
+              <SkeletonText align="right" role="caption" width={96} />
             ) : (
               <CopyableAddress
                 address={wallet.embeddedWalletAddress}
                 fallback={publicFallback}
-                role="micro"
+                maxFontSizeMultiplier={SETTINGS_ROW_TEXT_SCALE}
                 subject="public wallet address"
-                wide
+                tone="secondary"
               />
             )}
+            icon="wallet"
+            label="Public wallet"
           />
           {walletRetryable ? (
             <SettingsRow
@@ -206,20 +217,27 @@ export function AccountScreen() {
               : `Private wallet, ${privateState}`}
             icon="shield"
             label="Private wallet"
-            subtitle={privatePending ? (
-              <SkeletonText role="eyebrow" width={124} />
-            ) : session.address === null ? undefined : (
-              <CopyableAddress
-                address={session.address}
-                fallback={publicFallback}
-                role="micro"
-                subject="private wallet address"
-                wide
-              />
-            )}
-            // Spread rather than passed directly: under `exactOptionalPropertyTypes` an optional
-            // prop will not accept an explicit `undefined`, and a working wallet has no state word.
-            {...(privateState === undefined ? {} : { value: privateState })}
+            // The state word and the address contend for one slot, and the word wins whenever there
+            // is one. That is not a space compromise: every status that produces a word is a status
+            // where the address on file is stale, about to be replaced, or not usable yet, so showing
+            // it would offer something to copy that should not be copied. A working wallet has no
+            // word, and then the address is the whole point of the row.
+            //
+            // Spread rather than passed directly: under `exactOptionalPropertyTypes` an optional prop
+            // will not accept an explicit `undefined`.
+            {...(privateState === undefined
+              ? {
+                accessory: (
+                  <CopyableAddress
+                    address={session.address}
+                    fallback={publicFallback}
+                    maxFontSizeMultiplier={SETTINGS_ROW_TEXT_SCALE}
+                    subject="private wallet address"
+                    tone="secondary"
+                  />
+                ),
+              }
+              : { value: privateState })}
           />
           {privateAction === null ? null : (
             <SettingsRow
@@ -233,7 +251,7 @@ export function AccountScreen() {
         </SettingsGroup>
       </RiseInView>
 
-      <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={styles.group}>
+      <RiseInView delay={motion.rise.stagger * 2} layout={layoutMorph()} style={gutter}>
         <SettingsGroup title="SUPPORT">
           {/* The address is printed on the row rather than hidden behind the label, so it can be
               read and typed elsewhere when no mail client is set up on the device. */}
@@ -256,7 +274,7 @@ export function AccountScreen() {
         </SettingsGroup>
       </RiseInView>
 
-      <RiseInView delay={motion.rise.stagger * 3} layout={layoutMorph()} style={styles.group}>
+      <RiseInView delay={motion.rise.stagger * 3} layout={layoutMorph()} style={gutter}>
         <SettingsGroup title="ACCOUNT">
           <SettingsRow
             accessibilityHint="Ends the Privy session on this device"
@@ -270,7 +288,7 @@ export function AccountScreen() {
         </SettingsGroup>
       </RiseInView>
 
-      <RiseInView delay={motion.rise.stagger * 4} layout={layoutMorph()} style={styles.group}>
+      <RiseInView delay={motion.rise.stagger * 4} layout={layoutMorph()} style={gutter}>
         <SettingsGroup title="ABOUT">
           {/* The build, where iOS keeps it: a row with the number on the right. */}
           <SettingsRow icon="info" label="Version" value={version} />
@@ -322,14 +340,6 @@ async function openLink(url: string, unavailable: string): Promise<void> {
   }
 }
 
-/** True while an address is genuinely on its way, which is the only state worth shimmering. */
-function isDeriving(status: TradingSessionStatus): boolean {
-  return status === 'waiting-for-wallet'
-    || status === 'restoring'
-    || status === 'inactive'
-    || status === 'activating';
-}
-
 function readPrivateAction(
   status: TradingSessionStatus,
   rotationPending: boolean,
@@ -379,5 +389,4 @@ const styles = StyleSheet.create({
     paddingBottom: TAB_BAR_CLEARANCE,
     gap: spacing.lg,
   },
-  group: { paddingHorizontal: layout.screenPadding },
 });

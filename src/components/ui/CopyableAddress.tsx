@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo, StyleSheet, Text } from 'react-native';
@@ -7,32 +8,32 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
 
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, fonts, motion, spacing, typography } from '@/theme/tokens';
+import { colors, motion, spacing, typography } from '@/theme/tokens';
 
 /** Glyph size per role, so the copy mark stays proportional to the text it sits beside. */
-const ICON_SIZE = { caption: 16, label: 16, micro: 14 } as const;
+const ICON_SIZE = { caption: 16, label: 16 } as const;
 /** How long the tick holds before the copy glyph returns. */
 const COPIED_HOLD_MS = 1_600;
 /** Scale the tick springs up from, so the confirmation lands rather than blinks into place. */
 const COPIED_FROM_SCALE = 0.4;
 
 /**
- * Characters kept either side of the ellipsis, in two measures.
+ * Characters kept either side of the ellipsis.
  *
- * Two rather than one because the rows differ by more than a little: the home header carries
- * this beside a 52pt avatar with a 48pt control across from it, while a settings row hands it
- * most of the screen's width. One rule for both meant either a truncation that ellipsised on
- * the header or one that wasted half a settings row — and a short address in a wide space is
- * the worse of the two, because checking a wallet is mostly checking the characters you can see.
+ * One number for every place this appears, and deliberately not a count derived from the space
+ * available. Letting the address expand into whatever room a row has left sounds like it shows more
+ * for free, and it does — but it also means the value reaches all the way back to its own label with
+ * nothing between them, so the row reads as one long run of text instead of a name and a value. It
+ * also makes the length a property of the device, so two rows on two phones crop differently.
  *
- * Both are symmetric, and both are chosen to fit the narrowest device the app supports without
- * ellipsising, so the shortening never depends on how wide the screen happens to be.
+ * Six either side measures about 104pt of Poppins Medium at 12pt. That lands between the other
+ * right-hand values on the settings screen — `@PerpalApp` at 78pt and `perpal.app@gmail.com` at
+ * 147pt — so the address belongs to the same column rather than overflowing it, and it leaves 36pt
+ * clear beside the label on the narrowest supported width and 62pt on a typical phone.
  */
-const COMPACT_CHARS = 6;
-const WIDE_CHARS = 10;
+const SHORT_CHARS = 6;
 
 /**
  * A wallet address, and copying it.
@@ -48,25 +49,42 @@ const WIDE_CHARS = 10;
 export function CopyableAddress({
   address,
   fallback,
+  maxFontSizeMultiplier,
   role = 'caption',
   subject,
-  wide = false,
+  tone = 'primary',
 }: {
   /** Full address, copied verbatim. `null` renders `fallback` as plain text. */
   readonly address: string | null;
   /** Stands in when there is no address yet: a status word, not an explanation. */
   readonly fallback: string;
   /**
-   * Type role for the address. `label` where it is the primary line of its block, `caption` where it
-   * is a secondary line under a heading, `micro` where it is a secondary line under a heading that
-   * also carries an icon — there the caption size made the text block taller than the mark beside it,
-   * which inverted which of the two the row read from.
+   * Ceiling on the OS text size, for a caller whose row caps its own label.
+   *
+   * Set it wherever this shares a row with capped text. If the label beside this is capped and this
+   * is not, a large accessibility setting grows the address while the label holds still, and since
+   * the address is the side that yields it shrinks itself toward an ellipsis to make room for text
+   * that is not moving. Both sides have to scale on the same ceiling or the split comes apart.
    */
-  readonly role?: 'caption' | 'label' | 'micro';
+  readonly maxFontSizeMultiplier?: number;
+  /**
+   * Type role for the address. `label` where it is the primary line of its block, `caption` where it
+   * is a secondary line or a right-hand value.
+   */
+  readonly role?: 'caption' | 'label';
   /** Named in the accessibility label and announcement, e.g. `public wallet address`. */
   readonly subject: string;
-  /** Keeps more of the address, for a row with the width to spend on it. */
-  readonly wide?: boolean;
+  /**
+   * How much contrast the address carries.
+   *
+   * `secondary` where it sits beside its own label on one row. Both would otherwise be white, and
+   * two whites a few points apart in size read as a headline welded to a subheadline rather than as
+   * a row with a value on it. At 9.6:1 on the app's tinted surface it is still past AAA, which is
+   * the bar that matters for a string you check character by character.
+   *
+   * `primary` where the address owns its line and has nothing to be confused with.
+   */
+  readonly tone?: 'primary' | 'secondary';
 }) {
   const reduceMotion = useReducedMotion();
   const [copied, setCopied] = useState(false);
@@ -89,7 +107,7 @@ export function CopyableAddress({
   }, [copied, reduceMotion, settle]);
 
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: settle.value }] }));
-  const textStyle = styles[role];
+  const textStyle = [styles[role], tone === 'secondary' && styles.secondary];
 
   // No disabled button when there is nothing to copy. A control that cannot act is still an
   // element a screen reader has to walk past, and the fallback is text either way.
@@ -97,7 +115,7 @@ export function CopyableAddress({
     return <Text numberOfLines={1} style={[textStyle, styles.absent]}>{fallback}</Text>;
   }
 
-  const display = shortenAddress(address, wide);
+  const display = shortenAddress(address);
 
   const copy = () => {
     void Clipboard.setStringAsync(address).then(
@@ -114,87 +132,67 @@ export function CopyableAddress({
       accessibilityHint={`Copies the full ${subject}`}
       accessibilityLabel={`Copy ${subject}, ${display}`}
       accessibilityRole="button"
-      hitSlop={10}
+      // The whole touch target, and all of it outside layout. This used to buy its height from
+      // vertical padding, which worked but made the block 26pt tall against a 23pt label — so any
+      // settings row carrying an address stood 3pt taller than the rows around it, and the group read
+      // as unevenly spaced. `hitSlop` does not participate in flex, so the row's height can come from
+      // the text while the target stays 46pt: past the 44pt guidance, and larger than the padding gave.
+      hitSlop={{ bottom: 14, left: 10, right: 10, top: 14 }}
       onPress={copy}
       style={styles.row}
     >
-      <Text numberOfLines={1} style={textStyle}>{display}</Text>
-      <Animated.View style={animatedStyle}>
-        {copied ? <CheckIcon size={ICON_SIZE[role]} /> : <CopyIcon size={ICON_SIZE[role]} />}
+      <Text
+        // The safety net under `SHORT_CHARS`, not the thing doing the cropping. The fixed form fits
+        // every supported width at normal text size; past the 1.25x accessibility ceiling on the
+        // narrowest phone it no longer does, and then the engine takes more out of the middle rather
+        // than dropping the tail. The tail is the half people actually check an address by.
+        ellipsizeMode="middle"
+        maxFontSizeMultiplier={maxFontSizeMultiplier}
+        numberOfLines={1}
+        style={textStyle}
+      >
+        {display}
+      </Text>
+      <Animated.View style={[styles.mark, animatedStyle]}>
+        {copied ? (
+          <Ionicons color={colors.positive} name="checkmark" size={ICON_SIZE[role]} />
+        ) : (
+          <Ionicons color={colors.textSecondary} name="copy-outline" size={ICON_SIZE[role]} />
+        )}
       </Animated.View>
     </PressableScale>
   );
 }
 
-/** Shortened for the eye. Screen readers get the subject and the same shortened form. */
-export function shortenAddress(address: string, wide = false): string {
-  const keep = wide ? WIDE_CHARS : COMPACT_CHARS;
-
-  return address.length <= keep * 2
+/** Shortened for the eye, and for what a screen reader says. */
+export function shortenAddress(address: string): string {
+  return address.length <= SHORT_CHARS * 2
     ? address
-    : `${address.slice(0, keep)}…${address.slice(-keep)}`;
-}
-
-/** Confirmation only. Round caps and joins, so a 1.8pt tick does not end in two hard points. */
-function CheckIcon({ size }: { readonly size: number }) {
-  return (
-    <Svg height={size} viewBox="0 0 24 24" width={size}>
-      <Path
-        d="M5 12.6 9.7 17.3 19 8"
-        fill="none"
-        stroke={colors.positive}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
-/** Two sheets, the front one offset off the back. Rounded, so it matches the app's chrome. */
-function CopyIcon({ size }: { readonly size: number }) {
-  return (
-    <Svg height={size} viewBox="0 0 24 24" width={size}>
-      <Path
-        d="M11 9h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2ZM7 15a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2"
-        fill="none"
-        stroke={colors.textSecondary}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.8}
-      />
-    </Svg>
-  );
+    : `${address.slice(0, SHORT_CHARS)}…${address.slice(-SHORT_CHARS)}`;
 }
 
 const styles = StyleSheet.create({
-  // No fill and no leading padding: the address has to line up with whatever heading sits
-  // above it, and a chip's inset would hold it a few points off that edge. The vertical
-  // padding stays because it is invisible and buys the touch target its height.
+  // No padding at all, so the block is exactly one line of text tall. That is what keeps it
+  // interchangeable with the skeleton that stands in for it — both are now the type role's line
+  // height, so nothing moves when the address arrives — and what keeps a settings row carrying one
+  // the same height as a row that does not. The touch target comes from `hitSlop` instead.
+  //
+  // `flexShrink` and `minWidth` are what let the ellipsis above ever fire. A flex item's minimum
+  // defaults to its content's width, so without releasing that this would hold the address's full
+  // width inside a row and push its neighbour out instead of cropping itself.
   row: {
     maxWidth: '100%',
+    flexShrink: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xxs,
-    paddingVertical: spacing.xxs,
   },
-  caption: { ...typography.caption, flexShrink: 1, color: colors.textPrimary },
-  label: { ...typography.label, flexShrink: 1, color: colors.textPrimary },
-  // `eyebrow`'s metrics with its tracking neutralised, which is the app's smallest non-caps text —
-  // the same borrowing the leverage badge and the state pill already make. Not a new size in the
-  // scale: an address is a run of base58 and the letter-spacing meant for all-caps labels would
-  // stretch it into something harder to read at a glance, not easier.
-  //
-  // Medium rather than the SemiBold `eyebrow` carries. This role sits under a heading, and at SemiBold
-  // it was the heavier of the two lines — a value outweighing its own label. One step down is enough
-  // to put them in order while keeping base58 legible, which a Regular face at 11pt would not.
-  micro: {
-    ...typography.eyebrow,
-    fontFamily: fonts.medium,
-    letterSpacing: 0,
-    flexShrink: 1,
-    color: colors.textPrimary,
-  },
+  caption: { ...typography.caption, flexShrink: 1, minWidth: 0, color: colors.textPrimary },
+  label: { ...typography.label, flexShrink: 1, minWidth: 0, color: colors.textPrimary },
+  secondary: { color: colors.textSecondary },
+  /** Never the side that shrinks. The address gives way; the control it belongs to does not. */
+  mark: { flexShrink: 0 },
   /** A status word is not data, so it never renders at full white. */
   absent: { color: colors.textMuted },
 });

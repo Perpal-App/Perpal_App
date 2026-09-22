@@ -100,6 +100,23 @@ export const typography = {
     letterSpacing: 0,
   },
   /**
+   * The subject of a settings or menu row: the words you scan a list by.
+   *
+   * Medium at 15, against the SemiBold 14 these rows used. A grouped list is read by running down it,
+   * and SemiBold on every line means nothing in the column is emphasised relative to anything else —
+   * the weight stops being emphasis and becomes the baseline, which is what made the panel shout. One
+   * step down and one point up is lighter *and* more legible at the same time.
+   *
+   * Still a point heavier than `body`, because these labels sit beside secondary values and have to
+   * stay the thing the eye lands on first.
+   */
+  rowLabel: {
+    fontFamily: fonts.medium,
+    fontSize: 15,
+    lineHeight: 23,
+    letterSpacing: 0,
+  },
+  /**
    * All-caps column headers and metric labels. Caps have no descenders, so this
    * is the one role that can lead slightly under 1.5x without cropping.
    */

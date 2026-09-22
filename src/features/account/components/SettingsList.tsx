@@ -1,6 +1,6 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Children, Fragment, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
 
 import { PressableScale } from '@/components/ui/PressableScale';
 import {
@@ -22,6 +22,14 @@ import { colors, radii, spacing, typography } from '@/theme/tokens';
  */
 const GLYPH_SLOT = 26;
 
+/**
+ * Kept at the size the drawn chevron used, because the replacement occupies the same box.
+ *
+ * Ionicons' `chevron-forward` inks about 38% of its em width and 66% of its height at stroke 48/512;
+ * the path this replaces inked 39% and 68% at stroke 2.4/24. Near enough that the row's right edge
+ * does not move, and the weight now comes from the same font as every other glyph on the screen
+ * rather than from a literal stroke width kept in agreement by hand.
+ */
 const CHEVRON_SIZE = 16;
 
 /**
@@ -29,10 +37,14 @@ const CHEVRON_SIZE = 16;
  *
  * The row still scales with the reader's setting, but the label no longer shrinks to absorb overflow,
  * so an uncapped multiplier would put the cropping back — at 2x the label alone is wider than the
- * space between the tile and the chevron, and being unshrinkable it would push the value out of the
+ * space between the glyph and the chevron, and being unshrinkable it would push the value out of the
  * row entirely rather than losing a few characters. Capped, the pair always has somewhere to go.
+ *
+ * Exported because an `accessory` has to scale on the same ceiling. A capped label beside an uncapped
+ * value is worse than either extreme: the label holds still while the value grows, and since the
+ * value is the side that yields, it shrinks itself away to make room for text that is not moving.
  */
-const MAX_TEXT_SCALE = 1.25;
+export const SETTINGS_ROW_TEXT_SCALE = 1.25;
 
 export type SettingsTone = 'accent' | 'negative';
 
@@ -83,10 +95,16 @@ export function SettingsGroup({
 }
 
 /**
- * One settings row: a glyph tile, a label, and whatever the row carries on the right.
+ * One settings row: a glyph, a label, and one thing on the right.
  *
- * `subtitle` puts a second line under the label, for a value too long to sit beside it — an
- * address. `value` is the right-aligned muted text iOS uses for a version, a handle, or a state.
+ * Every row is a single line now. The second line under the label is gone, and with it the only
+ * thing it ever carried — a wallet address. A grouped list is read by running down the left edge and
+ * glancing right, and a row that grows a second line breaks that scan twice: once by making itself
+ * taller than its neighbours, and again by putting its value somewhere the eye is not looking.
+ *
+ * The right slot holds `accessory` if given, otherwise `value`. One or the other, never both: the
+ * space beside a label is a single budget, and two things sharing it means each gets half of an
+ * amount that was already the tight part of the row.
  *
  * Without `onPress` the row grows no chevron and takes no touches, so a value that cannot be
  * acted on never looks like it can.
@@ -94,24 +112,31 @@ export function SettingsGroup({
 export function SettingsRow({
   accessibilityHint,
   accessibilityLabel,
+  accessory,
   icon,
   iconTone = 'accent',
   label,
   loading = false,
   onPress = null,
-  subtitle,
   tone = 'default',
   value,
 }: {
   readonly accessibilityHint?: string;
   /** Defaults to the visible label. Set it where the label alone would not orient a listener. */
   readonly accessibilityLabel?: string;
+  /**
+   * A node in the right slot, for a value that is more than text — an address with its copy
+   * control, or a skeleton standing in for one. Displaces `value`.
+   *
+   * It has to shrink. The label does not, so whatever goes here is the side that absorbs a narrow
+   * screen, and a node that holds its intrinsic width would push the label out of the row.
+   */
+  readonly accessory?: ReactNode;
   readonly icon: ProfileGlyphName;
   readonly iconTone?: SettingsTone;
   readonly label: string;
   readonly loading?: boolean;
   readonly onPress?: (() => void) | null;
-  readonly subtitle?: ReactNode;
   readonly tone?: 'default' | 'destructive';
   readonly value?: string;
 }) {
@@ -125,34 +150,35 @@ export function SettingsRow({
       >
         <ProfileGlyph name={icon} tone={GLYPH_TONES[iconTone]} />
       </View>
-      <View style={styles.body}>
-        <View style={styles.headline}>
+      <View style={styles.headline}>
+        <Text
+          maxFontSizeMultiplier={SETTINGS_ROW_TEXT_SCALE}
+          numberOfLines={1}
+          style={[styles.label, tone === 'destructive' && styles.destructive]}
+        >
+          {label}
+        </Text>
+        {accessory ?? (value === undefined ? null : (
           <Text
-            maxFontSizeMultiplier={MAX_TEXT_SCALE}
+            maxFontSizeMultiplier={SETTINGS_ROW_TEXT_SCALE}
             numberOfLines={1}
-            style={[styles.label, tone === 'destructive' && styles.destructive]}
+            style={styles.value}
           >
-            {label}
+            {value}
           </Text>
-          {value === undefined ? null : (
-            <Text
-              maxFontSizeMultiplier={MAX_TEXT_SCALE}
-              numberOfLines={1}
-              style={styles.value}
-            >
-              {value}
-            </Text>
-          )}
-          {loading ? (
-            <ActivityIndicator
-              color={tone === 'destructive' ? colors.negative : colors.accent}
-              size="small"
-            />
-          ) : onPress === null ? null : (
-            <Chevron />
-          )}
-        </View>
-        {subtitle}
+        ))}
+        {loading ? (
+          <ActivityIndicator
+            color={tone === 'destructive' ? colors.negative : colors.accent}
+            size="small"
+          />
+        ) : onPress === null ? null : (
+          <Ionicons
+            color={colors.textMuted}
+            name="chevron-forward"
+            size={CHEVRON_SIZE}
+          />
+        )}
       </View>
     </>
   );
@@ -176,22 +202,6 @@ export function SettingsRow({
     >
       {content}
     </PressableScale>
-  );
-}
-
-/** Stroked rather than a text glyph, so its weight matches the app's other drawn icons. */
-function Chevron() {
-  return (
-    <Svg height={CHEVRON_SIZE} viewBox="0 0 24 24" width={CHEVRON_SIZE}>
-      <Path
-        d="M9 5l7 7-7 7"
-        fill="none"
-        stroke={colors.textMuted}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2.4}
-      />
-    </Svg>
   );
 }
 
@@ -225,19 +235,33 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     alignItems: 'center',
   },
-  body: { flex: 1, minWidth: 0, gap: 2 },
-  headline: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  // Grows to fill when the row carries no value, so a lone label still pushes the chevron to the
-  // right edge. Does not shrink, which is the half that was missing: the label had `flex: 1` and the
+  // One view, where there used to be two. The outer `body` existed only to stack a headline above a
+  // subtitle, and with the subtitle gone it was a column wrapping a single row — a level of nesting
+  // per row, on every row, holding nothing.
+  //
+  // `minWidth: 0` is what lets the accessory inside actually shrink. A flex item defaults to a minimum
+  // of its content's width, so without this the row would size itself to the full address and hand the
+  // overflow to the screen rather than to the ellipsis.
+  headline: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  // Grows to fill when the row carries nothing on the right, so a lone label still pushes the chevron
+  // to the edge. Does not shrink, which is the more important half: the label had `flex: 1` and the
   // value `flexShrink: 0`, so whenever the two together overran the row the label absorbed the whole
   // deficit and "Email support" came out as "Email supp…". The row's own name is the last thing on it
-  // that should be sacrificed for space.
-  // `label`, not `bodyCompact`. Both are 14pt, but `bodyCompact` is Regular and the address beneath it
-  // borrows `eyebrow`'s SemiBold — so a row's heading was set lighter than its own value, and the eye
-  // went to the base58 before the word telling it which wallet it belonged to. SemiBold here and Medium
-  // below restores the order without changing either size.
+  // that should be sacrificed for space, and now that the address sits beside it rather than under it
+  // that rule is doing real work on every wallet row.
+  //
+  // `rowLabel` — Medium 15, the role added for exactly this. It has been Regular 14 (lighter than the
+  // address it shares the row with, so the value outweighed its own heading) and then SemiBold 14
+  // (heavier than everything, so the whole column shouted). Medium 15 is the one that reads as a list:
+  // lighter than SemiBold, larger than either, and still a step above the value beside it.
   label: {
-    ...typography.label,
+    ...typography.rowLabel,
     flexGrow: 1,
     flexShrink: 0,
     minWidth: 0,
@@ -245,14 +269,14 @@ const styles = StyleSheet.create({
   },
   // `caption`, a step under the label rather than level with it.
   //
-  // At `bodyCompact` the muted detail was set at the label's own size and weight, so a 20-character
-  // address like perpal.app@gmail.com claimed as much of the row as the thing it was qualifying —
-  // about 140pt of a 210pt budget on a 360pt screen. 12pt returns roughly 18pt of that and restores
-  // the hierarchy the two should have had: this line describes the row, it does not title it.
+  // At `bodyCompact` the muted value was set at the label's own size and weight, so a 20-character
+  // string like perpal.app@gmail.com claimed as much of the row as the thing it was qualifying —
+  // measured against the bundled Poppins, 147pt of a 210pt budget on a 360pt screen. 12pt returns
+  // about 18pt of that and restores the hierarchy the two should have had.
   //
-  // `flexShrink: 1` makes it the side that gives way now. On a narrow device the address ellipsises
-  // instead of the label, which is the right trade — the full value is still in the row's
-  // accessibility label, and tapping the row acts on it either way.
+  // `flexShrink: 1` makes it the side that gives way. On a narrow device the value ellipsises instead
+  // of the label, which is the right trade — the row's accessibility label still carries it in full.
+  // An `accessory` shrinks the same way, by its own styles rather than these.
   value: {
     ...typography.caption,
     flexShrink: 1,
