@@ -69,11 +69,29 @@ function TradingViewMarketChartComponent({
     timeframe: timeframeLabel,
   }), [candles, chartStyle, showEma, showSma, symbol, timeframeLabel]);
 
-  useEffect(() => {
-    if (!ready || candles.length === 0) return;
-    webView.current?.postMessage(message);
+  /**
+   * The newest payload the chart has not acknowledged receiving.
+   *
+   * Held so `ready` can deliver it. Posting used to depend on a `ready` state *transition*, and after a
+   * reload there was none to depend on: the flag was still true from the previous document, the effect
+   * fired against a page that had not finished loading, the message was dropped, and the arriving
+   * `ready` set `true` over `true` — no re-render, no second attempt, no data. A chart with a series it
+   * never received is a blank canvas with a watermark.
+   */
+  const undelivered = useRef<string | null>(null);
+
+  const deliver = useCallback((payload: string) => {
+    webView.current?.postMessage(payload);
+    undelivered.current = null;
     shouldFit.current = false;
-  }, [candles.length, message, ready]);
+  }, []);
+
+  useEffect(() => {
+    if (candles.length === 0) return;
+    // Queued either way. If the chart is not listening yet, `ready` picks this up when it is.
+    undelivered.current = message;
+    if (ready) deliver(message);
+  }, [candles.length, deliver, message, ready]);
 
   const send = useCallback((payload: Record<string, unknown>) => {
     webView.current?.postMessage(JSON.stringify(payload));
@@ -98,6 +116,11 @@ function TradingViewMarketChartComponent({
       if (value.type === 'ready') {
         shouldFit.current = true;
         setReady(true);
+        // Delivered here rather than left to the effect. This is the only moment the chart is known to
+        // be listening, and whatever was queued before it loaded has to go now — the effect cannot be
+        // relied on to run, because `ready` may already have been true.
+        const queued = undelivered.current;
+        if (queued !== null) deliver(queued);
       } else if (value.type === 'tool_done') {
         // The chart disarms itself once a shape lands, so the rail follows it
         // back to the crosshair instead of drawing a second shape by accident.
@@ -108,7 +131,7 @@ function TradingViewMarketChartComponent({
     } catch {
       setFailed(true);
     }
-  }, []);
+  }, [deliver]);
 
   const allowNavigation = useCallback((request: WebViewNavigation) => {
     if (request.url === 'about:blank') return true;
@@ -124,7 +147,20 @@ function TradingViewMarketChartComponent({
     onTimeframeChange(next);
   };
 
-  const live = candles.length > 0 && !failed;
+  /**
+   * Whether the chart is worth keeping on screen, which is not the same as whether it has data.
+   *
+   * This used to be `candles.length > 0 && !failed`, and it gated the `WebView`'s existence — so every
+   * timeframe change unmounted the chart and remounted it, because the history hook clears its series
+   * before fetching the new one. Reloading a document to change an interval was wasteful on its own, and
+   * it was also what lost the data: see `undelivered`.
+   *
+   * The document now outlives the series. It loads once, keeps its chart, its drawings and its zoom, and
+   * a timeframe change is a message rather than a reload. Only a renderer failure takes it down, and
+   * that path deliberately unmounts so a retry gets a clean document.
+   */
+  const mounted = !failed;
+  const awaitingCandles = candles.length === 0;
 
   return (
     <View style={[styles.shell, fill && styles.shellFill]}>
@@ -229,7 +265,7 @@ function TradingViewMarketChartComponent({
           accessibilityLabel={`Interactive chart for ${symbol}. Drag to pan, pinch sideways to zoom time, pinch vertically to zoom price.`}
           style={styles.chart}
         >
-          {live ? (
+          {mounted ? (
             <WebView
               allowFileAccess={false}
               allowUniversalAccessFromFileURLs={false}
@@ -249,8 +285,15 @@ function TradingViewMarketChartComponent({
               source={CHART_SOURCE}
               style={styles.webView}
             />
-          ) : (
-            <View accessibilityLiveRegion="polite" style={styles.placeholder}>
+          ) : null}
+
+          {/* Over the chart rather than instead of it, which is the change that keeps the document
+              alive. An empty canvas behind this is a chart waiting for a series, not a broken one. */}
+          {mounted && !awaitingCandles ? null : (
+            <View
+              accessibilityLiveRegion="polite"
+              style={[styles.placeholder, mounted && styles.placeholderOverlay]}
+            >
               <Text style={styles.placeholderText}>
                 {failed ? 'Chart renderer needs a retry' :
                   status === 'loading' ? 'Loading market candles' : 'Reconnecting market candles'}
@@ -260,6 +303,7 @@ function TradingViewMarketChartComponent({
                   accessibilityRole="button"
                   onPress={() => {
                     shouldFit.current = true;
+                    undelivered.current = null;
                     setReady(false);
                     setFailed(false);
                   }}
@@ -417,6 +461,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surface,
+  },
+  // The same block, laid over a chart that is still mounted rather than replacing it. Opaque, because
+  // what is behind it is an empty canvas carrying the renderer's watermark.
+  placeholderOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    flex: 0,
   },
   retry: {
     minHeight: layout.minTouchTarget,

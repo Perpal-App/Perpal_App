@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import {
   reconcilePendingPacificaCommand,
@@ -14,18 +14,47 @@ import {
   type InAppNotificationScopeToken,
 } from '@/storage/inAppNotifications';
 
+/**
+ * The last snapshot read, so a remount has something to render on its first frame.
+ *
+ * The ticket is mounted inside a sheet that unmounts on close, so every open used to restart at `null`
+ * and hold a skeleton until the venue answered — and then, one frame after the answer, replace the
+ * controls it had just drawn once the wallet balance arrived too.
+ *
+ * Safe to render because it is only ever rendered. `usePacificaOrderFlow.prepare` calls
+ * `fetchFreshPacificaPortfolio` and passes *that* to `preparePacificaOrder`, so no order is ever priced
+ * against this value; it fills a card while the live one is in flight.
+ *
+ * One entry carrying its own account, so it cannot be read for a different identity and a rotation
+ * replaces it rather than accumulating. In memory only.
+ */
+let cached: { readonly account: string; readonly value: PacificaPortfolioSnapshot } | null = null;
+
+function readCache(account: string | null): PacificaPortfolioSnapshot | null {
+  return account !== null && cached?.account === account ? cached.value : null;
+}
+
 export function usePacificaTicketPortfolio(input: {
   readonly account: string | null;
   readonly apiOrigin: string;
   readonly enabled: boolean;
   readonly marketRef: string;
 }) {
-  const [portfolio, setPortfolio] = useState<PacificaPortfolioSnapshot | null>(null);
+  const [portfolio, setPortfolio] = useState<PacificaPortfolioSnapshot | null>(
+    () => readCache(input.account),
+  );
   const [failed, setFailed] = useState(false);
   const [revision, setRevision] = useState(0);
 
+  const publish = useCallback((next: PacificaPortfolioSnapshot) => {
+    if (input.account !== null) cached = { account: input.account, value: next };
+    setPortfolio(next);
+  }, [input.account]);
+
   useEffect(() => {
-    setPortfolio(null);
+    // The cached snapshot rather than nothing, so a reopen shows the last known state while the refresh
+    // runs instead of starting from a skeleton it already had the answer for.
+    setPortfolio(readCache(input.account));
     setFailed(false);
     if (!input.enabled || input.account === null) return;
     const account = input.account;
@@ -49,6 +78,7 @@ export function usePacificaTicketPortfolio(input: {
         }
       }
       const next = await fetchPacificaPortfolio(input.apiOrigin, account, abort.signal);
+      cached = { account, value: next };
       if (!abort.signal.aborted) setPortfolio(next);
     };
     void load().catch(() => {
@@ -61,7 +91,10 @@ export function usePacificaTicketPortfolio(input: {
     failed,
     portfolio,
     refresh: () => setRevision((value) => value + 1),
-    update: setPortfolio,
+    // `publish`, not `setPortfolio`: the flow hands back the fresh snapshot it fetched before pricing an
+    // order, which is the most current one the app will see. Dropping it on the floor would leave the
+    // next open seeding from something older than what was just in hand.
+    update: publish,
   };
 }
 
