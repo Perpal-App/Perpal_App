@@ -68,8 +68,13 @@ export function MarketInfoList({
         label="Margin mode"
         value={market.isolatedOnly ? 'Isolated only' : 'Cross or isolated'}
       />
+      {/* "Price update", not "Oracle update". The value is `pricePublishedAtMs`, which is the venue's
+          single entry timestamp — it stamps the mark, the oracle, the volume, the open interest and
+          both funding rates together. Naming it after the oracle implied the oracle had a publishing
+          cadence of its own, which is part of why a mark price and an oracle price differing by a few
+          basis points looked like one of them had gone stale. */}
       <Stat
-        label="Oracle update"
+        label="Price update"
         pending={pending}
         tone="time"
         value={snapshot?.pricePublishedAtMs == null

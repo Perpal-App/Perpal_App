@@ -102,10 +102,13 @@ const MENU_SPRING = { damping: 29, mass: 0.55, stiffness: 420 } as const;
  * menu positioning itself relative to a parent.
  *
  * Which *side* the menu takes is still the caller's call — only the caller knows whether its control
- * sits low in a bottom sheet. But it can no longer run off the screen on whichever side it took: the
- * layer below is pinned to the window's far edge, the card shrinks inside it, and the options scroll
- * once they no longer fit. That containment is flexbox reading the space it was given, not this
- * component measuring the viewport.
+ * sits low in a bottom sheet. Where it sits on that side is not: a menu hanging below a control that
+ * is itself near the bottom of a scroll view slides up by exactly as much as it would have overflowed,
+ * so every option stays on screen and none of them are cut off or hidden behind a scroll.
+ *
+ * That adaptation is a shrinkable strut above the card rather than a comparison, which is what lets it
+ * happen without measuring the viewport, without a layout pass to read a height back, and without the
+ * frame of wrong placement that a measure-then-reposition would show on first open. See `styles.lead`.
  *
  * Generic over the option id so a caller filtering by a union gets that union back in `onSelect`
  * instead of a bare `string` it has to widen a `useState` to accept.
@@ -197,11 +200,11 @@ export function AnchoredMenu<Id extends string>({
         />
       </Animated.View>
 
-      {/* The box the card is allowed to occupy, and the reason it can no longer be cropped.
-          Below a control it runs from the anchor to the bottom of the window; above one it is a box as
-          tall as the control's own offset with the card pinned to its lower edge. Either way the far
-          edge is a real boundary rather than open space, so the card's `flexShrink` has something to
-          shrink against. Neither branch knows how tall the screen is. */}
+      {/* The box the card is allowed to occupy. Below a control it spans the window and the lead strut
+          places the card inside it; above one it is a box as tall as the control's own offset with the
+          card pinned to its lower edge. Neither branch knows how tall the screen is — both are bounded
+          by their own absolute edges, which is the layout system answering the question rather than
+          this component asking the viewport. */}
       <View
         pointerEvents="box-none"
         style={[
@@ -212,13 +215,20 @@ export function AnchoredMenu<Id extends string>({
               justifyContent: 'flex-end',
               paddingTop: insets.top + spacing.sm,
             }
-            : {
-              top: anchor.offset,
-              bottom: 0,
-              paddingBottom: insets.bottom + spacing.sm,
-            },
+            : { bottom: 0, paddingBottom: insets.bottom + spacing.sm },
         ]}
       >
+        {/* The strut that holds the card under its control, and gives way when the card would not fit.
+            It wants to be exactly as tall as the gap between the window's top and the control's lower
+            edge, which puts the card directly below the button. When the two together are taller than
+            the layer, the deficit has to come out of one of them, and this is the one that yields —
+            so the card slides up by precisely the overflow and keeps every option.
+            Adaptive, with no measurement and no state: nothing here compares a card height to a
+            screen height, Yoga just resolves an over-constrained column. */}
+        {anchor.above ? null : (
+          <View pointerEvents="none" style={[styles.lead, { height: anchor.offset }]} />
+        )}
+
         <Animated.View
           accessibilityViewIsModal
           style={[
@@ -232,10 +242,9 @@ export function AnchoredMenu<Id extends string>({
             {title === undefined ? null : (
               <Text accessibilityRole="header" style={styles.title}>{title}</Text>
             )}
-            {/* Scrolls only when it has to. With `flexShrink` and no `flexGrow` it sizes to its
-                options while they fit and gives way once the card is capped, so a menu of four is the
-                height of four and a menu opened from the bottom of a long list becomes scrollable
-                instead of losing its last rows off the screen. */}
+            {/* Sizes to its options and scrolls only if the card was still capped after repositioning.
+                With `flexShrink` and no `flexGrow` a menu of four is the height of four; it never
+                claims the room left over below its control. */}
             <ScrollView
               bounces={false}
               showsVerticalScrollIndicator={false}
@@ -281,8 +290,11 @@ export function AnchoredMenu<Id extends string>({
  * wide card under a narrow button is what makes a dropdown look detached from the thing it belongs to.
  *
  * It can never overflow to the right: the card's right edge is the control's right edge, and that is
- * on screen by definition. The left edge is clamped for the case where the card is wider. Overflow
- * *downward* is handled by the menu itself, which bounds the card and scrolls its options.
+ * on screen by definition. The left edge is clamped for the case where the card is wider.
+ *
+ * `offset` is where the card would *prefer* to sit, not where it will end up. The menu treats it as a
+ * preference and lifts the card when there is not room below, so this can be called for a control at
+ * any scroll position without the caller checking anything.
  */
 export function anchorBelow(
   x: number,
@@ -306,6 +318,11 @@ export function anchorBelow(
  * have little room to open into. `offset` is the control's own top less the gap, and the card is
  * pinned to the bottom of a box that tall — so the card's bottom edge lands just above the control
  * without anything measuring the card or the viewport.
+ *
+ * Unlike `anchorBelow` this placement is a hard bound rather than a preference, and that is the point
+ * of choosing it: a caller asks for `above` precisely so the card does not cover its own control, so
+ * the card shrinks and scrolls here rather than spilling downward. Reach for it where the options are
+ * few; where they are many, `anchorBelow` will find the room on its own.
  */
 export function anchorAbove(
   x: number,
@@ -350,10 +367,20 @@ const styles = StyleSheet.create({
     left: 0,
     alignItems: 'flex-start',
   },
-  // `flexShrink` is the containment: the card takes its content's height while there is room for it and
-  // is capped by the layer when there is not. `overflow: hidden` then does double duty — it clips the
-  // ramp and the pressed row highlights to the rounded corners, and it guarantees that a card at its
-  // cap can never paint outside itself even if its contents disagree about how tall they are.
+  // Shrinks a thousand times more readily than the card does, which is what makes the two behave as an
+  // order of preference rather than a proportional split. Flexbox distributes a deficit by
+  // `flexShrink × flexBasis`, so at these weights the strut has given up essentially all of its height
+  // before the card loses its first point — the card moves, then and only then does it shrink.
+  lead: { flexShrink: 1000 },
+  // `flexShrink: 1` is the last resort, not the mechanism. The strut above absorbs the overflow first,
+  // so in practice a menu repositions rather than shrinking: six options come to 272pt against roughly
+  // 600pt of usable height on the smallest device the app supports, so there is always somewhere to
+  // put it. This is here for a caller that one day passes twenty options, and for it the scroller
+  // inside takes over.
+  //
+  // `overflow: hidden` does double duty — it clips the pressed row highlights to the rounded corners,
+  // and it guarantees a card at its cap can never paint outside itself even if its contents disagree
+  // about how tall they are.
   card: {
     flexShrink: 1,
     overflow: 'hidden',
