@@ -23,9 +23,16 @@ export const colors = {
   accentSoft: '#C4B5FD',
   positive: POSITIVE,
   negative: NEGATIVE,
-  /** Rim shades for the action materials, one step under each gradient's base. */
-  longEdge: '#178F52',
-  shortEdge: '#B03737',
+  /**
+   * Rim shade for a raised accent control that is a *selection* rather than an action — the active
+   * chip in the portfolio's filter row, where a border is what says "this one" from across the row.
+   *
+   * The matching `longEdge` and `shortEdge` are gone. They rimmed the order buttons one step under
+   * each gradient's base on all four sides, and a uniform dark outline is the opposite of dimension:
+   * it traces the shape instead of shading it, and light does not arrive from four directions. The
+   * order buttons get their edge from a specular along the top and a halo outside — see
+   * `ActionButton`.
+   */
   accentEdge: '#6D28D9',
 
 
@@ -236,28 +243,39 @@ export const gradients = {
     locations: [0, 1],
   },
   /**
-   * Order actions. Each ramp runs from a lit top edge to a deeper base, which is
-   * what gives a small button its dimension: the fill reads as a curved surface
-   * catching light rather than as a flat block of colour. Paired with the edge
-   * colours below, which darken the rim on all four sides.
+   * Order actions: a lit top edge, the deepest tone around three quarters down, then a small lift at
+   * the very bottom.
+   *
+   * That third stop is the whole difference between a surface and a wedge. A ramp that only darkens
+   * downward describes a plane tilted away from the light; a real convex surface also catches a little
+   * light bouncing off whatever it is sitting on, so its lowest edge is fractionally brighter than the
+   * shade above it. Two stops could never say that, which is why these buttons read as flat panels no
+   * matter how the rim was drawn — and why the rim was being asked to supply a dimension the fill was
+   * not providing.
+   *
+   * Paired with `glassActionSheen` laid over the top and no border at all. See `ActionButton`.
    */
   longAction: {
-    colors: ['#5CE79B', '#22B96C'],
-    locations: [0, 1],
+    colors: ['#6BEDA6', '#23BA6E', '#2FC77B'],
+    locations: [0, 0.74, 1],
   },
+  /**
+   * Same construction, and slightly deeper than it was. White on the old `#D64545` base came to
+   * 4.38:1, just under the 4.5 normal text needs; at `#CE4242` it is 4.69:1, and the label's own band
+   * around the middle of the ramp improves from 3.29 to 3.80.
+   */
   shortAction: {
-    colors: ['#F58585', '#D64545'],
-    locations: [0, 1],
+    colors: ['#F08A8A', '#CE4242', '#DA5252'],
+    locations: [0, 0.74, 1],
   },
   /**
    * The same material in the accent, for a control that is neither a buy nor a sell — a settings
    * glyph's tile. Built to the order buttons' recipe rather than a flat fill of `accent`, so
-   * every raised control in the app catches light the same way, and paired with `accentEdge`
-   * below, which darkens its rim on all four sides.
+   * every raised control in the app catches light the same way.
    */
   accentAction: {
-    colors: ['#A78BFA', '#7C3AED'],
-    locations: [0, 1],
+    colors: ['#B49CFC', '#7529EA', '#8438F0'],
+    locations: [0, 0.74, 1],
   },
 
 

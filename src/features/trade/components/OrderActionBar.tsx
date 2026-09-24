@@ -131,6 +131,7 @@ export function OrderActionBar({
         <ActionButton
           accessibilityHint="Opens the order ticket on this side"
           disabled={!tradable}
+          glow
           label="Buy / Long"
           onPress={() => open('long')}
           radius={radii.md}
@@ -141,6 +142,7 @@ export function OrderActionBar({
         <ActionButton
           accessibilityHint="Opens the order ticket on this side"
           disabled={!tradable}
+          glow
           label="Sell / Short"
           onPress={() => open('short')}
           radius={radii.md}
@@ -197,19 +199,11 @@ const styles = StyleSheet.create({
   },
   blocked: { ...typography.caption, color: colors.textMuted },
   actions: { flexDirection: 'row', gap: spacing.sm },
-  // The app's raised-material shadow, the same one the toast bar carries. It is what makes these read
-  // as floating over the page rather than painted onto it, and it is the only thing standing in for
-  // the rule that used to separate them from the content above.
+  // Width only. The lift is `ActionButton`'s `glow`, which throws each side's own colour and is what
+  // separates these from the content scrolling past underneath.
   //
-  // Legacy `shadow*` plus `elevation` rather than `boxShadow`, which needs the New Architecture and
-  // fails silently without it. Applied here rather than inside `ActionButton` so the primitive stays
-  // flat by default — a shadow on every action in the app would be a different design.
-  action: {
-    flex: 1,
-    shadowColor: colors.raisedHalo,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
+  // It used to be a dark shadow declared here, and it never drew on iOS: it sat on the same view as
+  // the `overflow: 'hidden'` that clipped the fill to its corners, and a masked layer casts no shadow.
+  // Moving it into the primitive put it on a layer that does not clip.
+  action: { flex: 1 },
 });

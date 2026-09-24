@@ -96,8 +96,10 @@ const styles = StyleSheet.create({
   chip: {
     borderRadius: radii.pill,
     // Never visible — the gradient child covers it. Present so Android's `elevation` has a surface to
-    // throw from, and taken from the ramp's own base so a partial paint cannot flash a foreign colour.
-    backgroundColor: gradients.accentAction.colors[1],
+    // throw from, and taken from the ramp's own last stop so a partial paint cannot flash a foreign
+    // colour. Index 2, not 1: the action ramps gained a third stop — a lift at the bottom edge — so the
+    // middle one is now the deepest tone rather than the base.
+    backgroundColor: gradients.accentAction.colors[2],
     shadowColor: colors.raisedHalo,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
