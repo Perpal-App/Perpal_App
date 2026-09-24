@@ -51,15 +51,18 @@ export default function TabsLayout() {
   const blurTarget = useRef<View | null>(null);
   const segments = useSegments();
 
-  // A tab root shares the bottom of the screen with the bar. A screen pushed on top of
-  // one owns it outright — the market detail screen pins the order buttons down there,
+  // A tab root shares the bottom of the screen with the bar. A screen pushed over the
+  // shell owns it outright — the market detail screen pins the order buttons down there,
   // and the bar cannot merely overlap them: the capsule samples what sits behind it, so
   // it would bury the buttons and take on their colour at the same time.
   //
-  // Read from the route rather than declared per screen, so a detail route added later
-  // gets this without anyone remembering to opt in. Phrased as "positively identified a
-  // pushed screen" rather than "not a root", so any unexpected segment shape leaves the
-  // bar on screen instead of hiding it on a tab where it belongs.
+  // `useSegments` reports the active route for the whole tree, not just this navigator, so
+  // this catches the market and chart routes even though they are pushed on the root stack
+  // rather than inside a tab — which is where they belong, and why no tab can be left
+  // holding a detail screen it did not open. Read from the route rather than declared per
+  // screen, so a route added later gets this without anyone remembering to opt in. Phrased
+  // as "positively identified a pushed screen" rather than "not a root", so any unexpected
+  // segment shape leaves the bar on screen instead of hiding it on a tab where it belongs.
   const leafSegment = segments[segments.length - 1];
   const isPushedScreen =
     segments.length > 1 && TABS.every((tab) => tab.name !== leafSegment);

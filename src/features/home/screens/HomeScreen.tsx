@@ -100,7 +100,7 @@ export function HomeScreen() {
   // Stable, so the movers rows are not handed a new callback on every price batch.
   const openMarket = useCallback(
     (venueRef: string) => router.push({
-      pathname: '/(tabs)/trade/[venueRef]',
+      pathname: '/market/[venueRef]',
       params: { venueRef },
     }),
     [router],

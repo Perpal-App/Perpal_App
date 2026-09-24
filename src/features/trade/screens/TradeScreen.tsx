@@ -52,7 +52,7 @@ export function TradeScreen() {
   // re-render the whole visible list for one market's tick.
   const openMarket = useCallback(
     (venueRef: string) => router.push({
-      pathname: '/(tabs)/trade/[venueRef]',
+      pathname: '/market/[venueRef]',
       params: { venueRef },
     }),
     [router],

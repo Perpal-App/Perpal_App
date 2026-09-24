@@ -103,8 +103,18 @@ export function AuthNavigationGate() {
           <Stack.Screen name="(auth)" />
         </Stack.Protected>
 
+        {/* The market screens sit here rather than inside the Markets tab, and that placement is
+            load-bearing. The detail screen used to be `(tabs)/trade/[venueRef]`, so opening a market
+            from Home pushed onto the Markets tab's own stack — it switched tabs and left a screen
+            behind in one move. Going back returned to Home but the residue stayed, so the next tap on
+            Markets restored that tab to where it had been left: straight back into the market the
+            reader had just dismissed from a different tab.
+            Pushed on this stack instead, a market is a destination reached from wherever you were and
+            popped back to the same place. Neither tab accumulates anything, and Home and Markets now
+            open a market by exactly the same route. */}
         <Stack.Protected guard={routeMode === 'app'}>
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="market/[venueRef]" />
           <Stack.Screen name="market-chart/[venueRef]" />
         </Stack.Protected>
       </Stack>
