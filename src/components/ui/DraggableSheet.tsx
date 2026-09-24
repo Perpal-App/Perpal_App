@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Pressable,
@@ -25,12 +26,10 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { colors, layout, motion, radii, spacing, typography } from '@/theme/tokens';
 
 /**
- * Most of the host the sheet may cover at rest, before it is dragged up.
+ * Share of the host the sheet covers at rest, before it is dragged up.
  *
- * A ceiling rather than a height. The sheet rests at whichever is smaller, this share or its content's
- * own height, which is what stops a short card from opening as a tall panel with an empty lower half —
- * the deposit form is about 45% of a phone, and at a flat fraction the rest of the sheet was blank
- * surface. Long content rests here and the drag reveals the remainder.
+ * Half, and a flat share rather than anything derived from the content — see `restOffset` for why a
+ * content-derived resting height is what made this sheet get stuck. The drag reveals the rest.
  */
 const DEFAULT_REST_RATIO = 0.5;
 
@@ -90,6 +89,12 @@ function restOffset(host: number, ratio: number): number {
  * (filling the host), resting (`restRatio` of it), and gone. Drag up to expand, down to close, and a
  * flick counts for more than the distance it covered.
  *
+ * Every position is a share of one measurement — the host's height. That is deliberate and was learned
+ * the hard way: a resting height that also depended on the content's height could not be computed until
+ * the content had settled, and content that loads in stages does not settle in time. The sheet opened
+ * wide and stayed there. One measurement, taken once, from a box whose size does not depend on what is
+ * inside it.
+ *
  * Two pieces of hard-won knowledge are load-bearing here and are the reason this is worth sharing:
  *
  * 1. It mounts its own `GestureHandlerRootView`. A React Native `Modal` renders into a separate native
@@ -125,28 +130,25 @@ export function DraggableSheet({
   // travelling before the modal can unmount, so one boolean cannot express both.
   const [mounted, setMounted] = useState(false);
   const [hostHeight, setHostHeight] = useState(0);
-  const [naturalHeight, setNaturalHeight] = useState(0);
+  // Held invisible until the sheet has a position. `offset` starts at 0, which in this model means
+  // fully expanded, so a frame painted before presentation shows the sheet at full height — and that
+  // frame is exactly what got stuck when presentation did not run. The gate makes the failure invisible
+  // as well as rarer.
+  const [ready, setReady] = useState(false);
   const presented = useRef(false);
   const lastHost = useRef(0);
   /** Usable height inside the safe area and below the backdrop gap. Every position is measured in it. */
   const host = useSharedValue(0);
-  /** Header plus content: how tall the sheet would be if nothing constrained it. */
-  const natural = useSharedValue(0);
   /** Translation from filling the host: 0 is as tall as it can be, `host` is fully off the bottom. */
   const offset = useSharedValue(0);
   const dragStart = useSharedValue(0);
-  // Refs rather than state: the two halves arrive from different callbacks in no fixed order, and only
-  // their sum is worth a render.
-  const headerHeight = useRef(0);
-  const contentHeight = useRef(0);
-
-  const commitNatural = useCallback(() => {
-    if (headerHeight.current === 0 || contentHeight.current === 0) return;
-
-    const total = headerHeight.current + contentHeight.current;
-    natural.set(total);
-    setNaturalHeight(total);
-  }, [natural]);
+  /**
+   * Which of the two open positions the sheet is at.
+   *
+   * Tracked rather than inferred from `offset`, because the host it was measured against can change
+   * underneath it. A shared value rather than a ref so the gesture can write it from the UI thread.
+   */
+  const expanded = useSharedValue(false);
 
   useEffect(() => {
     if (visible) {
@@ -159,26 +161,34 @@ export function DraggableSheet({
   const finish = useCallback(() => {
     setMounted(false);
     setHostHeight(0);
-    setNaturalHeight(0);
+    setReady(false);
     lastHost.current = 0;
   }, []);
 
-  // Presentation waits for both measurements, because the resting height is the smaller of the content
-  // and the ratio. Springing in against a guess settles the sheet in the wrong place and then corrects
-  // itself once the real number lands, which reads as the sheet bouncing twice.
+  // Presentation needs one measurement, the host's. It used to need two and that was the bug: the
+  // second came from the content, the content was still loading, and a zero reading meant this never
+  // ran at all — leaving the sheet at the initial offset, which is wide open.
   useEffect(() => {
-    if (!visible || hostHeight === 0 || naturalHeight === 0 || presented.current) return;
+    if (!visible || hostHeight === 0 || presented.current) return;
 
     presented.current = true;
+    expanded.set(false);
+    const target = restOffset(hostHeight, restRatio);
     offset.set(hostHeight);
-    const target = restOffset(hostHeight, naturalHeight, restRatio);
     offset.set(reduceMotion ? target : withSpring(target, motion.sheet));
-  }, [hostHeight, naturalHeight, offset, reduceMotion, restRatio, visible]);
+    setReady(true);
+  }, [expanded, hostHeight, offset, reduceMotion, restRatio, visible]);
 
-  // The dock shrinks when the keyboard opens, so every snap point moves under the sheet. Rather than
-  // re-derive a position that is now measured against a different host, expand: a field has focus, and
-  // the most room available is what typing into one wants. Skips the first measurement, which the
-  // presentation effect above owns.
+  // Re-derives the current position against a host that has changed size, and does not change which
+  // position that is.
+  //
+  // This effect used to expand the sheet on any host change, on the assumption that a host change meant
+  // the keyboard. It does not. Android re-measures shortly after a translucent modal mounts, as its
+  // insets settle, so the sheet would open at rest and then immediately run to full — which is the
+  // "it opens fully" this was reported as, and the same false positive behind it getting stuck.
+  //
+  // Set rather than sprung: a host resize is a layout correction, not a gesture, and animating it would
+  // show a slide the reader did not ask for.
   useEffect(() => {
     if (hostHeight === 0) return;
 
@@ -186,9 +196,22 @@ export function DraggableSheet({
     lastHost.current = hostHeight;
     if (previous === 0 || previous === hostHeight || !presented.current) return;
 
-    const target = fullOffset(hostHeight, naturalHeight);
-    offset.set(reduceMotion ? target : withSpring(target, motion.sheet));
-  }, [hostHeight, naturalHeight, offset, reduceMotion]);
+    offset.set(expanded.value ? 0 : restOffset(hostHeight, restRatio));
+  }, [expanded, hostHeight, offset, restRatio]);
+
+  // The one thing that legitimately expands the sheet on its own. A field has focus and the keyboard has
+  // taken most of the dock, so the most room available is what typing into one wants — and half of what
+  // is left would be a few rows tall. Driven by the keyboard's own event rather than inferred from a
+  // measurement, which is the distinction the effect above could not make.
+  useEffect(() => {
+    if (!mounted) return undefined;
+
+    const shown = Keyboard.addListener('keyboardDidShow', () => {
+      expanded.set(true);
+      offset.set(reduceMotion ? 0 : withSpring(0, motion.sheet));
+    });
+    return () => shown.remove();
+  }, [expanded, mounted, offset, reduceMotion]);
 
   // Runs the exit whenever the sheet stops being wanted, including after a drag has already carried it
   // most of the way down — the spring picks up from wherever the finger left it, so a release and its
@@ -224,13 +247,12 @@ export function DraggableSheet({
     })
     .onEnd((event) => {
       const projected = offset.value + event.velocityY * FLICK_PROJECTION;
-      const expanded = fullOffset(host.value, natural.value);
-      const resting = restOffset(host.value, natural.value, restRatio);
+      const resting = restOffset(host.value, restRatio);
 
       // Nearest of the three, measured against the projection. Expanded is the implicit default so a
       // release with no clear intent opens rather than closes.
-      let target = expanded;
-      let nearest = Math.abs(projected - expanded);
+      let target = 0;
+      let nearest = Math.abs(projected);
       const toRest = Math.abs(projected - resting);
       if (toRest < nearest) {
         target = resting;
@@ -245,8 +267,11 @@ export function DraggableSheet({
         return;
       }
 
+      // Recorded before the spring, so a host resize arriving mid-flight re-derives the position the
+      // sheet is heading to rather than the one it is leaving.
+      expanded.set(target === 0);
       offset.set(withSpring(target, motion.sheet));
-    }), [dragStart, host, natural, offset, requestClose, restRatio]);
+    }), [dragStart, expanded, host, offset, requestClose, restRatio]);
 
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: offset.value }],
@@ -256,7 +281,7 @@ export function DraggableSheet({
   // dragging the sheet halfway toward gone lightens the backdrop by half. Full strength anywhere at or
   // above rest, including expanded, and fading across exactly the dismissal travel.
   const scrimStyle = useAnimatedStyle(() => {
-    const resting = restOffset(host.value, natural.value, restRatio);
+    const resting = restOffset(host.value, restRatio);
     const span = host.value - resting;
 
     return {
@@ -273,13 +298,6 @@ export function DraggableSheet({
     host.set(measured);
     setHostHeight(measured);
   }, [host]);
-
-  // The header is measured rather than assumed, because it carries a title that can wrap at a large
-  // text size, and the resting height is header plus content.
-  const onHeaderLayout = useCallback((event: LayoutChangeEvent) => {
-    headerHeight.current = event.nativeEvent.layout.height;
-    commitNatural();
-  }, [commitNatural, headerHeight]);
 
   return (
     <Modal
@@ -307,10 +325,13 @@ export function DraggableSheet({
           {/* The keyboard pads the dock, which is the parent of the transformed view rather than the
               view itself — padding applied to a translated view fights the drag. */}
           <KeyboardAvoidingView behavior="padding" pointerEvents="box-none" style={styles.dock}>
-            <Animated.View onLayout={onHostLayout} style={[styles.host, sheetStyle]}>
+            <Animated.View
+              onLayout={onHostLayout}
+              style={[styles.host, !ready && styles.hidden, sheetStyle]}
+            >
               <View accessibilityViewIsModal style={styles.sheet}>
                 <GestureDetector gesture={drag}>
-                  <View onLayout={onHeaderLayout} style={styles.header}>
+                  <View style={styles.header}>
                     <View accessibilityElementsHidden pointerEvents="none" style={styles.grabber} />
                     <View style={styles.headerRow}>
                       {title === undefined ? null : (
@@ -337,13 +358,6 @@ export function DraggableSheet({
                   contentContainerStyle={styles.content}
                   contentInsetAdjustmentBehavior="never"
                   keyboardShouldPersistTaps="handled"
-                  // The content's own height, which is half of where the sheet comes to rest. Taken from
-                  // the scroller rather than an `onLayout` on a wrapper, because this is the measurement
-                  // the scroller already makes to decide whether it can scroll at all.
-                  onContentSizeChange={(_width, height) => {
-                    contentHeight.current = height;
-                    commitNatural();
-                  }}
                   showsVerticalScrollIndicator={false}
                   style={styles.scroll}
                 >
@@ -374,6 +388,8 @@ const styles = StyleSheet.create({
   // Fills the dock. The sheet's visible height is the translation, not this box, which is what lets one
   // gesture move continuously between expanded, resting and gone.
   host: { width: '100%', flex: 1 },
+  /** One frame at most, between the host being measured and the spring being armed. */
+  hidden: { opacity: 0 },
   sheet: {
     flex: 1,
     overflow: 'hidden',

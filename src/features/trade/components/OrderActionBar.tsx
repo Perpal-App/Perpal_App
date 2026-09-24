@@ -151,9 +151,9 @@ export function OrderActionBar({
       </View>
 
       {/* No `restRatio`: the sheet's own default opens it at half the screen and the drag takes it the
-          rest of the way, which is what the ticket wants. A short body — the deposit form, when the
-          account has nothing credited — comes to rest against its own height instead, so the card is
-          never taller than what is in it.
+          rest of the way, which is what the ticket wants. Half of the screen every time, regardless of
+          which form the body is showing — the ticket's height changes as the balance loads, and a
+          resting position that followed it was how this sheet used to open wide and stick there.
 
           The title is the instrument alone. It used to carry the side as well, which contradicted the
           body whenever the account had nothing credited: a sheet headed `Buy / Long` over a deposit

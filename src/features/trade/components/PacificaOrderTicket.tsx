@@ -31,6 +31,7 @@ import { usePacificaOrderFlow } from '@/features/trade/hooks/usePacificaOrderFlo
 import { useTradeActionRecovery } from '@/features/trade/hooks/useTradeActionRecovery';
 import { usePacificaTicketPortfolio } from '@/features/trade/hooks/usePacificaTicketPortfolio';
 import { useTradingStablecoinBalances } from '@/features/trade/hooks/useTradingStablecoinBalances';
+import { PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS } from '@/integrations/perps/pacifica/pacificaDeposit';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
 import type {
   PacificaMarginMode,
@@ -91,6 +92,29 @@ export function PacificaOrderTicket(props: {
   const portfolio = portfolioState.portfolio;
   const fundingOnly = portfolio !== null &&
     parseAmount(portfolio.availableToSpend, 6).baseUnits <= 0n;
+  // `null` while the balance is still being read. Insufficiency is a claim about a number, so it waits
+  // for the number rather than assuming zero — a ticket that flashed "Insufficient funds" on every open
+  // and then corrected itself would be worse than the button it replaces.
+  const privateUsdc = privateBalances.balances?.usdcBaseUnits ?? null;
+  /**
+   * The deposit on offer cannot be paid, whatever amount is typed.
+   *
+   * Pacifica does not credit deposits below its minimum, so a private balance under that floor cannot
+   * produce a valid deposit at any size. This used to be discoverable only by tapping: the ticket
+   * offered "Review deposit" as its primary accent action, the preparation threw
+   * `TradeFundingRequirementError`, and the rejection was deliberately quiet. A button that is the
+   * brightest thing on the card and cannot succeed is the wrong shape for that state.
+   */
+  const cannotFund = fundingOnly && privateUsdc !== null &&
+    privateUsdc < PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS;
+  // Shown up front rather than only after a failed attempt, so the two figures that explain the block
+  // are on screen with it. The flow's own requirement wins once it has one: that came from the venue.
+  const belowMinimum = cannotFund && privateUsdc !== null
+    ? {
+      minimumBaseUnits: PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS,
+      usdcAvailableBaseUnits: privateUsdc,
+    }
+    : null;
   // Every stage between a filled-in ticket and a submitted order. The form below owns what the reader
   // typed; this owns what is done with it, and `reset` is the contract between them — it drops any
   // prepared plan, so no edit here can leave a plan priced for inputs that have changed.
@@ -152,7 +176,17 @@ export function PacificaOrderTicket(props: {
     );
   }
 
-  if (portfolio === null) {
+  // Both facts or neither.
+  //
+  // The venue balance alone used to be enough to render, so the moment it arrived saying "nothing
+  // credited" the ticket drew the deposit form — a field, a slider and four presets — while the wallet
+  // balance was still in flight. When that landed at zero the whole form was replaced by "Insufficient
+  // funds". Two reveals for one answer, and the first was wrong.
+  //
+  // `fundingOnly` is the only branch that needs the second fact: a tradable account's form does not
+  // depend on the wallet at all, so it still renders as soon as the venue answers. With both values now
+  // seeded from their caches this wait is usually zero frames, not a round trip.
+  if (portfolio === null || (fundingOnly && privateUsdc === null)) {
     return (
       <PacificaBalanceState
         failed={portfolioState.failed}
@@ -165,6 +199,8 @@ export function PacificaOrderTicket(props: {
     (candidate) => candidate.symbol === props.market.venueRef && candidate.side === side,
   );
   const reduceOnly = action === 'close';
+  /** `ActionButton` always takes a handler; a disabled one never reaches it. */
+  const noop = () => undefined;
   const stopOrder = orderType === 'stop-market' || orderType === 'stop-limit';
 
   return (
@@ -216,7 +252,10 @@ export function PacificaOrderTicket(props: {
           tone="short"
         />
       </View>}
-      {reduceOnly ? null : (
+      {/* `cannotFund` hides the amount controls as well as changing the button. A field, a slider and
+          four percentage presets are all ways of choosing how much of a balance to commit, and there is
+          no balance — every one of them would be a control whose only possible value is zero. */}
+      {reduceOnly || cannotFund ? null : (
         <>
           <Field
             accessibilityLabel="Collateral amount"
@@ -265,10 +304,6 @@ export function PacificaOrderTicket(props: {
           <Field accessibilityLabel="Stop-loss price" onChangeText={(value) => { reset(); setStopLoss(value); }} placeholder="Stop loss" suffix="USD" value={stopLoss} />
         </>
       ) : null}
-      <PacificaFundingRequirementRows
-        onAddFunds={props.onRequestFunding}
-        requirement={flow.fundingRequirement}
-      />
       {preparation !== null ? (
         <TradeCollateralStepView loading={phase === 'submitting'} onConfirm={() => void flow.submitPreparation()} step={preparation} />
       ) : plan !== null ? (
@@ -278,6 +313,29 @@ export function PacificaOrderTicket(props: {
           onConfirm={flow.confirm}
           plan={plan}
         />
+      ) : cannotFund ? (
+        // The blocked state and its remedy on one line. `Insufficient funds` takes the room and says
+        // what is wrong; `Add funds` sizes to its own label and is the only thing here that can be
+        // pressed. Two full-width buttons stacked said the same pair of things in twice the height.
+        <View style={styles.controls}>
+          <ActionButton
+            // `negative` under `disabled` reads as blocked rather than as inviting. The accent
+            // "Review deposit" is reserved for a deposit that can actually be made.
+            disabled
+            label="Insufficient funds"
+            onPress={noop}
+            style={styles.grow}
+            tone="negative"
+          />
+          {props.onRequestFunding === undefined ? null : (
+            <ActionButton
+              accessibilityHint="Opens the private funding flow"
+              label="Add funds"
+              onPress={props.onRequestFunding}
+              tone="accent"
+            />
+          )}
+        </View>
       ) : (
         <ActionButton
           label={fundingOnly
@@ -296,6 +354,9 @@ export function PacificaOrderTicket(props: {
           tone={fundingOnly ? 'accent' : side === 'long' ? 'positive' : 'negative'}
         />
       )}
+
+      {/* Below the action, not above it: the figures explain the state the button is reporting. */}
+      <PacificaFundingRequirementRows requirement={flow.fundingRequirement ?? belowMinimum} />
       <PacificaRiskRows
         collateral={collateral}
         fundingOnly={fundingOnly}

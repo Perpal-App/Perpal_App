@@ -6,11 +6,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Skeleton, SkeletonText } from '@/components/feedback/Skeleton';
 import { RiseInView } from '@/components/motion/RiseInView';
 import { PressableScale } from '@/components/ui/PressableScale';
-import {
-  formatAmountWithCommas,
-  formatCompactTokenPrice,
-  formatCompactUsd,
-} from '@/domain/money/amount';
+import { formatCompactTokenPrice, formatCompactUsd } from '@/domain/money/amount';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
 import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import type {
@@ -41,8 +37,8 @@ const UNAVAILABLE = '--.--';
 const BACK_SIZE = 36;
 const BACK_GLYPH = 20;
 
-/** Placeholder widths for the figure row, near each real value's own width. */
-const FIGURE_WIDTHS = [56, 48, 64, 55, 55] as const;
+/** Placeholder widths for the figure row, near each real value's own width. Four cells, not five. */
+const FIGURE_WIDTHS = [56, 48, 55, 55] as const;
 
 /**
  * What the instrument is, what it costs, and the venue's headline figures.
@@ -102,17 +98,24 @@ export function MarketDetailHeader({
             </>
           ) : (
             <>
+              {/* `formatCompactTokenPrice`, the same formatter the strip and the markets table use.
+                  This was `formatAmountWithCommas`, which renders the exact stored decimal and never
+                  rounds — so BTC came out as `$84,822` beside an oracle reading of `$83,936.5`, two
+                  numbers rendered to different precision from the same feed. Half of the "these are
+                  not synced" impression was the formatting, not the values.
+                  It caps at two decimals above a unit and falls back to four significant digits below
+                  one, so a sub-cent market still reads as `$0.00001234` instead of `$0.00`. */}
               <Text
                 // Named for a screen reader too, which previously heard a bare number with no
-                // indication of which of this screen's two prices it had landed on.
+                // indication of which of this screen's prices it had landed on.
                 accessibilityLabel={price === null
                   ? 'Mark price unavailable'
-                  : `Mark price, ${formatAmountWithCommas(price)} dollars`}
+                  : `Mark price, ${formatCompactTokenPrice(price)}`}
                 numberOfLines={1}
                 selectable
                 style={styles.price}
               >
-                {price === null ? UNAVAILABLE : `$${formatAmountWithCommas(price)}`}
+                {price === null ? UNAVAILABLE : formatCompactTokenPrice(price)}
               </Text>
               {/* The basis this block is quoted on, which the header never stated. Two prices appear on
                   this screen — the venue's mark here, the index price in the strip — and only the
@@ -148,20 +151,14 @@ export function MarketDetailHeader({
           pendingWidth={48}
           value={openInterest === null ? UNAVAILABLE : formatCompactUsd(openInterest)}
         />
-        {/* `pricePending`, not `pending` — the only figure here gated on staleness, because it is the
-            only one that is a price. `priceStale` covers the whole snapshot, since the venue stamps
-            mark, oracle, volume, open interest and funding with one timestamp, so when it trips this
-            value is exactly as old as the headline. It rendered anyway before, which left a stale
-            snapshot showing a minute-old oracle price beside a skeleton where the mark had been — the
-            one case where the gap between the two could widen with nothing on screen saying so.
-            The aggregates keep the looser gate deliberately: a 24-hour volume forty seconds old is
-            still the answer, a price that old is not. */}
-        <Figure
-          label="ORACLE"
-          pending={pricePending}
-          pendingWidth={64}
-          value={snapshot === null ? UNAVAILABLE : formatCompactTokenPrice(snapshot.oraclePrice)}
-        />
+        {/* The oracle price used to sit here and no longer does. It is a real, different quantity — the
+            index Pacifica aggregates from spot venues, against which funding and liquidation are
+            computed — but two prices a few cents apart in one header read as one number disagreeing
+            with itself, and the one a reader acts on is the mark. The funding rate it drives is still
+            two cells over, and the full-screen chart's metric strip still carries it for anyone who
+            wants the basis.
+            Nothing about the data changed: both values always came from the same array element of the
+            same message, stamped with one timestamp. There was never a sync to fix. */}
         <Figure
           label="FUNDING"
           pending={pending}
