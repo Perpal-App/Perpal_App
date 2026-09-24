@@ -1,7 +1,6 @@
-import { useCallback, useState } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import { SkeletonText } from '@/components/feedback/Skeleton';
 import { FadeInView } from '@/components/motion/FadeInView';
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import type { AppConfig } from '@/config/appConfig';
@@ -10,21 +9,15 @@ import { PacificaDepthPanel } from '@/features/trade/components/PacificaDepthPan
 import { PacificaTradesPanel } from '@/features/trade/components/PacificaMarketTrades';
 import { PacificaFundingPanel } from '@/features/trade/components/PacificaFundingPanel';
 import { PacificaLiquidationsPanel } from '@/features/trade/components/PacificaLiquidationsPanel';
-import { PacificaOrderTicket } from '@/features/trade/components/PacificaOrderTicket';
 import { PacificaTradeAccountPanel } from '@/features/trade/components/PacificaTradeAccountPanel';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
 import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
-import { colors, radii, spacing } from '@/theme/tokens';
+import { spacing } from '@/theme/tokens';
 
-type WorkspaceView = 'trade' | 'chart';
 type MarketPanel = 'orderbook' | 'trades' | 'liquidations' | 'funding' | 'info';
 
-const VIEWS: readonly UnderlineTabOption<WorkspaceView>[] = [
-  { id: 'trade', label: 'Trade' },
-  { id: 'chart', label: 'Chart' },
-];
 const PANELS: readonly UnderlineTabOption<MarketPanel>[] = [
   { id: 'orderbook', label: 'Order book' },
   { id: 'trades', label: 'Trades' },
@@ -33,103 +26,70 @@ const PANELS: readonly UnderlineTabOption<MarketPanel>[] = [
   { id: 'info', label: 'Market info' },
 ];
 
+/**
+ * One market's workspace: the chart, the way into an order, the account, and the market's own panels —
+ * in that order, in one column.
+ *
+ * It was two columns behind a `Trade | Chart` tab pair, and both of those are gone.
+ *
+ * The columns were a 50/50 split of the order ticket against the order book, nominally responsive but
+ * not actually: the breakpoint was `width >= 340`, which every phone the app supports satisfies, so the
+ * split was permanent and each half got about 150pt on a 360pt screen. A numeric form and a price
+ * ladder are the two things on this screen that least want half a phone — the ticket's fields were
+ * narrower than the numbers in them, and the book ran at nine levels with its size column dropped.
+ *
+ * The tabs were worse, because the chart was the thing they hid. A market screen's subject is its
+ * price, and the chart opened on the second tab while the first showed a form. It is now the first
+ * thing on the screen and always mounted, so no interaction is needed to see the market.
+ *
+ * Order entry moved into a sheet raised by the Buy and Sell buttons, which the screen pins below this
+ * workspace rather than placing in it — same card, grabber and drag as the deposit and withdraw flows.
+ * That is what let both columns go: the ticket no longer needs page width, so the book gets all of it
+ * and runs at its full twelve levels in the panel strip below, alongside trades, liquidations, funding
+ * and the instrument's facts.
+ *
+ * The buttons deliberately are not mounted here. They belong to the screen, not to the scrolling
+ * content, so they stay reachable at any scroll position — see `MarketDetailScreen`'s footer.
+ *
+ * What did not move: the order lifecycle. The buttons only choose a side and open the ticket. Every
+ * order still passes through the same prepare, the same projected-risk panel, the same explicit confirm
+ * dialog and the same re-verification immediately before signing.
+ */
 export function PacificaTradingWorkspace(props: {
   readonly config: AppConfig;
   readonly market: PacificaMarket;
   readonly onExpandChart: () => void;
   readonly snapshot: PacificaMarketSnapshot | null;
 }) {
-  const [view, setView] = useState<WorkspaceView>('trade');
   const [panel, setPanel] = useState<MarketPanel>('orderbook');
-  const [chartMounted, setChartMounted] = useState(false);
   const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
-  // React Native reports logical points, not screenshot pixels. A phone that is
-  // 700+ physical pixels wide is normally 360-430 points, so 700 could never
-  // activate the requested split layout in portrait.
-  const wide = useWindowDimensions().width >= 340;
   const apiOrigin = props.config.perps.pacificaApiOrigin;
   const wsOrigin = props.config.perps.pacificaWsOrigin;
-  const history = usePacificaMarketHistory(
-    apiOrigin,
-    props.market.venueRef,
-    timeframe,
-    chartMounted,
-  );
-  const selectView = useCallback((next: WorkspaceView) => {
-    if (next === 'chart') setChartMounted(true);
-    setView(next);
-  }, []);
+  // Enabled unconditionally, where this used to wait for the chart's tab to be opened. The chart is the
+  // first thing on the screen now, so its candles are first-screen data rather than a prefetch.
+  const history = usePacificaMarketHistory(apiOrigin, props.market.venueRef, timeframe, true);
 
   return (
     <View style={styles.workspace}>
-      <UnderlineTabs onSelect={selectView} options={VIEWS} selectedId={view} />
+      <TradingViewMarketChart
+        candles={history.candles}
+        onExpand={props.onExpandChart}
+        onTimeframeChange={setTimeframe}
+        status={history.status}
+        symbol={`${props.market.baseAsset}/USD`}
+        timeframe={timeframe}
+      />
 
-      {view === 'trade' ? (
-        <FadeInView style={styles.tradeView}>
-          <View style={[styles.tradeGrid, wide && styles.tradeGridWide]}>
-            <View style={styles.tradePanel}>
-              {props.snapshot !== null && !props.snapshot.priceStale ? (
-                <PacificaOrderTicket
-                  apiOrigin={apiOrigin}
-                  centralState={props.config.perps.pacificaCentralState}
-                  market={props.market}
-                  programId={props.config.perps.pacificaProgramId}
-                  rpcUrl={props.config.api.rpcUrl}
-                  snapshot={props.snapshot}
-                  usdcMint={props.config.perps.usdcMint}
-                  vault={props.config.perps.pacificaVault}
-                />
-              ) : (
-                <View
-                  accessibilityLabel="Refreshing Pacifica mark price"
-                  accessibilityRole="progressbar"
-                  style={styles.waiting}
-                >
-                  <SkeletonText role="heading" width={104} />
-                  <SkeletonText role="bodyCompact" width="100%" />
-                  <SkeletonText role="bodyCompact" width="82%" />
-                </View>
-              )}
-            </View>
-            <View style={styles.bookPanel}>
-              <PacificaDepthPanel
-                apiOrigin={apiOrigin}
-                symbol={props.market.venueRef}
-                tickSize={props.market.tickSize}
-                variant="split"
-                wsOrigin={wsOrigin}
-              />
-            </View>
-          </View>
-          <PacificaTradeAccountPanel apiOrigin={apiOrigin} />
-        </FadeInView>
-      ) : null}
+      <PacificaTradeAccountPanel apiOrigin={apiOrigin} />
 
-      {chartMounted ? (
-        <View style={view === 'chart' ? styles.chartVisible : styles.chartHidden}>
-          <TradingViewMarketChart
-            candles={history.candles}
-            onExpand={props.onExpandChart}
-            onTimeframeChange={setTimeframe}
-            status={history.status}
-            symbol={`${props.market.baseAsset}/USD`}
-            timeframe={timeframe}
-          />
-        </View>
-      ) : null}
-
-      {view === 'chart' ? (
-        <>
-          <UnderlineTabs onSelect={setPanel} options={PANELS} selectedId={panel} />
-          <MarketPanelView
-            apiOrigin={apiOrigin}
-            market={props.market}
-            panel={panel}
-            snapshot={props.snapshot}
-            wsOrigin={wsOrigin}
-          />
-        </>
-      ) : null}
+      <UnderlineTabs onSelect={setPanel} options={PANELS} selectedId={panel} />
+      <MarketPanelView
+        apiOrigin={apiOrigin}
+        market={props.market}
+        panel={panel}
+        snapshot={props.snapshot}
+        wsOrigin={wsOrigin}
+      />
     </View>
   );
 }
@@ -144,6 +104,8 @@ function MarketPanelView(props: {
   return (
     <FadeInView>
       {props.panel === 'orderbook' ? (
+        // No `variant`, so the default full density: twelve levels with the size column, against the
+        // nine and no size column the half-width split could carry.
         <PacificaDepthPanel apiOrigin={props.apiOrigin} symbol={props.market.venueRef} tickSize={props.market.tickSize} wsOrigin={props.wsOrigin} />
       ) : null}
       {props.panel === 'trades' ? (
@@ -162,19 +124,4 @@ function MarketPanelView(props: {
 
 const styles = StyleSheet.create({
   workspace: { width: '100%', minWidth: 0, gap: spacing.sm },
-  tradeView: { width: '100%', minWidth: 0, gap: spacing.sm },
-  tradeGrid: { width: '100%', minWidth: 0, gap: spacing.xs },
-  // `stretch`, so both panels take the height of the taller one and their borders start and
-  // end on the same two lines. Under `flex-start` each card was only as tall as its own
-  // contents, which left the shorter of the two ending mid-column with a gap beneath it —
-  // and made the book's level count a layout dependency of the ticket's row count.
-  tradeGridWide: { flexDirection: 'row', alignItems: 'stretch' },
-  tradePanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', paddingHorizontal: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
-  // No padding of its own: the book's rows, toolbar and footnote share one gutter that
-  // the panel inside sets, so the depth bars end on the same line as the numbers above
-  // them instead of on a second, narrower inset.
-  bookPanel: { flex: 1, flexBasis: 0, minWidth: 0, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
-  waiting: { minHeight: 180, justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
-  chartVisible: { minWidth: 0 },
-  chartHidden: { display: 'none' },
 });

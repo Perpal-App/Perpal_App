@@ -33,6 +33,18 @@ type AppScreenProps = {
    * what keeps it clear of the home indicator without reading an inset.
    */
   footer?: ReactNode;
+  /**
+   * Floated over the bottom of the scroll area rather than placed under it.
+   *
+   * The difference from `footer` is what happens behind it: a footer ends the scroll, an overlay lets
+   * the content run beneath. Use it for chrome that needs the page visible through it — the same
+   * arrangement the floating tab bar uses — and give the screen's content bottom padding equal to the
+   * overlay's height, because an overlay cannot reserve the space itself.
+   *
+   * `box-none`, so the gaps around whatever is inside stay scrollable instead of masking a band of the
+   * page behind an invisible wall.
+   */
+  overlay?: ReactNode;
 };
 
 /**
@@ -45,6 +57,7 @@ export function AppScreen({
   background,
   contentContainerStyle,
   footer,
+  overlay,
   scroll = true,
 }: AppScreenProps) {
   const onScroll = useMinimizeOnScroll();
@@ -87,6 +100,12 @@ export function AppScreen({
         )}
 
         {footer}
+
+        {overlay ? (
+          <View pointerEvents="box-none" style={styles.overlay}>
+            {overlay}
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -105,5 +124,13 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
+  },
+  // Inside the keyboard avoider rather than the safe area, so the overlay rises with the keypad the
+  // same way the scroll area shrinks for it. Pinned to the bottom and left to size itself vertically.
+  overlay: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    left: 0,
   },
 });

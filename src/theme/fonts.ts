@@ -117,6 +117,24 @@ export const typography = {
     letterSpacing: 0,
   },
   /**
+   * The label on a screen's primary action, where that action is the reason the screen exists.
+   *
+   * A step above `label`, which is the role for a control sitting beside data. A pinned Buy and Sell
+   * pair is not beside anything — it is the thing being reached for — and at 14 it read as another
+   * row of the page rather than as the end of it.
+   *
+   * 16 rather than `heading`'s 18, and the difference is measured: at 18 the wider of the two labels
+   * comes to 99pt, which at the 1.2x cap buttons allow is 119pt against the 106pt a 320pt screen
+   * leaves each of a pair. It would ellipsise the word "Short" on the narrowest device the app
+   * supports. At 16 the same worst case is 106pt and fits.
+   */
+  action: {
+    fontFamily: fonts.semiBold,
+    fontSize: 16,
+    lineHeight: 24,
+    letterSpacing: 0,
+  },
+  /**
    * All-caps column headers and metric labels. Caps have no descenders, so this
    * is the one role that can lead slightly under 1.5x without cropping.
    */

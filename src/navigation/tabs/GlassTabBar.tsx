@@ -14,7 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ProgressiveBlur } from '@/navigation/tabs/ProgressiveBlur';
+import { ProgressiveBlur } from '@/components/ui/ProgressiveBlur';
 import {
   BAR_MARGIN,
   BarContext,

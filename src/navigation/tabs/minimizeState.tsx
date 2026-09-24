@@ -26,6 +26,15 @@ export type MinimizeState = {
   readonly progress: SharedValue<number>;
   /** Last requested target, so writers can avoid restarting the spring. */
   readonly target: SharedValue<number>;
+  /**
+   * True while the page is under a finger or still carrying momentum.
+   *
+   * Published for chrome that floats over the scroller and takes touches. A control there cannot be
+   * cancelled by a scroll the way a control inside the scroller is — the touch never reaches the
+   * scroll view — so the common gesture of stabbing the screen to stop a fling lands on it as a
+   * deliberate tap. Anything consequential up there should decline while this is set.
+   */
+  readonly moving: SharedValue<boolean>;
 };
 
 const MinimizeContext = createContext<MinimizeState | null>(null);
@@ -33,7 +42,8 @@ const MinimizeContext = createContext<MinimizeState | null>(null);
 export function TabBarMinimizeProvider({ children }: PropsWithChildren) {
   const progress = useSharedValue(0);
   const target = useSharedValue(0);
-  const state = useMemo(() => ({ progress, target }), [progress, target]);
+  const moving = useSharedValue(false);
+  const state = useMemo(() => ({ moving, progress, target }), [moving, progress, target]);
 
   return <MinimizeContext.Provider value={state}>{children}</MinimizeContext.Provider>;
 }
@@ -49,7 +59,8 @@ export function useMinimizeState(): MinimizeState {
   const shared = useContext(MinimizeContext);
   const progress = useSharedValue(0);
   const target = useSharedValue(0);
-  const local = useMemo(() => ({ progress, target }), [progress, target]);
+  const moving = useSharedValue(false);
+  const local = useMemo(() => ({ moving, progress, target }), [moving, progress, target]);
 
   return shared ?? local;
 }
@@ -57,6 +68,16 @@ export function useMinimizeState(): MinimizeState {
 /** The animated 0..1 progress that styles interpolate on. */
 export function useTabBarMinimized(): SharedValue<number> {
   return useMinimizeState().progress;
+}
+
+/**
+ * Whether the current page is being scrolled, for chrome floating over it.
+ *
+ * Read `.value` at the moment of a press rather than reacting to it: this is a question asked once, by
+ * a handler, on the thread the handler runs on — not something to re-render for.
+ */
+export function usePageMoving(): SharedValue<boolean> {
+  return useMinimizeState().moving;
 }
 
 /**
@@ -89,19 +110,29 @@ export function useMinimizeOnScroll() {
       const y = Math.min(Math.max(event.contentOffset.y, 0), maxY);
       const dy = y - previousY.value;
       previousY.set(y);
+      state.moving.set(true);
 
       if (y < TOP_ZONE) setMinimized(state, 0);
       else if (dy > INTENT) setMinimized(state, 1);
       else if (dy < -INTENT) setMinimized(state, 0);
+    },
+    onBeginDrag: () => {
+      // A finger down on the page counts as moving before a single pixel has scrolled, so a control
+      // floating over it declines from the moment the reader is clearly addressing the page.
+      state.moving.set(true);
     },
     // The bar is minimized only while the page is actually moving. Both handlers
     // are needed to cover the ways a scroll ends: a fling settles at momentum end,
     // while a slow drag released with no speed left never starts momentum at all.
     // Expanding on lift-off regardless would fight the fling that follows it.
     onEndDrag: (event) => {
-      if (Math.abs(event.velocity?.y ?? 0) < REST_VELOCITY) setMinimized(state, 0);
+      if (Math.abs(event.velocity?.y ?? 0) < REST_VELOCITY) {
+        state.moving.set(false);
+        setMinimized(state, 0);
+      }
     },
     onMomentumEnd: () => {
+      state.moving.set(false);
       setMinimized(state, 0);
     },
   });

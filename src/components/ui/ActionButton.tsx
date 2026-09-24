@@ -56,6 +56,7 @@ export function ActionButton({
   onPress,
   radius,
   selected,
+  size = 'regular',
   style,
   tone = 'accent',
 }: {
@@ -79,11 +80,17 @@ export function ActionButton({
    * sits inside a `radii.panel` shell, and at the default its buttons read as hard against it.
    */
   readonly radius?: number;
+  /**
+   * `large` for a screen's primary action — a pinned pair that is the point of the screen rather than
+   * a control beside its data. Taller, with the `action` type role and a wider fill inset.
+   */
+  readonly size?: 'regular' | 'large';
   readonly style?: StyleProp<ViewStyle>;
   readonly tone?: ActionButtonTone;
 }) {
   const material = TONES[tone];
   const unavailable = disabled || loading;
+  const large = size === 'large';
 
   return (
     <PressableScale
@@ -100,6 +107,7 @@ export function ActionButton({
       pressedScale={0.98}
       style={[
         styles.button,
+        large && styles.buttonLarge,
         { borderColor: material.edge },
         radius === undefined ? null : { borderRadius: radius },
         unavailable && styles.disabled,
@@ -111,7 +119,7 @@ export function ActionButton({
         end={{ x: 0.5, y: 1 }}
         locations={material.ramp.locations}
         start={{ x: 0.5, y: 0 }}
-        style={styles.fill}
+        style={[styles.fill, large && styles.fillLarge]}
       >
         {loading ? (
           <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -124,7 +132,7 @@ export function ActionButton({
           <Text
             maxFontSizeMultiplier={MAX_TEXT_SCALE}
             numberOfLines={1}
-            style={[styles.label, { color: material.label }]}
+            style={[large ? styles.labelLarge : styles.label, { color: material.label }]}
           >
             {label}
           </Text>
@@ -157,6 +165,10 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     borderCurve: 'continuous',
   },
+  // 52 against the regular 42. Still a minimum, so the same growth-not-clipping rule applies: the
+  // `action` label's line plus the fill's padding comes to 40, which leaves the height to the minimum
+  // at normal scale and to the label past it.
+  buttonLarge: { minHeight: 52 },
   fill: {
     flex: 1,
     alignItems: 'center',
@@ -164,6 +176,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
   },
+  fillLarge: { paddingHorizontal: spacing.md },
   label: { ...typography.label, textAlign: 'center' },
+  labelLarge: { ...typography.action, textAlign: 'center' },
   disabled: { opacity: 0.4 },
 });

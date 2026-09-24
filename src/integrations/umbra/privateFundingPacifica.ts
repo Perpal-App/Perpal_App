@@ -7,6 +7,10 @@ import {
   type PacificaDepositPlan,
 } from '@/integrations/perps/pacifica/pacificaDeposit';
 import {
+  removePendingTradeAction,
+  writePendingTradeAction,
+} from '@/integrations/perps/tradeActionStorage';
+import {
   readSubmittedTransactionStatus,
   storedLegacyTransactionIsCurrent,
   submitSignedLegacyTransaction,
@@ -22,6 +26,48 @@ type ProviderDepositCheckpoint = Pick<
   | 'providerDepositSignature'
   | 'providerDepositSignedTransactionBase64'
 >;
+
+/**
+ * Announces an in-flight Pacifica deposit where the rest of the app looks for one.
+ *
+ * This flow keeps its own checkpoint inside the Umbra funding record, which it has to: the record is
+ * keyed by the public wallet and the phase machine needs the deposit's state co-located with the leg
+ * that produced it. But the order ticket reconciles a different store — `PendingTradeAction`, keyed by
+ * the trading wallet and the provider — and so it could not see a deposit this flow had already signed.
+ *
+ * That gap was a double-deposit window, and a narrow one rather than a theoretical one. While a deposit
+ * from here is signed but not yet confirmed, Pacifica still reports zero available, so the ticket
+ * computes the full shortfall again and builds a second deposit for the same collateral. Writing the
+ * shared record closes it: the ticket's `reconcile` returns `pending` and its own preparation refuses
+ * with "A previous collateral transaction is still confirming."
+ *
+ * Both records describe the same transaction and are written and cleared together. This is not the
+ * single store the two paths should eventually share — it is the safety property that store was for.
+ */
+async function announceDeposit(
+  owner: string,
+  plan: PacificaDepositPlan,
+  signature: string,
+  signedTransactionBase64: string,
+): Promise<void> {
+  await writePendingTradeAction({
+    amountBaseUnits: plan.amountBaseUnits.toString(),
+    expiresAtMs: plan.expiresAtMs,
+    idempotencyKey: plan.idempotencyKey,
+    kind: 'collateral',
+    owner,
+    provider: 'pacifica',
+    signature,
+    signedTransactionBase64,
+    updatedAtMs: Date.now(),
+    version: 1,
+  });
+}
+
+/** Clears the shared record. Safe to call when none was written. */
+function withdrawAnnouncement(owner: string): Promise<void> {
+  return removePendingTradeAction(owner, 'pacifica');
+}
 
 export async function fundPacificaFromPrivateWallet(input: {
   readonly config: AppConfig;
@@ -75,20 +121,30 @@ export async function fundPacificaFromPrivateWallet(input: {
   }
 
   try {
+    const owner = input.record.tradingWalletAddress;
     const result = await submitPacificaDeposit({
       plan,
       rpcUrl: input.config.api.rpcUrl,
       signer: input.signer,
-      onSigned: (signature, signedTransactionBase64) => input.onCheckpoint({
-        providerDepositExpiresAtMs: plan.expiresAtMs,
-        providerDepositIdempotencyKey: plan.idempotencyKey,
-        providerDepositSignature: signature,
-        providerDepositSignedTransactionBase64: signedTransactionBase64,
-      }),
-      onSubmissionRejected: () => input.onCheckpoint(emptyCheckpoint()),
+      onSigned: async (signature, signedTransactionBase64) => {
+        await input.onCheckpoint({
+          providerDepositExpiresAtMs: plan.expiresAtMs,
+          providerDepositIdempotencyKey: plan.idempotencyKey,
+          providerDepositSignature: signature,
+          providerDepositSignedTransactionBase64: signedTransactionBase64,
+        });
+        await announceDeposit(owner, plan, signature, signedTransactionBase64);
+      },
+      onSubmissionRejected: async () => {
+        await input.onCheckpoint(emptyCheckpoint());
+        await withdrawAnnouncement(owner);
+      },
     });
 
-    if (result.status === 'confirmed') return result.signature;
+    if (result.status === 'confirmed') {
+      await withdrawAnnouncement(owner);
+      return result.signature;
+    }
     throw pendingDeposit();
   } catch (cause) {
     if (cause instanceof PrivateFundingError) throw cause;
@@ -114,14 +170,19 @@ async function reconcileSignedDeposit(input: {
   const signature = input.record.providerDepositSignature;
   if (signature === null) return null;
 
+  const owner = input.record.tradingWalletAddress;
   const status = await readSubmittedTransactionStatus({
     rpcUrl: input.config.api.rpcUrl,
     signature,
     signer: input.signer,
   });
-  if (status === 'confirmed') return signature;
+  if (status === 'confirmed') {
+    await withdrawAnnouncement(owner);
+    return signature;
+  }
   if (status === 'failed') {
     await input.onCheckpoint(emptyCheckpoint());
+    await withdrawAnnouncement(owner);
     throw new PrivateFundingError(
       'The Pacifica deposit failed on-chain. It is safe to prepare it again.',
       'pacifica_deposit_transaction_failed',
@@ -142,6 +203,7 @@ async function reconcileSignedDeposit(input: {
   });
   if (!current) {
     await input.onCheckpoint(emptyCheckpoint());
+    await withdrawAnnouncement(owner);
     return null;
   }
 
@@ -149,12 +211,15 @@ async function reconcileSignedDeposit(input: {
     const result = await submitSignedLegacyTransaction({
       expectedSignature: signature,
       idempotencyKey,
-      owner: input.record.tradingWalletAddress,
+      owner,
       rpcUrl: input.config.api.rpcUrl,
       signedTransactionBase64: transaction,
       signer: input.signer,
     });
-    if (result.status === 'confirmed') return result.signature;
+    if (result.status === 'confirmed') {
+      await withdrawAnnouncement(owner);
+      return result.signature;
+    }
     throw pendingDeposit();
   } catch (cause) {
     if (cause instanceof PrivateFundingError) throw cause;

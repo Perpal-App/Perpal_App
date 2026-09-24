@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen } from '@/components/layout/AppScreen';
@@ -50,6 +51,20 @@ export function PacificaPortfolioContent({
   const positions = snapshot?.positions ?? [];
   const orders = snapshot?.orders ?? [];
   const [fundsRequest, setFundsRequest] = useState<FundsRequest | null>(null);
+  // An intent handed over by another screen. The order ticket sends `funds=deposit` when a trade cannot
+  // be collateralised, because the funding flow takes minutes and belongs here rather than inside a
+  // ticket. Consumed once per arrival: the ref is what stops a param that outlives the navigation from
+  // reopening the sheet every time this tab is focused.
+  const { funds } = useLocalSearchParams<{ funds?: string }>();
+  const consumedFunds = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (funds === undefined || consumedFunds.current === funds) return;
+
+    consumedFunds.current = funds;
+    if (funds === 'deposit') setFundsRequest({ mode: 'deposit' });
+  }, [funds]);
+
   const hasPositions = positions.length > 0;
   const hasOrders = orders.length > 0;
 

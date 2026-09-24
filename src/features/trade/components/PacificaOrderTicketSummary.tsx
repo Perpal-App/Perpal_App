@@ -41,7 +41,48 @@ export function PacificaBalanceState(props: {
   );
 }
 
+/**
+ * What the ticket is, and — when it is a deposit form — why.
+ *
+ * The heading alone used to be the entire explanation. Tapping `Buy / Long` on a market opened a sheet
+ * titled for that side whose whole body was a form headed `Deposit`, with nothing anywhere saying what
+ * the deposit was for. The reasonable conclusion from that screen is that the deposit is a bug, because
+ * the account is keyed to a wallet that already holds USDC.
+ *
+ * It is not a bug, and the line says the part that was missing: the venue custodies margin itself.
+ * Signing for a Pacifica account and having collateral credited to it are two different things, and the
+ * wallet balance shown two rows below as `Private USDC` is the money that has not been credited yet.
+ */
+export function PacificaTicketHeading(props: { readonly fundingOnly: boolean }) {
+  return (
+    <>
+      <Text accessibilityRole="header" style={styles.title}>
+        {props.fundingOnly ? 'Deposit collateral' : 'Order'}
+      </Text>
+      {props.fundingOnly ? (
+        <Text style={styles.note}>
+          Pacifica holds margin in its own vault, so trading needs a credited deposit first.
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Why a deposit cannot be completed, and the one action that resolves it.
+ *
+ * These two figures used to be the whole of it, and they were a dead end: the deposit form stays on
+ * screen offering an amount the private wallet cannot cover, the rejection is deliberately quiet — no
+ * toast, no log — and nothing anywhere says that the money has to arrive through the Umbra funding flow
+ * on another screen first. A reader could tap the button as many times as they liked and get the same
+ * two rows back.
+ *
+ * `onAddFunds` is what makes it a route rather than a wall. It is optional because the ticket is also
+ * mounted where there is nowhere to send them, and a button that goes nowhere is worse than none.
+ */
 export function PacificaFundingRequirementRows(props: {
+  /** Opens the private funding flow. Omit where the caller cannot present it. */
+  readonly onAddFunds?: (() => void) | undefined;
   readonly requirement: TradeFundingRequirement | null;
 }) {
   if (props.requirement === null) return null;
@@ -59,6 +100,19 @@ export function PacificaFundingRequirementRows(props: {
         singleLine
         value={usdcText(props.requirement.usdcAvailableBaseUnits)}
       />
+      {props.onAddFunds === undefined ? null : (
+        <>
+          <Text style={styles.note}>
+            The deposit is paid from your private wallet, which is funded through Umbra.
+          </Text>
+          <ActionButton
+            accessibilityHint="Opens the private funding flow on the portfolio screen"
+            label="Add private funds"
+            onPress={props.onAddFunds}
+            tone="accent"
+          />
+        </>
+      )}
     </View>
   );
 }

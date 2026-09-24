@@ -8,6 +8,8 @@ export const pacificaOrderTicketStyles = StyleSheet.create({
   loading: { minHeight: 180, justifyContent: 'center', gap: spacing.sm },
   message: { ...typography.bodyCompact, color: colors.textSecondary },
   controls: { flexDirection: 'row', gap: spacing.xs },
+  /** One line under a heading, for a prerequisite the reader cannot be expected to already know. */
+  note: { ...typography.caption, color: colors.textMuted },
   summary: { gap: spacing.xxs, paddingTop: spacing.xs },
   riskRows: {
     gap: spacing.xxs,

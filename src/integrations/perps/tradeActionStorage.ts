@@ -11,6 +11,15 @@ export type PendingTradeAction = {
   readonly amountBaseUnits: string;
   readonly expiresAtMs: number;
   readonly idempotencyKey: string;
+  /**
+   * `setup` is a migration reader and nothing writes it any more — it belonged to the removed Velocity
+   * provider-setup step. It stays in the union and in `valid` below on purpose: a device that abandoned
+   * that step still has such a record, and dropping the label would make `readPendingTradeAction` throw
+   * "Stored trade preparation state is invalid." on a record that can otherwise be read and cleared.
+   *
+   * `conversion` is live, despite reading like residue of the same era — `walletStablecoinSwap` writes
+   * it and `tradeActionRecovery` treats it as one of the two versioned kinds.
+   */
   readonly kind: 'conversion' | 'setup' | 'collateral' | 'trade' | 'close' | 'withdraw';
   readonly owner: string;
   readonly provider: TradeActionScope;
