@@ -3,14 +3,19 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 
 import {
-  ChartToolIcon,
-  type ChartToolName,
-} from '@/features/trade/components/ChartToolIcon';
+  CHART_ICON_SIZE,
+  IconButton,
+} from '@/features/trade/components/ChartToolbarControls';
 import {
   CHART_TOOL_GROUPS,
   chartToolGroupId,
   type ChartTool,
 } from '@/features/trade/components/chartTools';
+import {
+  MarketChartOptions,
+  type ChartStyle,
+} from '@/features/trade/components/MarketChartOptions';
+import { MarketChartTimeframes } from '@/features/trade/components/MarketChartTimeframes';
 import { TRADING_VIEW_CHART_HTML } from '@/features/trade/generated/tradingViewChartHtml';
 import type { MarketHistoryStatus } from '@/features/trade/hooks/usePacificaMarketHistory';
 import {
@@ -20,10 +25,24 @@ import {
 } from '@/integrations/perps/pacifica/pacificaHistory';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 
-type ChartStyle = 'candles' | 'line';
 const CHART_SOURCE = { html: TRADING_VIEW_CHART_HTML };
 const CHART_ORIGIN_WHITELIST = ['*'];
 
+/**
+ * The market chart: the interval strip, the canvas with its drawing rail, and the series and view
+ * controls — in that order, in one column.
+ *
+ * The strip and the controls used to be one horizontal `ScrollView` above the canvas, and it ran to
+ * 632pt of content on a 336pt column. Everything past `30m` was off the right edge with no indication
+ * it was there, which put the daily and weekly intervals and every one of the series controls out of
+ * reach in practice. They are now two rows that each fit the column they are in: see
+ * `MarketChartTimeframes` for how the strip decides what fits, and `MarketChartOptions` for why the
+ * row under the canvas wraps rather than scrolls.
+ *
+ * What stayed here is the part that owns the document: the series message, the `ready` handshake, the
+ * drawing rail's tool state, and the failure path. The two control rows hold no chart state — they
+ * render what this passes down and call back — so the canvas never reloads because a control moved.
+ */
 function TradingViewMarketChartComponent({
   candles,
   fill = false,
@@ -164,38 +183,7 @@ function TradingViewMarketChartComponent({
 
   return (
     <View style={[styles.shell, fill && styles.shellFill]}>
-      <ScrollView
-        accessibilityRole="tablist"
-        contentContainerStyle={styles.toolbar}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-      >
-        {MARKET_TIMEFRAMES.map((item) => (
-          <ToolButton
-            key={item.id}
-            label={item.label}
-            onPress={() => selectTimeframe(item.id)}
-            selected={item.id === timeframe}
-          />
-        ))}
-        <View style={styles.divider} />
-        <ToolButton
-          label={chartStyle === 'candles' ? 'Candles' : 'Line'}
-          onPress={() => setChartStyle((current) => current === 'candles' ? 'line' : 'candles')}
-          selected
-        />
-        <ToolButton label="SMA 20" onPress={() => setShowSma((value) => !value)} selected={showSma} />
-        <ToolButton label="EMA 20" onPress={() => setShowEma((value) => !value)} selected={showEma} />
-        <View style={styles.divider} />
-        <IconButton
-          icon="scale"
-          label="Reset zoom and price scale"
-          onPress={() => send({ type: 'reset_scale' })}
-        />
-        {onExpand ? (
-          <IconButton icon="expand" label="Full-screen chart" onPress={onExpand} />
-        ) : null}
-      </ScrollView>
+      <MarketChartTimeframes onSelect={selectTimeframe} selected={timeframe} />
 
       <View style={[styles.workspace, fill && styles.workspaceFill]}>
         <ScrollView
@@ -318,95 +306,25 @@ function TradingViewMarketChartComponent({
         </View>
       </View>
 
+      <MarketChartOptions
+        chartStyle={chartStyle}
+        onExpand={onExpand}
+        onResetScale={() => send({ type: 'reset_scale' })}
+        onToggleEma={() => setShowEma((value) => !value)}
+        onToggleSma={() => setShowSma((value) => !value)}
+        onToggleStyle={() => setChartStyle((current) => current === 'candles' ? 'line' : 'candles')}
+        showEma={showEma}
+        showSma={showSma}
+      />
     </View>
   );
 }
 
 export const TradingViewMarketChart = memo(TradingViewMarketChartComponent);
 
-function ToolButton({
-  label,
-  onPress,
-  selected = false,
-}: {
-  readonly label: string;
-  readonly onPress: () => void;
-  readonly selected?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.tool,
-        selected && styles.toolSelected,
-        pressed && styles.pressed,
-      ]}
-    >
-      <Text style={[styles.toolText, selected && styles.toolTextSelected]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function IconButton({
-  icon,
-  label,
-  onPress,
-  selected = false,
-}: {
-  readonly icon: ChartToolName;
-  readonly label: string;
-  readonly onPress: () => void;
-  readonly selected?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.iconTool,
-        selected && styles.toolSelected,
-        pressed && styles.pressed,
-      ]}
-    >
-      <ChartToolIcon color={selected ? colors.accentSoft : colors.textMuted} name={icon} />
-    </Pressable>
-  );
-}
-
-const RAIL_WIDTH = 40;
-
 const styles = StyleSheet.create({
   shell: { gap: spacing.xs },
   shellFill: { flex: 1 },
-  toolbar: { minHeight: layout.minTouchTarget, alignItems: 'center', gap: spacing.xxs },
-  divider: {
-    width: StyleSheet.hairlineWidth,
-    height: 28,
-    marginHorizontal: spacing.xxs,
-    backgroundColor: colors.borderStrong,
-  },
-  tool: {
-    minWidth: 44,
-    minHeight: 40,
-    paddingHorizontal: spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-  },
-  iconTool: {
-    width: RAIL_WIDTH,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-  },
-  toolSelected: { backgroundColor: colors.surfaceElevated },
-  toolText: { ...typography.caption, color: colors.textMuted },
-  toolTextSelected: { color: colors.textPrimary },
   // Rail and chart share one bordered frame, so the tools read as part of the
   // chart surface rather than as a floating strip beside it.
   workspace: {
@@ -422,7 +340,7 @@ const styles = StyleSheet.create({
   railScroll: {
     flexGrow: 0,
     flexShrink: 0,
-    width: RAIL_WIDTH,
+    width: CHART_ICON_SIZE,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: colors.border,
     backgroundColor: colors.surface,
@@ -434,7 +352,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 2,
     top: spacing.xxs,
-    left: RAIL_WIDTH + spacing.xxs,
+    left: CHART_ICON_SIZE + spacing.xxs,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderStrong,
