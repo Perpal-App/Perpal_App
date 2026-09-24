@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { PublicKey } from '@solana/web3.js';
 import { getSupportedMints } from '@umbra-privacy/sdk/constants';
 import { NATIVE_MINT } from '@solana/spl-token';
@@ -13,6 +13,8 @@ import {
   withdrawOptionStyle,
 } from '@/features/portfolio/components/WithdrawChoice';
 import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
+import { WithdrawReviewCard } from '@/features/portfolio/components/WithdrawReviewCard';
+import { shortAddress } from '@/features/portfolio/components/directWithdrawPanelSupport';
 import {
   WITHDRAW_RADIUS,
   withdrawSheetStyles,
@@ -51,6 +53,12 @@ export function PrivateWithdrawPanel({
   const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>('privy');
   const [externalAddress, setExternalAddress] = useState('');
   const [chosenMint, setChosenMint] = useState('');
+  /** The validated request awaiting the reader's slide. Non-null swaps the form for the review. */
+  const [review, setReview] = useState<{
+    readonly asset: PrivateExitAsset;
+    readonly baseUnits: bigint;
+    readonly destination: string;
+  } | null>(null);
   const configured = useMemo(() => {
     const config = readAppConfig();
     return config.ok
@@ -81,6 +89,14 @@ export function PrivateWithdrawPanel({
   // Only a USDC withdrawal pays the venue's withdrawal fee; other assets are already private.
   const collectsFromVenue = symbol === 'USDC';
 
+  /**
+   * Validates the form and hands the review the request it will confirm.
+   *
+   * This used to raise an `Alert` whose body was five sentences joined into one paragraph — the amount,
+   * the destination, the venue fee, the relayer fees and the rent warning, all as prose, over the top of
+   * the form that had just been filled in. The facts are the same; they are now rows the reader can scan
+   * and the destination is selectable, so an address can be checked against wherever it came from.
+   */
   const confirm = () => {
     if (asset === null) {
       showAppToast({
@@ -95,28 +111,11 @@ export function PrivateWithdrawPanel({
         ? privateExit.mainWalletAddress
         : externalAddress.trim();
       if (parsed <= 0n || destination === null) throw new Error('invalid input');
-      const validated = new PublicKey(destination).toBase58();
-      Alert.alert(
-        nativeSol ? 'Withdraw SOL privately' : 'Withdraw privately',
-        [
-          nativeSol
-            ? `${amount.trim()} SOL will move from your private balance through Umbra`
-            : `${amount.trim()} ${asset.symbol} will move from your private balance through Umbra`,
-          `to ${destinationMode === 'privy' ? 'your public wallet' : 'the external wallet'}.`,
-          collectsFromVenue ? `Trading withdrawal fee: ${feeLabel()}.` : null,
-          nativeSol
-            ? 'Umbra wraps SOL inside the pool and delivers native SOL after the relayed claim.'
-            : 'Umbra relayer fees are deducted from the private transfer.',
-          'First use may create Umbra registration accounts and spend SOL on rent and network fees. If a claim is interrupted after deposit, resume it to recover the Umbra note.',
-        ].filter((line): line is string => line !== null).join(' '),
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Withdraw',
-            onPress: () => void privateExit.start(parsed, validated, asset),
-          },
-        ],
-      );
+      setReview({
+        asset,
+        baseUnits: parsed,
+        destination: new PublicKey(destination).toBase58(),
+      });
     } catch {
       showAppToast({
         outcome: 'error', 
@@ -124,6 +123,36 @@ export function PrivateWithdrawPanel({
       });
     }
   };
+
+  if (review !== null) {
+    return (
+      <View style={styles.panel}>
+        <WithdrawReviewCard
+          confirming={privateExit.isRunning}
+          headline={`${amount.trim()} ${review.asset.symbol}`}
+          note={privateRouteNote(review.asset.kind === 'native')}
+          onCancel={() => setReview(null)}
+          onConfirm={() => {
+            setReview(null);
+            void privateExit.start(review.baseUnits, review.destination, review.asset);
+          }}
+          rows={[
+            {
+              label: 'To',
+              value: destinationMode === 'privy'
+                ? 'Your public wallet'
+                : shortAddress(review.destination),
+            },
+            { label: 'Route', value: 'Umbra private transfer' },
+            ...(collectsFromVenue ? [{ label: 'Trading fee', value: feeLabel() }] : []),
+          ]}
+          slideLabel="Slide to withdraw"
+          title="Review private withdrawal"
+          workingLabel="Withdrawing"
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.panel}>
@@ -307,6 +336,24 @@ function venueWithdrawable(snapshot: PacificaPortfolioSnapshot | null): bigint {
   } catch {
     return 0n;
   }
+}
+
+/**
+ * What the Umbra route costs and what it can leave behind, stated before it is approved.
+ *
+ * Every clause here was in the alert this replaced and none of it is decoration. The relayer fee comes
+ * out of the transfer and cannot be quoted in advance, first use spends SOL on accounts that did not
+ * exist, and an interrupted claim leaves a recoverable note rather than a lost balance — a reader who
+ * has not been told the third will read an interruption as missing money.
+ */
+function privateRouteNote(nativeSol: boolean): string {
+  return [
+    nativeSol
+      ? 'Umbra wraps SOL inside the pool and delivers native SOL after the relayed claim.'
+      : 'Relayer fees are deducted from the private transfer.',
+    'First use may create Umbra accounts and spend SOL on rent and network fees.',
+    'If a claim is interrupted after deposit, resume it to recover the note.',
+  ].join(' ');
 }
 
 function feeLabel(): string {

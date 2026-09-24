@@ -32,9 +32,16 @@ export type ActionButtonTone = 'accent' | 'negative' | 'neutral' | 'positive';
  *
  * `neutral` is deliberately not one of them. It is the quiet secondary, cut from the same raised grey
  * the search field and the markets table header use, and it keeps its border because that border is
- * the only thing separating a dark grey control from a near-black page. A specular on it would make a
- * secondary action shout, so it has none, and its halo is the app's dark contact shadow rather than a
- * coloured glow — grey does not emit light.
+ * the only thing separating a dark grey control from a near-black page. Its halo is the app's dark
+ * contact shadow rather than a coloured glow — grey does not emit light — and its specular is
+ * `quietSheen`, a quarter-strength version of the others.
+ *
+ * Every tone names a sheen, and none of them names `null`. That is load-bearing rather than tidy: the
+ * sheen is a sibling of the label inside the ramp, so a tone that mounted it and a tone that did not
+ * gave the label two different positions in the child list. Selecting an option flipped its tone from
+ * `neutral` to `accent`, the sheen was inserted ahead of the label, and on Android the label lost the
+ * draw order — the button came up filled and blank. Both layers now always exist and only their
+ * colours change, so nothing is ever inserted next to the text.
  *
  * `base` is never seen: the ramp covers it. It exists because Android's `elevation` will not throw a
  * shadow from a view with no background, and it is the ramp's own lowest stop so a partial paint
@@ -50,7 +57,7 @@ const TONES = {
     label: colors.onAccent,
     ramp: gradients.accentAction,
     rim: null,
-    sheen: true,
+    sheen: gradients.glassActionSheen,
   },
   negative: {
     base: gradients.shortAction.colors[2],
@@ -58,7 +65,7 @@ const TONES = {
     label: colors.onAccent,
     ramp: gradients.shortAction,
     rim: null,
-    sheen: true,
+    sheen: gradients.glassActionSheen,
   },
   neutral: {
     base: gradients.surfaceRaise.colors[1],
@@ -66,7 +73,7 @@ const TONES = {
     label: colors.textPrimary,
     ramp: gradients.surfaceRaise,
     rim: colors.border,
-    sheen: false,
+    sheen: gradients.quietSheen,
   },
   positive: {
     base: gradients.longAction.colors[2],
@@ -74,7 +81,7 @@ const TONES = {
     label: colors.onLight,
     ramp: gradients.longAction,
     rim: null,
-    sheen: true,
+    sheen: gradients.glassActionSheen,
   },
 } as const;
 
@@ -193,17 +200,15 @@ export function ActionButton({
         ]}
       >
         {/* The specular the rim used to fake. A gradient rather than `borderTopWidth`, because a border
-            draws on all four sides or none. */}
-        {material.sheen ? (
-          <LinearGradient
-            colors={gradients.glassActionSheen.colors}
-            end={{ x: 0.5, y: 1 }}
-            locations={gradients.glassActionSheen.locations}
-            pointerEvents="none"
-            start={{ x: 0.5, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
-        ) : null}
+            draws on all four sides or none. Unconditional — see `TONES`. */}
+        <LinearGradient
+          colors={material.sheen.colors}
+          end={{ x: 0.5, y: 1 }}
+          locations={material.sheen.locations}
+          pointerEvents="none"
+          start={{ x: 0.5, y: 0 }}
+          style={StyleSheet.absoluteFill}
+        />
 
         {loading ? (
           <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">

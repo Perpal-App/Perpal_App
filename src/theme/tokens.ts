@@ -328,6 +328,27 @@ export const gradients = {
     locations: [0, 0.45, 1],
   },
   /**
+   * The same specular, for a raised surface in the palette's greys rather than a colour.
+   *
+   * A quarter of the strength. `glassActionSheen` is tuned for a fill bright enough to absorb it; laid
+   * over `surfaceRaise` the same white lifts the top edge to nearly `borderStrong`, which turns a quiet
+   * secondary control into the loudest thing in a row of them. At this weight it reads as the same
+   * material catching the same light, several stops down.
+   *
+   * It exists so every tone of `ActionButton` can carry a sheen unconditionally. That is not a
+   * cosmetic preference: a tone change that mounts or unmounts a layer changes the child order around
+   * the label, and on Android that cost the label its place in the draw order — a selected button came
+   * up with its fill and no text on it.
+   */
+  quietSheen: {
+    colors: [
+      'rgba(255, 255, 255, 0.06)',
+      'rgba(255, 255, 255, 0.015)',
+      'rgba(255, 255, 255, 0)',
+    ],
+    locations: [0, 0.4, 1],
+  },
+  /**
    * Specular highlight along the top of the glass. It fades out well before the
    * midpoint, so it reads as a curved surface catching light rather than as a
    * second fill.

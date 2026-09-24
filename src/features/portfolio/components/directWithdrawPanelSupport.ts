@@ -182,3 +182,37 @@ function pacificaNetWithdrawable(
     return 0n;
   }
 }
+
+/**
+ * The facts a direct withdrawal is approved on, as scannable rows.
+ *
+ * Built here rather than in the panel because it is a mapping from a plan to copy, with no state and no
+ * rendering in it — and because the panel it came out of was within twenty lines of the file ceiling.
+ *
+ * Rent appears only when there is some. A `0 SOL` row for an account that already exists is a number
+ * the reader has to read and then discard, and every such row makes the ones that matter harder to find.
+ */
+export function directReviewRows(plan: {
+  readonly destinationAddress: string;
+  readonly feeLamports: bigint;
+  readonly rentLamports: bigint;
+}): readonly { readonly label: string; readonly value: string }[] {
+  return [
+    { label: 'To', value: shortAddress(plan.destinationAddress) },
+    { label: 'Network fee', value: sol(plan.feeLamports) },
+    ...(plan.rentLamports > 0n
+      ? [{ label: 'Account rent', value: sol(plan.rentLamports) }]
+      : []),
+  ];
+}
+
+/**
+ * What this route does and does not hide, stated before it is approved.
+ *
+ * The privacy claim is the only sentence on the review, and it has to stay honest in both directions:
+ * the route is observable, and it is also atomic, so a failure does not consume the amount. Saying only
+ * the first would read as a warning about losing money; saying only the second would overstate privacy.
+ */
+export const DIRECT_REVIEW_NOTE =
+  'Visible on Solana. No Umbra routing or registration fee. The transfer is atomic: if it fails, ' +
+  'the amount stays available.';

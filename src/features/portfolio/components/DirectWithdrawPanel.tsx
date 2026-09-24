@@ -1,36 +1,33 @@
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, TextInput, View } from 'react-native';
+import { View } from 'react-native';
 import { PublicKey } from '@solana/web3.js';
 
-import { ActionButton } from '@/components/ui/ActionButton';
 import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import {
-  WithdrawChoice,
-  withdrawOptionStyle,
-} from '@/features/portfolio/components/WithdrawChoice';
-import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
-import {
-  WITHDRAW_RADIUS,
-  withdrawSheetStyles as styles,
-} from '@/features/portfolio/components/withdrawSheetStyles';
+  DirectWithdrawForm,
+  type DirectDestinationMode,
+} from '@/features/portfolio/components/DirectWithdrawForm';
+import { withdrawSheetStyles as styles } from '@/features/portfolio/components/withdrawSheetStyles';
 import {
   formatTokenAmount,
   parseTokenAmount,
 } from '@/features/portfolio/components/withdrawalAssets';
 import {
+  DIRECT_REVIEW_NOTE,
   directErrorMessage,
+  directReviewRows,
   directWithdrawalTokens,
   maxCostMessage,
   pacificaReleaseRequirement,
   publicTransactionAuthority,
   shortAddress,
-  sol,
   walletAssetBalance,
   type DirectWithdrawalSource,
   type PacificaReleaseRequirement,
 } from '@/features/portfolio/components/directWithdrawPanelSupport';
+import { WithdrawReviewCard } from '@/features/portfolio/components/WithdrawReviewCard';
 import {
   useDirectWithdrawalRecovery,
   type DirectWithdrawalPhase,
@@ -53,7 +50,6 @@ import {
   publishInAppNotification,
 } from '@/storage/inAppNotifications';
 import { showAppToast } from '@/storage/appToast';
-import { colors } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
 export function DirectWithdrawPanel({
@@ -76,11 +72,13 @@ export function DirectWithdrawPanel({
   const session = useTradingSession();
   const [amount, setAmount] = useState('');
   const [chosenId, setChosenId] = useState('');
-  const [destinationMode, setDestinationMode] = useState<'privy' | 'external'>(
+  const [destinationMode, setDestinationMode] = useState<DirectDestinationMode>(
     source === 'public' ? 'external' : 'privy',
   );
   const [externalAddress, setExternalAddress] = useState('');
   const [phase, setPhase] = useState<DirectWithdrawalPhase>('idle');
+  /** The prepared plan awaiting the reader's slide. Non-null is what swaps the form for the review. */
+  const [pending, setPending] = useState<DirectWithdrawalPlan | null>(null);
   const [withdrawMaximum, setWithdrawMaximum] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const tokens = useMemo(
@@ -315,23 +313,23 @@ export function DirectWithdrawPanel({
     }
   };
 
+  /**
+   * Holds the review in place of the form rather than over it.
+   *
+   * This was an `Alert.alert`, which covered the very figures it asked about and put "Cancel" and
+   * "Confirm and sign" one thumb-width apart. The plan now lives in state, the form yields its space to
+   * `WithdrawReviewCard`, and confirming is a slide. Nothing about the plan itself changed: it is the
+   * same object, built by the same `prepareDirectWithdrawal`, and `submit` re-verifies it before signing.
+   */
   const review = (plan: DirectWithdrawalPlan) => {
     setPhase('reviewing');
-    const rent = plan.rentLamports > 0n
-      ? `\nDestination token-account rent: ${sol(plan.rentLamports)}`
-      : '';
-    Alert.alert(
-      `Send ${plan.symbol} directly?`,
-      `Amount: ${formatTokenAmount(plan.amountBaseUnits, plan.decimals)} ${plan.symbol}\n` +
-      `Destination: ${shortAddress(plan.destinationAddress)}\n` +
-      `Network fee: ${sol(plan.feeLamports)}${rent}\n` +
-      'This public route is visible on Solana and does not use Umbra or charge an Umbra registration fee. The transfer is atomic: if it fails, the amount remains available.',
-      [
-        { text: 'Cancel', style: 'cancel', onPress: () => setPhase('idle') },
-        { text: 'Confirm and sign', onPress: () => void submit(plan) },
-      ],
-      { cancelable: false },
-    );
+    setPending(plan);
+  };
+
+  const cancelReview = () => {
+    controller.current?.abort();
+    setPending(null);
+    setPhase('idle');
   };
 
   const submit = async (plan: DirectWithdrawalPlan) => {
@@ -349,6 +347,7 @@ export function DirectWithdrawPanel({
         ...(transactionAuthority === undefined ? {} : { transactionAuthority }),
       });
       onBalancesChanged();
+      setPending(null);
       if (result.status === 'confirmed') {
         setAmount('');
         setWithdrawMaximum(false);
@@ -371,7 +370,9 @@ export function DirectWithdrawPanel({
         });
       }
     } catch (cause) {
-      setPhase('idle');
+      // Back to the review rather than back to the form: the plan is still the one the reader approved,
+      // and a failure that leaves nothing on screen to retry sends them through the whole form again.
+      setPhase('reviewing');
       onBalancesChanged();
       publishInAppNotification({
         kind: 'withdrawal', outcome: 'error', title: 'Direct withdrawal failed',
@@ -381,104 +382,52 @@ export function DirectWithdrawPanel({
     }
   };
 
-  return (
-    <View style={styles.panel}>
-      {/* No heading and no note. "Direct withdrawal" restated the route button selected directly
-          above it, and "Pacifica USDC is released automatically when needed" described plumbing the
-          reader has no decision to make about — it happens either way. The public variant's note
-          promised that fees and rent are shown before approval, which the review step it leads to
-          already does; saying so in advance only added a line to get past. */}
-      {source === 'private' ? (
-        <WithdrawChoice label="To">
-          <ActionButton
-            accessibilityHint="Sends the withdrawal to your Privy public wallet"
-            disabled={running}
-            label="Public wallet"
-            onPress={() => setDestinationMode('privy')}
-            radius={WITHDRAW_RADIUS}
-            selected={destinationMode === 'privy'}
-            style={withdrawOptionStyle}
-            tone={destinationMode === 'privy' ? 'accent' : 'neutral'}
-          />
-          <ActionButton
-            accessibilityHint="Sends the withdrawal to an address you enter"
-            disabled={running}
-            label="Other wallet"
-            onPress={() => setDestinationMode('external')}
-            radius={WITHDRAW_RADIUS}
-            selected={destinationMode === 'external'}
-            style={withdrawOptionStyle}
-            tone={destinationMode === 'external' ? 'accent' : 'neutral'}
-          />
-        </WithdrawChoice>
-      ) : null}
-      <View style={styles.amountRow}>
-        <TextInput
-          accessibilityLabel={`${asset?.symbol ?? 'Token'} withdrawal amount`}
-          editable={!running}
-          inputMode="decimal"
-          onChangeText={(value) => {
-            setAmount(value);
-            setWithdrawMaximum(false);
-          }}
-          placeholder="0.00"
-          placeholderTextColor={colors.textMuted}
-          style={[styles.input, styles.amountInput]}
-          value={amount}
-        />
-        <WithdrawalTokenSelector
-          disabled={running || tokens.length === 0}
-          onSelect={(id) => {
-            setChosenId(id);
-            setAmount('');
-            setWithdrawMaximum(false);
-          }}
-          selectedMint={selected?.id ?? ''}
-          symbol={asset?.symbol ?? 'Token'}
-          tokens={tokens}
-        />
-        <ActionButton
-          disabled={running || asset === null || (
-            destinationMode === 'privy' && mainWalletAddress === null
-          )}
-          label="Max"
-          loading={phase === 'quoting'}
-          onPress={() => void prepare(true, true)}
-          radius={WITHDRAW_RADIUS}
-          style={styles.max}
-          tone="neutral"
+  // The whole form, not only the amount field. During review the destination is a fact of the prepared
+  // plan, so leaving the `To` selector live beside it would offer a choice that changes nothing — the
+  // plan was built for one address and re-verified against it before signing.
+  if (pending !== null) {
+    return (
+      <View style={styles.panel}>
+        <WithdrawReviewCard
+          confirming={phase === 'submitting'}
+          headline={`${formatTokenAmount(pending.amountBaseUnits, pending.decimals)} ${pending.symbol}`}
+          note={DIRECT_REVIEW_NOTE}
+          onCancel={cancelReview}
+          onConfirm={() => void submit(pending)}
+          rows={directReviewRows(pending)}
+          slideLabel={source === 'public' ? 'Slide to send' : 'Slide to withdraw'}
+          title={source === 'public' ? 'Review send' : 'Review withdrawal'}
+          workingLabel={source === 'public' ? 'Sending' : 'Withdrawing'}
         />
       </View>
-      {source === 'public' || destinationMode === 'external' ? (
-        <TextInput
-          accessibilityLabel="Destination Solana wallet"
-          autoCapitalize="none"
-          editable={!running}
-          onChangeText={setExternalAddress}
-          placeholder="Solana wallet address"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          value={externalAddress}
-        />
-      ) : null}
-      <ActionButton
-        disabled={running || asset === null || (
-          destinationMode === 'privy' && mainWalletAddress === null
-        )}
-        label={phase === 'pending'
-          ? 'Withdrawal confirming'
-          : phase === 'quoting'
-            ? 'Calculating max'
-          : phase === 'preparing'
-            ? 'Checking fees'
-            : phase === 'submitting'
-              ? 'Submitting withdrawal'
-              : source === 'public' ? 'Review send' : 'Review direct withdrawal'}
-        loading={phase === 'preparing' || phase === 'submitting'}
-        onPress={() => void prepare()}
-        radius={WITHDRAW_RADIUS}
-        style={styles.cta}
-      />
-    </View>
+    );
+  }
+
+  return (
+    <DirectWithdrawForm
+      amount={amount}
+      destinationMode={destinationMode}
+      disabled={asset === null || (destinationMode === 'privy' && mainWalletAddress === null)}
+      externalAddress={externalAddress}
+      onAmountChange={(value) => {
+        setAmount(value);
+        setWithdrawMaximum(false);
+      }}
+      onDestinationMode={setDestinationMode}
+      onExternalAddress={setExternalAddress}
+      onMax={() => void prepare(true, true)}
+      onReview={() => void prepare()}
+      onTokenChange={(id) => {
+        setChosenId(id);
+        setAmount('');
+        setWithdrawMaximum(false);
+      }}
+      phase={phase}
+      running={running}
+      selectedId={selected?.id ?? ''}
+      source={source}
+      symbol={asset?.symbol ?? 'Token'}
+      tokens={tokens}
+    />
   );
 }
