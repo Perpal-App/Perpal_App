@@ -42,7 +42,26 @@ export const MARKET_TIMEFRAMES: readonly {
   { id: '12h', label: '12h', intervalMs: 12 * 60 * 60_000 },
   { id: '1d', label: '1D', intervalMs: 24 * 60 * 60_000 },
   { id: '1w', label: '1W', intervalMs: 7 * 24 * 60 * 60_000 },
-  { id: '1M', label: '1M', intervalMs: 30 * 24 * 60 * 60_000 },
+  /**
+   * Monthly candles, labelled for what they actually show: the market's whole history.
+   *
+   * `id` is still `1M` because that is the wire value, and the venue's interval enumeration is closed
+   * — asking `/kline/mark` for `1Y`, `1y`, `all` or `ALL` returns a deserialize error naming the
+   * thirteen variants below, so an all-time *interval* does not exist to request.
+   *
+   * It does not need to. Every entry here asks for its own interval's maximum window, because the
+   * venue rejects a wider range than `MAX_CANDLES` allows ("Time range too large for 1w interval with
+   * limit 300"). At a month a side that window is 300 months, and no Pacifica market is anywhere near
+   * 25 years old: BTC answers this request with 16 candles, the first dated 2025-06-01, which is the
+   * whole of its history. So this is the widest view the API can serve and the only one whose window
+   * cannot truncate — which is what "all time" means.
+   *
+   * Labelled rather than duplicated, deliberately. A separate `ALL` entry would have to resolve to one
+   * of the same thirteen intervals over the same maximum window, so it would issue a byte-identical
+   * request to an entry already on the strip. The menu names the resolution alongside it so nothing is
+   * hidden by the shorter label: see `MENU_ROWS` in `MarketChartTimeframes`.
+   */
+  { id: '1M', label: 'ALL', intervalMs: 30 * 24 * 60 * 60_000 },
 ];
 
 export async function fetchPacificaMarketHistory(

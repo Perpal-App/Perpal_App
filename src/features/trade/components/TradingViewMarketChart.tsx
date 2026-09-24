@@ -69,9 +69,19 @@ function TradingViewMarketChartComponent({
   const [tool, setTool] = useState<ChartTool>('none');
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [magnet, setMagnet] = useState(false);
+  /**
+   * Whether the next series to reach the document should be scaled to fill the canvas.
+   *
+   * Armed by a timeframe change and by a fresh document, spent by the delivery that follows. It is
+   * deliberately not part of `payload`: a fit describes the delivery, not the data, and baking it into
+   * the serialized body made it stale the moment the body outlived the moment it was built. A payload
+   * queued before the document finished loading carried whatever the flag had been when the memo last
+   * ran, so a chart that reloaded after a renderer failure could receive its series with `fit: false`
+   * and draw it at a default spacing it was never scaled to.
+   */
   const shouldFit = useRef(true);
   const timeframeLabel = MARKET_TIMEFRAMES.find((item) => item.id === timeframe)?.label ?? timeframe;
-  const message = useMemo(() => JSON.stringify({
+  const payload = useMemo(() => ({
     type: 'market_data',
     candles: candles.map((candle) => ({
       time: Math.floor(candle.timeMs / 1_000),
@@ -81,7 +91,6 @@ function TradingViewMarketChartComponent({
       close: candle.close,
     })),
     ema: showEma,
-    fit: shouldFit.current,
     sma: showSma,
     style: chartStyle,
     symbol,
@@ -97,10 +106,10 @@ function TradingViewMarketChartComponent({
    * `ready` set `true` over `true` — no re-render, no second attempt, no data. A chart with a series it
    * never received is a blank canvas with a watermark.
    */
-  const undelivered = useRef<string | null>(null);
+  const undelivered = useRef<typeof payload | null>(null);
 
-  const deliver = useCallback((payload: string) => {
-    webView.current?.postMessage(payload);
+  const deliver = useCallback((body: typeof payload) => {
+    webView.current?.postMessage(JSON.stringify({ ...body, fit: shouldFit.current }));
     undelivered.current = null;
     shouldFit.current = false;
   }, []);
@@ -108,9 +117,9 @@ function TradingViewMarketChartComponent({
   useEffect(() => {
     if (candles.length === 0) return;
     // Queued either way. If the chart is not listening yet, `ready` picks this up when it is.
-    undelivered.current = message;
-    if (ready) deliver(message);
-  }, [candles.length, deliver, message, ready]);
+    undelivered.current = payload;
+    if (ready) deliver(payload);
+  }, [candles.length, deliver, payload, ready]);
 
   const send = useCallback((payload: Record<string, unknown>) => {
     webView.current?.postMessage(JSON.stringify(payload));
