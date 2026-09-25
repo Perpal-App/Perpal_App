@@ -18,9 +18,15 @@ export const PACIFICA_MINIMUM_WITHDRAWAL_BASE_UNITS = 1_000_000n;
 const MINIMUM_WITHDRAWAL_BASE_UNITS = PACIFICA_MINIMUM_WITHDRAWAL_BASE_UNITS;
 const inFlight = new Map<string, {
   readonly amountBaseUnits: bigint;
-  readonly promise: Promise<void>;
+  readonly promise: Promise<PacificaReleaseReceipt>;
 }>();
 const listeners = new Map<string, Set<() => void>>();
+
+export type PacificaReleaseReceipt = {
+  readonly creditedBaseUnits: bigint;
+  readonly feeBaseUnits: bigint;
+  readonly requestedBaseUnits: bigint;
+};
 
 export function availablePacificaReturnBaseUnits(
   availableBaseUnits: bigint,
@@ -61,44 +67,43 @@ type PendingWithdrawal = PendingWithdrawalBase & (
 export async function ensurePacificaCollateralInWallet(
   requestedBaseUnits: bigint,
   input: WithdrawalInput,
-): Promise<void> {
+): Promise<PacificaReleaseReceipt | null> {
   if (requestedBaseUnits <= 0n) throw new Error('Withdrawal amount is invalid.');
   const inWallet = await balance(input);
-  if (inWallet >= requestedBaseUnits) return;
+  if (inWallet >= requestedBaseUnits) return null;
   const shortfall = requestedBaseUnits - inWallet;
   const grossRequired = shortfall + input.withdrawalFeeBaseUnits;
   const providerAmount = grossRequired < MINIMUM_WITHDRAWAL_BASE_UNITS
     ? MINIMUM_WITHDRAWAL_BASE_UNITS
     : grossRequired;
-  await withdrawToWallet(providerAmount, input);
+  return withdrawToWallet(providerAmount, input);
 }
 
 export async function withdrawPacificaCollateralToWallet(
   amountBaseUnits: bigint,
   input: WithdrawalInput,
-): Promise<void> {
+): Promise<PacificaReleaseReceipt> {
   if (amountBaseUnits <= 0n) throw new Error('Withdrawal amount is invalid.');
   const grossRequired = amountBaseUnits + input.withdrawalFeeBaseUnits;
   const providerAmount = grossRequired < MINIMUM_WITHDRAWAL_BASE_UNITS
     ? MINIMUM_WITHDRAWAL_BASE_UNITS
     : grossRequired;
-  await withdrawToWallet(providerAmount, input);
+  return withdrawToWallet(providerAmount, input);
 }
 
 export async function resumePacificaCollateralWithdrawalToWallet(
   input: WithdrawalInput,
-): Promise<bigint> {
+): Promise<PacificaReleaseReceipt> {
   const pending = await read(input.account);
   if (pending === null) throw new Error('No Pacifica withdrawal is waiting to resume.');
   const amount = BigInt(pending.amountBaseUnits);
-  await withdrawToWallet(amount, input);
-  return amount;
+  return withdrawToWallet(amount, input);
 }
 
 async function withdrawToWallet(
   providerAmount: bigint,
   input: WithdrawalInput,
-): Promise<void> {
+): Promise<PacificaReleaseReceipt> {
   const active = inFlight.get(input.account);
   if (active !== undefined) {
     if (active.amountBaseUnits !== providerAmount) {
@@ -109,7 +114,7 @@ async function withdrawToWallet(
   const operation = performWithdrawal(providerAmount, input);
   inFlight.set(input.account, { amountBaseUnits: providerAmount, promise: operation });
   try {
-    await operation;
+    return await operation;
   } finally {
     if (inFlight.get(input.account)?.promise === operation) inFlight.delete(input.account);
   }
@@ -118,7 +123,7 @@ async function withdrawToWallet(
 async function performWithdrawal(
   providerAmount: bigint,
   input: WithdrawalInput,
-): Promise<void> {
+): Promise<PacificaReleaseReceipt> {
   let pending = await read(input.account);
   if (pending !== null && BigInt(pending.amountBaseUnits) !== providerAmount) {
     throw new Error('Resume the pending trading withdrawal before changing the amount.');
@@ -181,8 +186,9 @@ async function performWithdrawal(
     const batchNonce = pending.batchNonce;
     if (batchNonce === null) throw new Error('The saved Pacifica receipt is incomplete.');
     const confirmation = await monitor.waitFor(batchNonce, input.signal);
-    assertConfirmation(confirmation, pending);
+    const receipt = confirmationReceipt(confirmation, pending);
     await clear(input.account);
+    return receipt;
   } finally {
     monitor.close();
   }
@@ -267,10 +273,10 @@ function withdrawalReceipt(response: Record<string, unknown>): {
   };
 }
 
-function assertConfirmation(
+function confirmationReceipt(
   confirmation: PacificaWithdrawalConfirmation,
   pending: PendingWithdrawal,
-): void {
+): PacificaReleaseReceipt {
   const requested = usdc(confirmation.requestedAmount);
   const fee = usdc(confirmation.feeAmount);
   const credited = usdc(confirmation.amount);
@@ -286,6 +292,11 @@ function assertConfirmation(
       'Pacifica confirmed a release that does not match the saved request. The recovery record was kept.',
     );
   }
+  return {
+    creditedBaseUnits: credited,
+    feeBaseUnits: fee,
+    requestedBaseUnits: requested,
+  };
 }
 
 async function read(account: string): Promise<PendingWithdrawal | null> {

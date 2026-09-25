@@ -69,7 +69,7 @@ export async function beginPrivateFunding(
     input.privateUsdcBaseUnitsAtStart < 0n
   ) {
     throw new PrivateFundingError(
-      'Enter collateral and a SOL fee reserve greater than zero.',
+      'Enter collateral and a SOL network reserve greater than zero.',
       'amount_invalid',
     );
   }

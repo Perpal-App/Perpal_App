@@ -14,6 +14,7 @@ import {
 import {
   availablePacificaReturnBaseUnits,
   PACIFICA_MINIMUM_WITHDRAWAL_BASE_UNITS,
+  type PacificaReleaseReceipt,
 } from '@/integrations/perps/pacifica/pacificaWithdrawal';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { listTradingCollateralOptions } from '@/integrations/perps/providerCollateral';
@@ -51,28 +52,39 @@ export function directWithdrawalTokens(
   const tokens = [...listWalletTokens(wallet, configured)];
   if (source !== 'private' || !config.ok || snapshot === null) return tokens;
 
-  const providerAmount = pacificaNetWithdrawable(
+  const provider = pacificaAvailability(
     snapshot,
     config.value.perps.pacificaWithdrawalFeeBaseUnits,
   );
-  if (providerAmount <= 0n) return tokens;
+  if (provider === null || provider.netBaseUnits <= 0n) return tokens;
 
   const usdc = configured.find((asset) => asset.mint === config.value.perps.usdcMint);
   if (usdc === undefined) return tokens;
   const index = tokens.findIndex((token) => token.asset.mint === usdc.mint);
+  const walletBaseUnits = index >= 0 ? tokens[index]?.baseUnits ?? 0n : 0n;
+  const release = {
+    feeBaseUnits: config.value.perps.pacificaWithdrawalFeeBaseUnits,
+    grossBaseUnits: provider.grossBaseUnits,
+    netBaseUnits: provider.netBaseUnits,
+    walletBaseUnits,
+  };
   if (index >= 0) {
     const existing = tokens[index]!;
     tokens[index] = {
       ...existing,
-      baseUnits: (existing.baseUnits ?? 0n) + providerAmount,
+      baseUnits: walletBaseUnits + provider.netBaseUnits,
+      displayBaseUnits: walletBaseUnits + provider.grossBaseUnits,
+      pacificaRelease: release,
     };
     return tokens;
   }
 
   const providerToken: WithdrawableToken = {
     asset: { ...usdc, kind: 'spl' },
-    baseUnits: providerAmount,
+    baseUnits: provider.netBaseUnits,
+    displayBaseUnits: provider.grossBaseUnits,
     id: `spl:${usdc.mint}`,
+    pacificaRelease: release,
   };
   const nativeIndex = tokens.findIndex((token) => token.asset.kind !== 'native');
   tokens.splice(nativeIndex < 0 ? tokens.length : nativeIndex, 0, providerToken);
@@ -160,6 +172,10 @@ export function sol(lamports: bigint): string {
   return `${formatTokenAmount(lamports, 9)} SOL`;
 }
 
+function usdc(baseUnits: bigint): string {
+  return `${formatTokenAmount(baseUnits, 6)} USDC`;
+}
+
 /**
  * What "Max" just put in the amount field.
  *
@@ -202,17 +218,21 @@ export function shortAddress(address: string): string {
   return `${address.slice(0, 5)}…${address.slice(-5)}`;
 }
 
-function pacificaNetWithdrawable(
+function pacificaAvailability(
   snapshot: PacificaPortfolioSnapshot,
   withdrawalFeeBaseUnits: bigint,
-): bigint {
+): { readonly grossBaseUnits: bigint; readonly netBaseUnits: bigint } | null {
   try {
-    return availablePacificaReturnBaseUnits(
-      parseAmount(snapshot.availableToWithdraw, 6).baseUnits,
-      withdrawalFeeBaseUnits,
-    );
+    const grossBaseUnits = parseAmount(snapshot.availableToWithdraw, 6).baseUnits;
+    return {
+      grossBaseUnits,
+      netBaseUnits: availablePacificaReturnBaseUnits(
+        grossBaseUnits,
+        withdrawalFeeBaseUnits,
+      ),
+    };
   } catch {
-    return 0n;
+    return null;
   }
 }
 
@@ -230,12 +250,35 @@ function pacificaNetWithdrawable(
  * Rent appears only when there is some. A `0 SOL` row for an account that already exists is a number
  * the reader has to read and then discard, and every such row makes the ones that matter harder to find.
  */
-export function directReviewRows(plan: {
-  readonly destinationAddress: string;
-  readonly feeLamports: bigint;
-  readonly rentLamports: bigint;
-}): readonly { readonly label: string; readonly value: string }[] {
+export function directReviewRows(
+  plan: {
+    readonly amountBaseUnits: bigint;
+    readonly destinationAddress: string;
+    readonly feeLamports: bigint;
+    readonly rentLamports: bigint;
+  },
+  release: PacificaReleaseReceipt | null = null,
+): readonly { readonly label: string; readonly value: string }[] {
+  const walletContribution = release === null || plan.amountBaseUnits <= release.creditedBaseUnits
+    ? 0n
+    : plan.amountBaseUnits - release.creditedBaseUnits;
+  const retainedCredit = release === null || release.creditedBaseUnits <= plan.amountBaseUnits
+    ? 0n
+    : release.creditedBaseUnits - plan.amountBaseUnits;
   return [
+    ...(release === null
+      ? []
+      : [
+          { label: 'Pacifica withdrawal', value: usdc(release.requestedBaseUnits) },
+          { label: 'Withdrawal fee', value: usdc(release.feeBaseUnits) },
+          { label: 'From Pacifica', value: usdc(release.creditedBaseUnits) },
+        ]),
+    ...(walletContribution > 0n
+      ? [{ label: 'From funding wallet', value: usdc(walletContribution) }]
+      : []),
+    ...(retainedCredit > 0n
+      ? [{ label: 'Left in funding wallet', value: usdc(retainedCredit) }]
+      : []),
     { label: 'To', value: shortAddress(plan.destinationAddress) },
     { label: 'Route', value: 'Public on Solana' },
     { label: 'Network fee', value: sol(plan.feeLamports) },

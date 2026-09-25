@@ -41,7 +41,12 @@ export function WithdrawalTokenSelector({
       label: token.asset.symbol,
       ...(token.baseUnits === null
         ? {}
-        : { detail: formatTokenAmount(token.baseUnits, token.asset.decimals) }),
+        : {
+            detail: formatTokenAmount(
+              token.displayBaseUnits ?? token.baseUnits,
+              token.asset.decimals,
+            ),
+          }),
     })),
     [tokens],
   );

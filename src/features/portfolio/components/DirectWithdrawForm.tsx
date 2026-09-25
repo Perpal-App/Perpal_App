@@ -1,4 +1,4 @@
-import { TextInput, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
 import type { DirectWithdrawalSource } from '@/features/portfolio/components/directWithdrawPanelSupport';
@@ -32,6 +32,7 @@ export type DirectDestinationMode = 'external' | 'privy';
  */
 export function DirectWithdrawForm({
   amount,
+  amountHint,
   destinationMode,
   disabled,
   externalAddress,
@@ -50,6 +51,8 @@ export function DirectWithdrawForm({
   tokens,
 }: {
   readonly amount: string;
+  /** Gross source balance and provider fee when the field itself is the net destination amount. */
+  readonly amountHint?: string;
   readonly destinationMode: DirectDestinationMode;
   /** True when the form cannot produce a valid request at all — no asset, or no destination wallet. */
   readonly disabled: boolean;
@@ -127,6 +130,10 @@ export function DirectWithdrawForm({
           tone="neutral"
         />
       </View>
+
+      {amountHint === undefined ? null : (
+        <Text style={styles.note}>{amountHint}</Text>
+      )}
 
       {source === 'public' || destinationMode === 'external' ? (
         <TextInput

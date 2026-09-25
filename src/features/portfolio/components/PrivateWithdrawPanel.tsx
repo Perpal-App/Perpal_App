@@ -396,7 +396,7 @@ function privateReviewRows(input: {
     { label: 'Route', value: 'Umbra private transfer' },
     ...(input.nativeSol ? [{ label: 'Delivers', value: 'Native SOL' }] : []),
     { label: 'Relayer fee', value: 'From the transfer' },
-    ...(input.venueFee === null ? [] : [{ label: 'Trading fee', value: input.venueFee }]),
+    ...(input.venueFee === null ? [] : [{ label: 'Withdrawal fee', value: input.venueFee }]),
   ];
 }
 

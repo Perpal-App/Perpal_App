@@ -308,7 +308,7 @@ export function PrivateFundingPanel({
             available={solLamports === null
               ? null
               : `Available ${formatAmount(amountFromBaseUnits(solLamports, SOL_DECIMALS))} SOL`}
-            label="Fee reserve"
+            label="Network reserve"
           />
           <View style={styles.row}>
             <TextInput

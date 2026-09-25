@@ -95,7 +95,7 @@ export async function preparePacificaDeposit(input: {
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (fee.value === null || !Number.isSafeInteger(fee.value) || fee.value < 0) {
-    throw new Error('Pacifica deposit fee could not be verified.');
+    throw new Error('Pacifica deposit network fee could not be verified.');
   }
   const feeLamports = BigInt(fee.value);
   const solBalanceLamports = BigInt(solBalance.value);

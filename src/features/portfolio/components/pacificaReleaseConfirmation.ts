@@ -20,7 +20,7 @@ export function showPacificaReleaseConfirmation(input: {
     : `Pacifica request: ${amountLabel}\n` +
       `Credited to wallet: ${formatTokenAmount(creditedBaseUnits, 6)} USDC\n` +
       `Required shortfall: ${formatTokenAmount(input.release.shortfallBaseUnits, 6)} USDC\n` +
-      `Pacifica fee: ${formatTokenAmount(input.feeBaseUnits, 6)} USDC\n\n` +
+      `Withdrawal fee: ${formatTokenAmount(input.feeBaseUnits, 6)} USDC\n\n` +
       (input.release.amountBaseUnits > input.release.shortfallBaseUnits
         ? `Pacifica requires at least ${formatTokenAmount(
           PACIFICA_MINIMUM_WITHDRAWAL_BASE_UNITS,

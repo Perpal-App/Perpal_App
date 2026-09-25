@@ -6,8 +6,17 @@ import type { PrivateExitAsset } from '@/integrations/umbra/PrivateExitProvider'
 
 export type WithdrawableToken = {
   readonly asset: PrivateExitAsset;
+  /** Maximum amount that can reach the destination after source-specific fees. */
   readonly baseUnits: bigint | null;
+  /** Balance shown in the token menu when it differs from the net destination maximum. */
+  readonly displayBaseUnits?: bigint;
   readonly id?: string;
+  readonly pacificaRelease?: {
+    readonly feeBaseUnits: bigint;
+    readonly grossBaseUnits: bigint;
+    readonly netBaseUnits: bigint;
+    readonly walletBaseUnits: bigint;
+  };
 };
 
 /**

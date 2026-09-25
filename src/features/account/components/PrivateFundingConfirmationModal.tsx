@@ -96,7 +96,7 @@ export function PrivateFundingConfirmationModal({
             label="Collateral"
             value={`${amount} ${confirmation.symbol}`}
           />
-          <ConfirmationRow label="Trading fee reserve" value={`${reserve} SOL`} />
+          <ConfirmationRow label="Network fee reserve" value={`${reserve} SOL`} />
           <ConfirmationRow
             label="Route"
             value={confirmation.destination === 'pacifica'

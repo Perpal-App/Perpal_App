@@ -126,7 +126,7 @@ export async function fundPacificaFromPrivateWallet(input: {
   }
   if (plan.simulation === 'insufficient-sol') {
     throw new PrivateFundingError(
-      'The private wallet needs more SOL for the Pacifica deposit fee.',
+      'The private wallet needs more SOL for the Pacifica deposit network fee.',
       'pacifica_deposit_insufficient_sol',
     );
   }

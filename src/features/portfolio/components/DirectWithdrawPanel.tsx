@@ -39,6 +39,7 @@ import {
   ensurePacificaCollateralInWallet,
   pendingPacificaWithdrawalBaseUnits,
   resumePacificaCollateralWithdrawalToWallet,
+  type PacificaReleaseReceipt,
 } from '@/integrations/perps/pacifica/pacificaWithdrawal';
 import { reconcilePendingTradeAction } from '@/integrations/perps/tradeActionRecovery';
 import {
@@ -88,6 +89,8 @@ export function DirectWithdrawPanel({
   const [phase, setPhase] = useState<DirectWithdrawalPhase>('idle');
   /** The prepared plan awaiting the reader's slide. Non-null is what swaps the form for the review. */
   const [pending, setPending] = useState<DirectWithdrawalPlan | null>(null);
+  /** Confirmed provider debit/fee facts carried into the final Solana review. */
+  const [releaseReceipt, setReleaseReceipt] = useState<PacificaReleaseReceipt | null>(null);
   const controller = useRef<AbortController | null>(null);
   /** Synchronous single-flight gate; React state cannot lock a second gesture until the next render. */
   const submitInFlight = useRef(false);
@@ -97,6 +100,16 @@ export function DirectWithdrawPanel({
   );
   const selected = tokens.find((token) => token.id === chosenId) ?? tokens[0] ?? null;
   const asset = selected?.asset ?? null;
+  const pacificaRelease = selected?.pacificaRelease ?? null;
+  const amountHint = pacificaRelease === null
+    ? undefined
+    : `${formatTokenAmount(
+        pacificaRelease.walletBaseUnits + pacificaRelease.grossBaseUnits,
+        6,
+      )} total · ${formatTokenAmount(pacificaRelease.feeBaseUnits, 6)} withdrawal fee · ${formatTokenAmount(
+        pacificaRelease.walletBaseUnits + pacificaRelease.netBaseUnits,
+        6,
+      )} USDC receivable`;
   /**
    * The ceiling both "Max" and the typed-amount check work from.
    *
@@ -117,6 +130,7 @@ export function DirectWithdrawPanel({
   useEffect(() => {
     if (phase === 'idle' && pending !== null) {
       setPending(null);
+      setReleaseReceipt(null);
       setAmount('');
     }
   }, [pending, phase]);
@@ -146,6 +160,7 @@ export function DirectWithdrawPanel({
   const buildSolanaReview = async (input: {
     readonly amountBaseUnits: bigint;
     readonly destinationAddress: string;
+    readonly releaseReceipt?: PacificaReleaseReceipt | null;
     readonly signal: AbortSignal;
   }) => {
     if (!config.ok || owner === null || session.signer === null || asset === null) {
@@ -167,7 +182,7 @@ export function DirectWithdrawPanel({
         : {}),
     });
     if (input.signal.aborted) return;
-    review(plan);
+    review(plan, input.releaseReceipt ?? null);
   };
 
   const releasePacificaAndContinue = async (input: {
@@ -189,20 +204,23 @@ export function DirectWithdrawPanel({
       wsOrigin: config.value.perps.pacificaWsOrigin,
     };
     try {
-      if (input.release.kind === 'resume') {
-        await resumePacificaCollateralWithdrawalToWallet(withdrawalInput);
-      } else {
-        await ensurePacificaCollateralInWallet(
-          input.release.targetWalletBalanceBaseUnits,
-          withdrawalInput,
-        );
-      }
+      const receipt = input.release.kind === 'resume'
+        ? await resumePacificaCollateralWithdrawalToWallet(withdrawalInput)
+        : await ensurePacificaCollateralInWallet(
+            input.release.targetWalletBalanceBaseUnits,
+            withdrawalInput,
+          );
       if (input.signal.aborted) return;
       await Promise.all([
         onBalancesChanged(),
         onPacificaRefresh?.(),
       ]);
-      await buildSolanaReview(input);
+      await buildSolanaReview({
+        amountBaseUnits: input.amountBaseUnits,
+        destinationAddress: input.destinationAddress,
+        releaseReceipt: receipt,
+        signal: input.signal,
+      });
     } catch (cause) {
       if (!input.signal.aborted) {
         setPhase('idle');
@@ -217,15 +235,8 @@ export function DirectWithdrawPanel({
   };
 
   /**
-   * Fills the amount field with everything that can be sent, from balances already on screen.
-   *
-   * This used to ask the network: it sent `'max'` through `prepareDirectWithdrawal` so the fee could be
-   * priced exactly, which meant Max needed a valid destination address before it could answer. On the
-   * public route the address field starts empty, so the first tap threw on `new PublicKey('')` and the
-   * reader was told to enter an amount up to their balance — advice for a problem they did not have, and
-   * for SOL a figure the fee made unsendable anyway. Max is now the same arithmetic as the range check
-   * that guards a typed amount, so it always produces a value that check accepts, and the exact fee is
-   * still priced against that amount when the plan is built for review.
+   * Fills the destination amount from the spendable balance already on screen. Pacifica-backed USDC
+   * reports its gross debit and fee separately because its Max is necessarily the net receipt.
    */
   const fillMaximumAmount = () => {
     if (asset === null || maxBaseUnits === null) {
@@ -239,12 +250,17 @@ export function DirectWithdrawPanel({
     setAmount(formatTokenAmount(maxBaseUnits, asset.decimals));
     showAppToast({
       outcome: 'info',
-      message: maxAmountMessage({
-        decimals: asset.decimals,
-        kind: asset.kind,
-        maxBaseUnits,
-        symbol: asset.symbol,
-      }),
+      message: pacificaRelease === null
+        ? maxAmountMessage({
+            decimals: asset.decimals,
+            kind: asset.kind,
+            maxBaseUnits,
+            symbol: asset.symbol,
+          })
+        : `Withdraw all ${formatTokenAmount(
+            pacificaRelease.walletBaseUnits + pacificaRelease.grossBaseUnits,
+            6,
+          )}. Receive ${formatTokenAmount(maxBaseUnits, 6)} after withdrawal fee.`,
     });
   };
 
@@ -297,6 +313,7 @@ export function DirectWithdrawPanel({
       asset.mint === config.value.perps.usdcMint;
 
     controller.current?.abort();
+    setReleaseReceipt(null);
     const abort = new AbortController();
     controller.current = abort;
     setPhase('preparing');
@@ -362,16 +379,12 @@ export function DirectWithdrawPanel({
     }
   };
 
-  /**
-   * Holds the review in place of the form rather than over it.
-   *
-   * This was an `Alert.alert`, which covered the very figures it asked about and put "Cancel" and
-   * "Confirm and sign" one thumb-width apart. The plan now lives in state, the sheet yields its form and
-   * its selectors to `WithdrawReviewStep`, and confirming is a slide. Nothing about the plan itself
-   * changed: it is the same object, built by the same `prepareDirectWithdrawal`, and `submit`
-   * re-verifies it before signing.
-   */
-  const review = (plan: DirectWithdrawalPlan) => {
+  /** Holds the exact Solana plan and confirmed provider receipt in the in-sheet review. */
+  const review = (
+    plan: DirectWithdrawalPlan,
+    receipt: PacificaReleaseReceipt | null,
+  ) => {
+    setReleaseReceipt(receipt);
     setPhase('reviewing');
     setPending(plan);
   };
@@ -379,6 +392,7 @@ export function DirectWithdrawPanel({
   const cancelReview = () => {
     controller.current?.abort();
     setPending(null);
+    setReleaseReceipt(null);
     setPhase('idle');
   };
 
@@ -401,6 +415,7 @@ export function DirectWithdrawPanel({
       });
       if (result.status === 'confirmed') {
         setPending(null);
+        setReleaseReceipt(null);
         onBalancesChanged();
         setAmount('');
         setPhase('idle');
@@ -436,10 +451,7 @@ export function DirectWithdrawPanel({
     }
   };
 
-  // The whole form gives way, not only the amount field, and the sheet's own selectors go with it. Every
-  // choice above this point is a fact of the prepared plan by now — the plan was built for one source,
-  // one token and one address, and re-verified against them before signing — so a live selector beside
-  // it would offer a decision that changes nothing.
+  // The prepared plan owns every choice while it is visible, so the form and selectors yield to it.
   if (pending !== null) {
     return (
       <WithdrawReviewStep
@@ -448,7 +460,7 @@ export function DirectWithdrawPanel({
         note={DIRECT_REVIEW_NOTE}
         onBack={cancelReview}
         onConfirm={() => void submit(pending)}
-        rows={directReviewRows(pending)}
+        rows={directReviewRows(pending, releaseReceipt)}
         slideLabel={source === 'public' ? 'Slide to send' : 'Slide to withdraw'}
         title={source === 'public' ? 'Review send' : 'Review withdrawal'}
         workingLabel={source === 'public' ? 'Sending' : 'Withdrawing'}
@@ -459,11 +471,15 @@ export function DirectWithdrawPanel({
   return (
     <DirectWithdrawForm
       amount={amount}
+      {...(amountHint === undefined ? {} : { amountHint })}
       destinationMode={destinationMode}
       disabled={asset === null || (destinationMode === 'privy' && mainWalletAddress === null)}
       externalAddress={externalAddress}
       maxDisabled={asset === null}
-      onAmountChange={setAmount}
+      onAmountChange={(value) => {
+        setAmount(value);
+        setReleaseReceipt(null);
+      }}
       onDestinationMode={setDestinationMode}
       onExternalAddress={setExternalAddress}
       onMax={fillMaximumAmount}
@@ -471,6 +487,7 @@ export function DirectWithdrawPanel({
       onTokenChange={(id) => {
         setChosenId(id);
         setAmount('');
+        setReleaseReceipt(null);
       }}
       phase={phase}
       running={running}
