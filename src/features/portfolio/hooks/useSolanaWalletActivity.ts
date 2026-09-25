@@ -18,6 +18,8 @@ export function useSolanaWalletActivity(input: {
   readonly pacificaProgramId: string;
   readonly privateAddress: string;
   readonly publicAddress: string | null;
+  /** True while a higher-priority funding or withdrawal interaction is open. */
+  readonly paused: boolean;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner | null;
   readonly usdcMint: string;
@@ -27,6 +29,12 @@ export function useSolanaWalletActivity(input: {
   const [refreshKey, setRefreshKey] = useState(0);
   const updatedAtMs = useRef(0);
   const forceNetwork = useRef(false);
+  // The private address is the identity; the object that signs gateway requests is a transport. Keeping
+  // the latest transport in a ref prevents a provider render that recreates the same signer from
+  // cancelling an eighty-transaction history load, clearing its rows, and starting it again.
+  const signerRef = useRef(input.signer);
+  signerRef.current = input.signer;
+  const signerReady = input.signer !== null;
   const refresh = useCallback(() => {
     forceNetwork.current = true;
     setRefreshKey((value) => value + 1);
@@ -40,18 +48,20 @@ export function useSolanaWalletActivity(input: {
     input.privateAddress,
     input.publicAddress,
     input.rpcUrl,
-    input.signer,
+    signerReady,
     input.usdcMint,
     input.usdtMint,
   ]);
 
   useFocusEffect(useCallback(() => {
+    const signer = signerRef.current;
     if (
-      input.publicAddress === null
+      input.paused
+      || input.publicAddress === null
       || input.pacificaProgramId.length === 0
       || input.privateAddress.length === 0
       || input.rpcUrl.length === 0
-      || input.signer === null
+      || signer === null
       || input.usdcMint.length === 0
       || input.usdtMint.length === 0
     ) return undefined;
@@ -66,7 +76,7 @@ export function useSolanaWalletActivity(input: {
       publicAddress: input.publicAddress,
       rpcUrl: input.rpcUrl,
       signal: controller.signal,
-      signer: input.signer,
+      signer,
       usdcMint: input.usdcMint,
       usdtMint: input.usdtMint,
     }).then((data) => {
@@ -89,13 +99,14 @@ export function useSolanaWalletActivity(input: {
     return () => controller.abort();
   }, [
     input.pacificaProgramId,
+    input.paused,
     input.privateAddress,
     input.publicAddress,
     input.rpcUrl,
-    input.signer,
     input.usdcMint,
     input.usdtMint,
     refreshKey,
+    signerReady,
   ]));
 
   return { refresh, state };

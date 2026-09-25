@@ -6,6 +6,7 @@ import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import {
   confirmSignature,
+  SEND_TRANSACTION_MAX_RETRIES,
   type SubmittedTransactionResult,
 } from '@/integrations/solana/transactionConfirmation';
 import { TransactionSigningError } from '@/integrations/solana/transactionSigningError';
@@ -145,7 +146,7 @@ export async function submitSignedVersionedTransaction(input: {
       input.signedTransactionBase64,
       {
         encoding: 'base64',
-        maxRetries: 0,
+        maxRetries: SEND_TRANSACTION_MAX_RETRIES,
         preflightCommitment: 'confirmed',
         skipPreflight: false,
       },

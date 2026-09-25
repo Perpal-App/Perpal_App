@@ -67,8 +67,8 @@ export function useDirectWithdrawalRecovery({
       });
     }).then((status) => {
       if (abort.signal.aborted || status === 'none') return;
-      void onBalancesChanged();
       if (status === 'confirmed') {
+        void onBalancesChanged();
         setPhase('idle');
         publishResult(notificationScope, correlationSignature, {
           outcome: 'success',

@@ -28,6 +28,17 @@ const CONFIRMATION_INTERVAL_MS = 1_200;
  */
 const CONFIRMATION_READ_FAILURES = 4;
 
+/**
+ * Provider-side rebroadcasts requested for an accepted signed transaction.
+ *
+ * `0` made every provider try the transaction once and forget it. The gateway broadcasts writes to all
+ * configured providers, but a node can still lose an accepted packet before the current leader sees it;
+ * recovery then repeats the same idempotency key and correctly receives the cached first response rather
+ * than a second dispatch. Asking each provider for a small bounded retry budget on the original request
+ * is therefore what keeps the one idempotent submission alive — not a second client submission.
+ */
+export const SEND_TRANSACTION_MAX_RETRIES = 5;
+
 export type SubmittedTransactionResult = {
   readonly signature: string;
   readonly status: 'confirmed' | 'submitted' | 'unknown';

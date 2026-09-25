@@ -1,5 +1,4 @@
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { fetchPacificaActivity } from '@/integrations/perps/pacifica/pacificaActivity';
 import {
@@ -13,11 +12,23 @@ import {
   subscribePacificaActivitySnapshot,
 } from '@/integrations/perps/pacifica/pacificaActivityStore';
 
-const FOCUS_REFRESH_AFTER_MS = 60_000;
-
+/**
+ * Reads the Pacifica history maintained by `PacificaAccountLifecycleMonitor`.
+ *
+ * This hook used to be a second automatic owner of the same three endpoints. The root monitor fetched
+ * account activity every five seconds while this hook independently fetched on focus, so opening or
+ * returning from the public-wallet signing prompt produced a `latest` and a `backfill` pass over the
+ * same history. The coordinator usually served one from cache, but both passes still parsed, merged,
+ * published, logged and could abort each other's visible lifecycle during focus changes.
+ *
+ * The root monitor is mounted above navigation and already owns foreground catch-up, polling, backoff,
+ * checkpointing and publication. A screen should subscribe to that result, not recreate its lifecycle.
+ * The only write path kept here is an explicit Retry press: it performs one forced network refresh and
+ * publishes through the same store. That preserves the control's meaning without restoring a second
+ * automatic poller.
+ */
 export function usePacificaActivity(apiOrigin: string, account: string) {
-  const [refreshKey, setRefreshKey] = useState(0);
-  const forceNetwork = useRef(false);
+  const request = useRef<AbortController | null>(null);
   const subscribe = useCallback(
     (listener: () => void) => subscribePacificaActivitySnapshot(apiOrigin, account, listener),
     [account, apiOrigin],
@@ -28,34 +39,26 @@ export function usePacificaActivity(apiOrigin: string, account: string) {
   );
   const state = useSyncExternalStore(subscribe, read, read);
 
+  useEffect(() => () => request.current?.abort(), [account, apiOrigin]);
+
   const refresh = useCallback(() => {
-    forceNetwork.current = true;
-    setRefreshKey((value) => value + 1);
-  }, []);
-
-  useFocusEffect(useCallback(() => {
-    if (account.length === 0 || apiOrigin.length === 0) return undefined;
-    const current = readPacificaActivitySnapshot(apiOrigin, account);
-    const forced = forceNetwork.current;
-    forceNetwork.current = false;
-    if (
-      !forced
-      && current.data !== null
-      && Date.now() - current.updatedAtMs < FOCUS_REFRESH_AFTER_MS
-    ) return undefined;
-
+    if (account.length === 0 || apiOrigin.length === 0) return;
+    request.current?.abort();
     const controller = new AbortController();
+    request.current = controller;
+    const current = readPacificaActivitySnapshot(apiOrigin, account);
+
     void fetchPacificaActivity(
       apiOrigin,
       account,
       controller.signal,
       current.data === null || current.data.incomplete ? 'backfill' : 'latest',
-      forced ? 'network' : 'cached',
+      'network',
     ).then((activity) => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || request.current !== controller) return;
       publishPacificaActivitySnapshot({ account, activity, apiOrigin });
     }).catch((cause: unknown) => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || request.current !== controller) return;
       markPacificaActivityUnavailable({
         account,
         apiOrigin,
@@ -74,10 +77,10 @@ export function usePacificaActivity(apiOrigin: string, account: string) {
             : { errorName: cause instanceof Error ? cause.name : typeof cause },
         );
       }
+    }).finally(() => {
+      if (request.current === controller) request.current = null;
     });
-
-    return () => controller.abort();
-  }, [account, apiOrigin, refreshKey]));
+  }, [account, apiOrigin]);
 
   return { refresh, state };
 }

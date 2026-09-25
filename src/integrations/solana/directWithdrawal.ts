@@ -318,7 +318,6 @@ export async function submitDirectWithdrawal(input: {
       'balance_changed',
     );
   }
-  await simulate(Transaction.from(input.plan.unsignedTransaction), input);
 
   try {
     const result = await signAndSubmitLegacyTransaction({
@@ -340,12 +339,17 @@ export async function submitDirectWithdrawal(input: {
         'wallet-withdrawal',
       ),
       owner: input.plan.owner,
+      refreshBlockhashBeforeSigning: true,
       rpcUrl: input.rpcUrl,
       signer: input.signer,
       ...(input.transactionAuthority === undefined
         ? {}
         : { transactionAuthority: input.transactionAuthority }),
       unsignedTransaction: input.plan.unsignedTransaction,
+      // This runs on the final transaction after its new blockhash is installed. It reconstructs every
+      // instruction from the reviewed plan, so refreshing freshness cannot change owner, destination,
+      // mint, amount, token program or source allocations under the user's confirmation.
+      verifyTransaction: (transaction) => assertReviewedTransaction(input.plan, transaction),
     });
     if (result.status === 'confirmed') {
       await removePendingTradeAction(input.plan.owner, 'wallet-withdrawal');
@@ -361,8 +365,11 @@ export async function submitDirectWithdrawal(input: {
   }
 }
 
-function assertReviewedTransaction(plan: DirectWithdrawalPlan): void {
-  const actual = Transaction.from(plan.unsignedTransaction);
+function assertReviewedTransaction(
+  plan: DirectWithdrawalPlan,
+  transaction?: Transaction,
+): void {
+  const actual = transaction ?? Transaction.from(plan.unsignedTransaction);
   if (actual.recentBlockhash === undefined) {
     throw new DirectWithdrawalError('The withdrawal transaction is invalid.', 'transaction_invalid');
   }

@@ -14,6 +14,7 @@ import {
 } from '@/integrations/api/signedSolanaRpc';
 import {
   confirmSignature,
+  SEND_TRANSACTION_MAX_RETRIES,
   type SubmittedTransactionResult,
 } from '@/integrations/solana/transactionConfirmation';
 import { TransactionSigningError } from '@/integrations/solana/transactionSigningError';
@@ -46,8 +47,18 @@ export async function signAndSubmitLegacyTransaction(input: {
     signedTransactionBase64: string,
   ) => Promise<void>;
   readonly onSubmissionRejected?: () => Promise<void>;
+  /**
+   * Replaces the reviewed transaction's old blockhash immediately before its authority signs.
+   *
+   * The instructions do not change, and `verifyTransaction` runs after replacement. Direct withdrawals
+   * use this because their review intentionally separates inspection from signing; the blockhash should
+   * not have to survive however long that inspection takes.
+   */
+  readonly refreshBlockhashBeforeSigning?: boolean;
   readonly signal?: AbortSignal;
   readonly tradeTiming?: TradeTimingContext;
+  /** Independently verifies the final message, including after a blockhash refresh. */
+  readonly verifyTransaction?: (transaction: Transaction) => void;
 }): Promise<SubmittedTransactionResult> {
   const owner = new PublicKey(input.owner);
   const authority = input.transactionAuthority ?? localAuthority(input.signer);
@@ -75,26 +86,49 @@ export async function signAndSubmitLegacyTransaction(input: {
     );
   }
 
-  const blockhash = await signedSolanaRpc<{
-    readonly context: { readonly slot: number };
-    readonly value: boolean;
-  }>({
-    method: 'isBlockhashValid',
-    params: [transaction.recentBlockhash, { commitment: 'confirmed' }],
-    rpcUrl: input.rpcUrl,
-    signer: input.signer,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
+  if (input.refreshBlockhashBeforeSigning === true) {
+    // Fetch, install, re-verify, then sign. The previous order only asked whether the review-time
+    // blockhash was alive and then handed that aging message to Privy; a slow approval could consume its
+    // remaining lifetime after the check had passed. The fresh hash starts its life beside the signature.
+    const latest = await signedSolanaRpc<{
+      readonly value: { readonly blockhash: string };
+    }>({
+      method: 'getLatestBlockhash',
+      params: [{ commitment: 'confirmed' }],
+      rpcUrl: input.rpcUrl,
+      signer: input.signer,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    transaction.recentBlockhash = latest.value.blockhash;
+  } else {
+    const blockhash = await signedSolanaRpc<{
+      readonly context: { readonly slot: number };
+      readonly value: boolean;
+    }>({
+      method: 'isBlockhashValid',
+      params: [transaction.recentBlockhash, { commitment: 'confirmed' }],
+      rpcUrl: input.rpcUrl,
+      signer: input.signer,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
 
-  if (!blockhash.value) {
-    throw new TransactionSigningError(
-      'The transaction expired. Prepare it again.',
-      'blockhash_expired',
-    );
+    if (!blockhash.value) {
+      throw new TransactionSigningError(
+        'The transaction expired. Prepare it again.',
+        'blockhash_expired',
+      );
+    }
   }
 
+  // The operation owner knows the intent; this signer boundary knows only bytes. Run its decoder on the
+  // exact transaction about to be signed, after the only mutation this boundary is allowed to make.
+  input.verifyTransaction?.(transaction);
+  const refreshedUnsigned = transaction.serialize({
+    requireAllSignatures: false,
+    verifySignatures: false,
+  });
   const message = transaction.serializeMessage();
-  const signed = await authority.signTransaction(Transaction.from(input.unsignedTransaction));
+  const signed = await authority.signTransaction(Transaction.from(refreshedUnsigned));
   const ownerSignature = signed.signatures.find((entry) => entry.publicKey.equals(owner));
   const signature = ownerSignature?.signature;
 
@@ -135,7 +169,7 @@ export async function signAndSubmitLegacyTransaction(input: {
         signedTransactionBase64,
         {
           encoding: 'base64',
-          maxRetries: 0,
+          maxRetries: SEND_TRANSACTION_MAX_RETRIES,
           preflightCommitment: 'confirmed',
           skipPreflight: false,
         },
@@ -247,7 +281,7 @@ export async function submitSignedLegacyTransaction(input: {
       input.signedTransactionBase64,
       {
         encoding: 'base64',
-        maxRetries: 0,
+        maxRetries: SEND_TRANSACTION_MAX_RETRIES,
         preflightCommitment: 'confirmed',
         skipPreflight: false,
       },
@@ -362,7 +396,12 @@ export async function signAndSubmitMultiSignerLegacyTransaction(input: {
     method: 'sendTransaction',
     params: [
       base64.encode(transaction.serialize({ requireAllSignatures: true, verifySignatures: true })),
-      { encoding: 'base64', maxRetries: 0, preflightCommitment: 'confirmed', skipPreflight: false },
+      {
+        encoding: 'base64',
+        maxRetries: SEND_TRANSACTION_MAX_RETRIES,
+        preflightCommitment: 'confirmed',
+        skipPreflight: false,
+      },
     ],
     rpcUrl: input.rpcUrl,
     signer: input.requestSigner,

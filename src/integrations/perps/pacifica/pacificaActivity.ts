@@ -54,10 +54,8 @@ export type PacificaActivity = {
 const HISTORY_LIMIT = '100';
 const MAX_HISTORY_PAGES = 10;
 const MAX_HISTORY_ITEMS = 1_000;
-const DIAGNOSTIC_REPEAT_AFTER_MS = 30_000;
 
 let lastDiagnostic = '';
-let lastDiagnosticAtMs = 0;
 
 type HistoryResult<T> = {
   readonly items: readonly T[];
@@ -107,6 +105,16 @@ export async function fetchPacificaActivity(
       ...(signal === undefined ? {} : { signal }),
     })),
   ]);
+
+  // An abort is lifecycle, not a history result. `settle` is needed so one failed endpoint does not hide
+  // the other two, but it also turns an intentional focus/background cancellation into three data-shaped
+  // errors and the diagnostic used to print those as an incomplete refresh. Throw before logging; every
+  // owner already ignores work whose controller it cancelled.
+  if (signal?.aborted === true) {
+    throw [trades.error, balances.error, orders.error].find(
+      (cause) => cause instanceof PacificaApiError && cause.code === 'request_cancelled',
+    ) ?? new PacificaApiError('Pacifica request was cancelled.', 'request_cancelled', 0);
+  }
 
   logActivityDiagnostic({ balances, freshness, mode, orders, trades });
 
@@ -225,12 +233,8 @@ function logActivityDiagnostic(input: {
       || input.trades.data?.truncated === true
       || input.orders.data?.truncated === true,
   });
-  const now = Date.now();
-  if (diagnostic === lastDiagnostic && now - lastDiagnosticAtMs < DIAGNOSTIC_REPEAT_AFTER_MS) {
-    return;
-  }
+  if (diagnostic === lastDiagnostic) return;
   lastDiagnostic = diagnostic;
-  lastDiagnosticAtMs = now;
   console.info('[Perpal Pacifica activity]', diagnostic);
 }
 

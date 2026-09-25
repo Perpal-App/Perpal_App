@@ -46,6 +46,7 @@ export function GlobalActivityTracker({
   generation,
   metadata,
   pacificaProgramId,
+  paused,
   publicAccount,
   rpcUrl,
   signer,
@@ -65,6 +66,13 @@ export function GlobalActivityTracker({
    */
   readonly metadata: TokenMetadataMap;
   readonly pacificaProgramId: string;
+  /**
+   * Stops wallet-history RPC while a funding sheet owns the user's attention.
+   *
+   * A history load can request details for eighty signatures through the same signed gateway a
+   * withdrawal uses. History is non-critical and the transfer is not, so the sheet wins this resource.
+   */
+  readonly paused: boolean;
   readonly publicAccount: string | null;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner | null;
@@ -76,6 +84,7 @@ export function GlobalActivityTracker({
     pacificaProgramId,
     privateAddress: account,
     publicAddress: publicAccount,
+    paused,
     rpcUrl,
     signer,
     usdcMint,

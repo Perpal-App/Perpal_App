@@ -89,6 +89,8 @@ export function DirectWithdrawPanel({
   /** The prepared plan awaiting the reader's slide. Non-null is what swaps the form for the review. */
   const [pending, setPending] = useState<DirectWithdrawalPlan | null>(null);
   const controller = useRef<AbortController | null>(null);
+  /** Synchronous single-flight gate; React state cannot lock a second gesture until the next render. */
+  const submitInFlight = useRef(false);
   const tokens = useMemo(
     () => directWithdrawalTokens(balances, source, snapshot),
     [balances, snapshot, source],
@@ -371,7 +373,10 @@ export function DirectWithdrawPanel({
   };
 
   const submit = async (plan: DirectWithdrawalPlan) => {
-    if (!config.ok || session.signer === null) return;
+    if (!config.ok || session.signer === null || submitInFlight.current) return;
+    // Set before any await. A fast second finalize from the slider otherwise reaches this callback before
+    // `phase="submitting"` has rendered and can ask Privy for a second signature of the same intent.
+    submitInFlight.current = true;
     const notificationScope = captureInAppNotificationScope();
     setPhase('submitting');
     try {
@@ -384,9 +389,9 @@ export function DirectWithdrawPanel({
         signer: session.signer,
         ...(transactionAuthority === undefined ? {} : { transactionAuthority }),
       });
-      onBalancesChanged();
       setPending(null);
       if (result.status === 'confirmed') {
+        onBalancesChanged();
         setAmount('');
         setPhase('idle');
         publishInAppNotification({
@@ -416,6 +421,8 @@ export function DirectWithdrawPanel({
         scopeToken: notificationScope,
         message: directErrorMessage(cause),
       });
+    } finally {
+      submitInFlight.current = false;
     }
   };
 
