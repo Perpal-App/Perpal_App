@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
@@ -38,30 +38,46 @@ export function WalletWithdrawPanel({
 }) {
   const session = useTradingSession();
   const [source, setSource] = useState<Source>('public');
+  /**
+   * Whether a panel further down has a prepared plan on screen.
+   *
+   * Owned here because this is where the chrome it hides lives, and reported upward by whichever panel
+   * reaches its review. The source cannot change while a review is up — the buttons that would change
+   * it are exactly what this withdraws — so there is no state to reconcile when it clears.
+   */
+  const [reviewing, setReviewing] = useState(false);
 
   return (
     <View style={withdrawSheetStyles.stack}>
-      <Text accessibilityRole="header" style={withdrawSheetStyles.title}>Withdraw</Text>
+      {/* The sheet's title and its one unavoidable choice, both gone for the duration of a review. The
+          review carries its own heading and its own way back, and leaving these above it left the
+          reader looking at two headings and a decision that had already been made. */}
+      {reviewing ? null : (
+        <Fragment>
+          <Text accessibilityRole="header" style={withdrawSheetStyles.title}>Withdraw</Text>
 
-      <WithdrawChoice label="From">
-        {(['public', 'private'] as const).map((value) => (
-          <ActionButton
-            key={value}
-            label={value === 'public' ? 'Public wallet' : 'Private funds'}
-            onPress={() => setSource(value)}
-            radius={WITHDRAW_RADIUS}
-            selected={source === value}
-            style={withdrawOptionStyle}
-            tone={source === value ? 'accent' : 'neutral'}
-          />
-        ))}
-      </WithdrawChoice>
+          <WithdrawChoice label="From">
+            {(['public', 'private'] as const).map((value) => (
+              <ActionButton
+                key={value}
+                label={value === 'public' ? 'Public wallet' : 'Private funds'}
+                onPress={() => setSource(value)}
+                radius={WITHDRAW_RADIUS}
+                selected={source === value}
+                style={withdrawOptionStyle}
+                tone={source === value ? 'accent' : 'neutral'}
+              />
+            ))}
+          </WithdrawChoice>
+        </Fragment>
+      )}
 
       {source === 'public' ? (
         <DirectWithdrawPanel
           balances={balances}
           mainWalletAddress={session.mainWalletAddress}
           onBalancesChanged={onBalancesChanged}
+          onReviewingChange={setReviewing}
           source="public"
         />
       ) : (
@@ -69,6 +85,8 @@ export function WalletWithdrawPanel({
           balances={balances}
           onBalancesChanged={onBalancesChanged}
           onPacificaRefresh={onPacificaRefresh}
+          onReviewingChange={setReviewing}
+          reviewing={reviewing}
           snapshot={snapshot}
         />
       )}

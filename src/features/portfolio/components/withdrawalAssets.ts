@@ -10,6 +10,33 @@ export type WithdrawableToken = {
   readonly id?: string;
 };
 
+/**
+ * Lamports a native SOL withdrawal leaves behind so the transfer can pay for itself.
+ *
+ * A withdrawal is a single `SystemProgram.transfer` signed once, which Solana prices at 5,000 lamports.
+ * The reserve is double that so the amount offered as "Max" stays affordable if the fee is quoted higher
+ * a moment later, and nothing beyond the fee is held: the sender is a system account with no rent-exempt
+ * minimum to preserve.
+ */
+export const SOL_WITHDRAWAL_FEE_RESERVE_LAMPORTS = 10_000n;
+
+/**
+ * The largest amount of this token that can actually leave the wallet, in base units.
+ *
+ * SOL pays its network fee out of the balance being sent, so its whole balance is never a sendable
+ * amount — offering it produces a transfer the wallet cannot afford. SPL transfers are paid for in SOL,
+ * so the entire token balance is sendable and the fee is checked against SOL separately when the plan
+ * is built.
+ *
+ * `null` carries "not loaded yet" through unchanged; `0n` means there is nothing left to send.
+ */
+export function spendableMaximum(token: WithdrawableToken): bigint | null {
+  if (token.baseUnits === null) return null;
+  if (token.asset.kind !== 'native') return token.baseUnits;
+  const spendable = token.baseUnits - SOL_WITHDRAWAL_FEE_RESERVE_LAMPORTS;
+  return spendable > 0n ? spendable : 0n;
+}
+
 export function listWalletTokens(
   wallet: WalletBalance | null,
   configured: readonly ProviderCollateral[],

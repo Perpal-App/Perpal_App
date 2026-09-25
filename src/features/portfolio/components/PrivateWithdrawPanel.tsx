@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { PublicKey } from '@solana/web3.js';
 import { getSupportedMints } from '@umbra-privacy/sdk/constants';
@@ -13,7 +13,7 @@ import {
   withdrawOptionStyle,
 } from '@/features/portfolio/components/WithdrawChoice';
 import { WithdrawalTokenSelector } from '@/features/portfolio/components/WithdrawalTokenSelector';
-import { WithdrawReviewCard } from '@/features/portfolio/components/WithdrawReviewCard';
+import { WithdrawReviewStep } from '@/features/portfolio/components/WithdrawReviewStep';
 import { shortAddress } from '@/features/portfolio/components/directWithdrawPanelSupport';
 import {
   WITHDRAW_RADIUS,
@@ -43,9 +43,12 @@ import { showAppToast } from '@/storage/appToast';
  */
 export function PrivateWithdrawPanel({
   balances,
+  onReviewingChange,
   snapshot,
 }: {
   readonly balances: WalletBalances | null;
+  /** Reports the review step upward so the sheet's source and route choices can withdraw. */
+  readonly onReviewingChange: (reviewing: boolean) => void;
   readonly snapshot: PacificaPortfolioSnapshot | null;
 }) {
   const privateExit = usePrivateExit();
@@ -73,6 +76,13 @@ export function PrivateWithdrawPanel({
     () => readWithdrawable(configured, balances, snapshot),
     [balances, configured, snapshot],
   );
+
+  // Derived from the one piece of state that decides which step is rendered, so the sheet's chrome and
+  // this panel can never disagree about which of the two is on screen. A layout effect for the same
+  // reason as the direct panel's: the parent's chrome has to go in the same frame the review arrives.
+  useLayoutEffect(() => {
+    onReviewingChange(review !== null);
+  }, [onReviewingChange, review]);
 
   // Derived, not corrected in an effect. A balance can drop to zero while the panel is open, and the
   // selection has to fall back within the same render — otherwise the amount field would keep
@@ -126,31 +136,25 @@ export function PrivateWithdrawPanel({
 
   if (review !== null) {
     return (
-      <View style={styles.panel}>
-        <WithdrawReviewCard
-          confirming={privateExit.isRunning}
-          headline={`${amount.trim()} ${review.asset.symbol}`}
-          note={privateRouteNote(review.asset.kind === 'native')}
-          onCancel={() => setReview(null)}
-          onConfirm={() => {
-            setReview(null);
-            void privateExit.start(review.baseUnits, review.destination, review.asset);
-          }}
-          rows={[
-            {
-              label: 'To',
-              value: destinationMode === 'privy'
-                ? 'Your public wallet'
-                : shortAddress(review.destination),
-            },
-            { label: 'Route', value: 'Umbra private transfer' },
-            ...(collectsFromVenue ? [{ label: 'Trading fee', value: feeLabel() }] : []),
-          ]}
-          slideLabel="Slide to withdraw"
-          title="Review private withdrawal"
-          workingLabel="Withdrawing"
-        />
-      </View>
+      <WithdrawReviewStep
+        confirming={privateExit.isRunning}
+        headline={`${amount.trim()} ${review.asset.symbol}`}
+        note={privateRouteNote()}
+        onBack={() => setReview(null)}
+        onConfirm={() => {
+          setReview(null);
+          void privateExit.start(review.baseUnits, review.destination, review.asset);
+        }}
+        rows={privateReviewRows({
+          destination: review.destination,
+          nativeSol: review.asset.kind === 'native',
+          toOwnWallet: destinationMode === 'privy',
+          venueFee: collectsFromVenue ? feeLabel() : null,
+        })}
+        slideLabel="Slide to withdraw"
+        title="Review private withdrawal"
+        workingLabel="Withdrawing"
+      />
     );
   }
 
@@ -339,21 +343,44 @@ function venueWithdrawable(snapshot: PacificaPortfolioSnapshot | null): bigint {
 }
 
 /**
- * What the Umbra route costs and what it can leave behind, stated before it is approved.
+ * What the Umbra route can cost beyond the rows, and what happens if it breaks.
  *
- * Every clause here was in the alert this replaced and none of it is decoration. The relayer fee comes
- * out of the transfer and cannot be quoted in advance, first use spends SOL on accounts that did not
- * exist, and an interrupted claim leaves a recoverable note rather than a lost balance — a reader who
- * has not been told the third will read an interruption as missing money.
+ * Four clauses joined into a paragraph before this, which under a step of four rows was fine print
+ * nobody reads — and it is the one route where the fine print is load-bearing. Two of the four were
+ * values with labels and moved into `privateReviewRows`: what the relayer takes, and what lands in the
+ * wallet at the end.
+ *
+ * These two stay prose because neither is a value. First use is a cost that may or may not apply and
+ * cannot be quoted, and the second is a conditional about an interruption — which has to survive the
+ * edit, because a reader who has not been told it will read a stalled claim as lost money.
  */
-function privateRouteNote(nativeSol: boolean): string {
+function privateRouteNote(): string {
+  return 'First use spends SOL on account rent. An interrupted claim can be resumed.';
+}
+
+/**
+ * What a private withdrawal is approved on.
+ *
+ * `Delivers` and `Relayer fee` were clauses of the note. The relayer's cut cannot be quoted in advance,
+ * so the value says where it comes from rather than inventing a figure — the honest answer to "how much"
+ * here is "out of this transfer", and a number would be a guess presented as a quote.
+ */
+function privateReviewRows(input: {
+  readonly destination: string;
+  readonly nativeSol: boolean;
+  readonly toOwnWallet: boolean;
+  readonly venueFee: string | null;
+}): readonly { readonly label: string; readonly value: string }[] {
   return [
-    nativeSol
-      ? 'Umbra wraps SOL inside the pool and delivers native SOL after the relayed claim.'
-      : 'Relayer fees are deducted from the private transfer.',
-    'First use may create Umbra accounts and spend SOL on rent and network fees.',
-    'If a claim is interrupted after deposit, resume it to recover the note.',
-  ].join(' ');
+    {
+      label: 'To',
+      value: input.toOwnWallet ? 'Your public wallet' : shortAddress(input.destination),
+    },
+    { label: 'Route', value: 'Umbra private transfer' },
+    ...(input.nativeSol ? [{ label: 'Delivers', value: 'Native SOL' }] : []),
+    { label: 'Relayer fee', value: 'From the transfer' },
+    ...(input.venueFee === null ? [] : [{ label: 'Trading fee', value: input.venueFee }]),
+  ];
 }
 
 function feeLabel(): string {

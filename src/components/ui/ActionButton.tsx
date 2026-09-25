@@ -1,8 +1,8 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { RaisedMaterial } from '@/components/ui/RaisedMaterial';
 import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
 /**
@@ -17,71 +17,55 @@ const MIN_HEIGHT = 42;
 export type ActionButtonTone = 'accent' | 'negative' | 'neutral' | 'positive';
 
 /**
- * The four materials an action can be cut from.
+ * The four materials an action can be cut from: a solid fill, a label colour, a halo, and how much
+ * specular the fill can absorb.
  *
- * The three lit ones share one construction, the same one `RaisedChip` uses: a ramp that runs from a
- * lit top edge through its deepest tone to a small lift at the bottom, a specular fading out before
- * the midpoint, and no border. Between them those describe a convex surface — a top catching light, a
- * shaded belly, a lower edge picking up bounce.
+ * A colour and not a ramp, which is the fix for a selected button coming up as a flat block with no
+ * label on it. The modelling that used to live in a three-stop gradient now comes from `RaisedMaterial`,
+ * whose two overlays are identical for every tone — so choosing an option changes a `backgroundColor`
+ * and an opacity and touches no native gradient prop. `expo-linear-gradient`'s Android view rebuilds its
+ * shader from two separate setters and abandons the rebuild whenever `colors` and `locations` disagree in
+ * length; a gradient asked to change its stop count at runtime is a gradient that can be left drawing
+ * nothing, and swapping between the three-stop accent ramp and the two-stop grey one did exactly that.
  *
- * They used to be rimmed a step darker than the base on all four sides, and that rim was the reason
- * they read as flat. An even outline traces a shape rather than shading it, and light does not arrive
- * from four directions; drawn around a two-stop ramp it turned each button into a coloured rectangle
- * with a line around it. What replaces it is a specular inside the top edge and the tone's own halo
- * outside all of them.
+ * `fill` is each old ramp's deepest stop rather than a new colour, so every button keeps the tone it
+ * had — the sheen supplies the lit top edge the first stop used to be, and the shade supplies the belly.
  *
- * `neutral` is deliberately not one of them. It is the quiet secondary, cut from the same raised grey
- * the search field and the markets table header use, and it keeps its border because that border is
- * the only thing separating a dark grey control from a near-black page. Its halo is the app's dark
- * contact shadow rather than a coloured glow — grey does not emit light — and its specular is
- * `quietSheen`, a quarter-strength version of the others.
- *
- * Every tone names a sheen, and none of them names `null`. That is load-bearing rather than tidy: the
- * sheen is a sibling of the label inside the ramp, so a tone that mounted it and a tone that did not
- * gave the label two different positions in the child list. Selecting an option flipped its tone from
- * `neutral` to `accent`, the sheen was inserted ahead of the label, and on Android the label lost the
- * draw order — the button came up filled and blank. Both layers now always exist and only their
- * colours change, so nothing is ever inserted next to the text.
- *
- * `base` is never seen: the ramp covers it. It exists because Android's `elevation` will not throw a
- * shadow from a view with no background, and it is the ramp's own lowest stop so a partial paint
- * cannot flash a foreign colour.
- *
- * Left to infer rather than annotated: `LinearGradient` wants its stops as tuples of at least two
- * entries, and widening them through a record type is enough to lose that and fail the call.
+ * The lit three carry no border. They were rimmed a step darker on all four sides, and that rim was why
+ * they read as flat: an even outline traces a shape instead of shading it, and light does not arrive from
+ * four directions. `neutral` keeps its border, because on a near-black page that border is the only thing
+ * separating a dark grey control from the page. Its specular runs at a quarter strength for the same
+ * reason, and its halo is the app's dark contact shadow rather than a coloured glow — grey does not emit
+ * light.
  */
 const TONES = {
   accent: {
-    base: gradients.accentAction.colors[2],
+    fill: gradients.accentAction.colors[1],
     glow: colors.accent,
     label: colors.onAccent,
-    ramp: gradients.accentAction,
     rim: null,
-    sheen: gradients.glassActionSheen,
+    sheen: 1,
   },
   negative: {
-    base: gradients.shortAction.colors[2],
+    fill: gradients.shortAction.colors[1],
     glow: colors.negative,
     label: colors.onAccent,
-    ramp: gradients.shortAction,
     rim: null,
-    sheen: gradients.glassActionSheen,
+    sheen: 1,
   },
   neutral: {
-    base: gradients.surfaceRaise.colors[1],
+    fill: gradients.surfaceRaise.colors[1],
     glow: colors.raisedHalo,
     label: colors.textPrimary,
-    ramp: gradients.surfaceRaise,
     rim: colors.border,
-    sheen: gradients.quietSheen,
+    sheen: 0.28,
   },
   positive: {
-    base: gradients.longAction.colors[2],
+    fill: gradients.longAction.colors[1],
     glow: colors.positive,
     label: colors.onLight,
-    ramp: gradients.longAction,
     rim: null,
-    sheen: gradients.glassActionSheen,
+    sheen: 1,
   },
 } as const;
 
@@ -176,39 +160,43 @@ export function ActionButton({
       style={[
         styles.button,
         large && styles.buttonLarge,
-        { backgroundColor: material.base, borderRadius: corner },
+        // The colour is on both layers on purpose. The fill below needs it to be seen; this one needs it
+        // because Android's `elevation` throws no shadow from a view with no background, and the halo
+        // lives here. Taken from the same token, so they cannot disagree.
+        { backgroundColor: material.fill, borderRadius: corner },
         glow ? [styles.glow, { shadowColor: material.glow }] : null,
         unavailable && styles.disabled,
         style,
       ]}
     >
-      {/* The ramp is a child rather than the pressable itself, so the halo on the parent is not clipped
-          by the `overflow` this needs to keep the fill inside the corner. Same arrangement as
-          `RaisedChip`, and for the same reason: `overflow: 'hidden'` sets `masksToBounds`, and a masked
-          layer throws no shadow on iOS — which is why the contact shadow this pair used to carry was
-          never visible there. */}
-      <LinearGradient
-        colors={material.ramp.colors}
-        end={{ x: 0.5, y: 1 }}
-        locations={material.ramp.locations}
-        start={{ x: 0.5, y: 0 }}
+      {/* A plain view holds the colour, the corner, the clip and the label. The modelling is two fixed
+          overlays behind the label, not a container around it.
+
+          1. The clip has to be off the pressable, because `overflow: 'hidden'` sets `masksToBounds` and
+             a masked layer throws no shadow on iOS — which is why the contact shadow this pair used to
+             carry was never visible there.
+          2. The clip has to be a React Native view rather than a gradient. `overflow` and `borderRadius`
+             on a third-party native view are the platform's least-tested path; on a `View` they are the
+             most-tested one.
+          3. The label must not be inside a gradient. Whatever a gradient view does or fails to do with
+             its shader, the text is a sibling and renders regardless. */}
+      <View
+        // Fabric can retain a clipped Android view's display list while its background, border and
+        // descendants are restyled in one commit. The symptom is unusually specific: accessibility
+        // still sees the TextView at the right bounds and at drawing order 3, but the frame contains
+        // only the new background. Remount the material boundary when the tone changes rather than
+        // asking that native view to mutate between the two display lists. The pressable stays mounted,
+        // so gesture state and accessibility focus do not move.
+        collapsable={false}
+        key={tone}
         style={[
           styles.fill,
           large && styles.fillLarge,
-          { borderRadius: corner },
+          { backgroundColor: material.fill, borderRadius: corner },
           material.rim === null ? null : { borderColor: material.rim, borderWidth: 1 },
         ]}
       >
-        {/* The specular the rim used to fake. A gradient rather than `borderTopWidth`, because a border
-            draws on all four sides or none. Unconditional — see `TONES`. */}
-        <LinearGradient
-          colors={material.sheen.colors}
-          end={{ x: 0.5, y: 1 }}
-          locations={material.sheen.locations}
-          pointerEvents="none"
-          start={{ x: 0.5, y: 0 }}
-          style={StyleSheet.absoluteFill}
-        />
+        <RaisedMaterial sheen={material.sheen} />
 
         {loading ? (
           <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -226,7 +214,7 @@ export function ActionButton({
             {label}
           </Text>
         )}
-      </LinearGradient>
+      </View>
     </PressableScale>
   );
 }
@@ -245,7 +233,7 @@ const styles = StyleSheet.create({
   // than the minimum, so it still measures exactly `MIN_HEIGHT` and nothing on any existing screen
   // moves — the flexibility only shows up where it is needed.
   //
-  // Not clipped, and carries no border. Both moved to the ramp inside it: this layer's only jobs are
+  // Not clipped, and carries no border. Both moved to the fill inside it: this layer's only jobs are
   // the height and the halo, and a layer that clips cannot cast one.
   button: {
     minHeight: MIN_HEIGHT,
@@ -263,7 +251,8 @@ const styles = StyleSheet.create({
   // `action` label's line plus the fill's padding comes to 40, which leaves the height to the minimum
   // at normal scale and to the label past it.
   buttonLarge: { minHeight: 52 },
-  // Rounds and clips itself rather than relying on the parent, so the halo above stays unmasked.
+  // Rounds and clips itself rather than relying on the parent, so the halo above stays unmasked. It also
+  // holds the label, which the gradients behind it deliberately do not.
   fill: {
     flex: 1,
     alignItems: 'center',

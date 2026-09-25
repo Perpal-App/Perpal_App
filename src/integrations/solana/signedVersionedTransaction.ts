@@ -5,13 +5,10 @@ import { PublicKey, VersionedTransaction } from '@solana/web3.js';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
 import {
-  readSubmittedTransactionStatus,
-  TransactionSigningError,
+  confirmSignature,
   type SubmittedTransactionResult,
-} from '@/integrations/solana/signedLegacyTransaction';
-
-const CONFIRMATION_ATTEMPTS = 10;
-const CONFIRMATION_INTERVAL_MS = 1_200;
+} from '@/integrations/solana/transactionConfirmation';
+import { TransactionSigningError } from '@/integrations/solana/transactionSigningError';
 
 /**
  * Owns the on-chain transaction signature only. Gateway RPC authentication is
@@ -260,30 +257,22 @@ async function isBlockhashValid(
   return response.value;
 }
 
-async function confirm(input: {
+/**
+ * Now the shared loop rather than a second copy of it.
+ *
+ * The copy this replaces had the same twelve-second attempt ceiling as the legacy one and no `catch` at
+ * all, so a rate-limited status read became a thrown error on a conversion that was probably fine.
+ */
+function confirm(input: {
   readonly expectedSignature: string;
   readonly operationLabel?: string;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
 }): Promise<'confirmed' | 'submitted'> {
-  for (let attempt = 0; attempt < CONFIRMATION_ATTEMPTS; attempt += 1) {
-    const status = await readSubmittedTransactionStatus({
-      rpcUrl: input.rpcUrl,
-      signature: input.expectedSignature,
-      signer: input.signer,
-    });
-
-    if (status === 'failed') {
-      throw new TransactionSigningError(
-        `The ${input.operationLabel ?? 'stablecoin conversion'} failed on-chain.`,
-        'transaction_failed',
-      );
-    }
-    if (status === 'confirmed') {
-      return 'confirmed';
-    }
-    await new Promise((resolve) => setTimeout(resolve, CONFIRMATION_INTERVAL_MS));
-  }
-
-  return 'submitted';
+  return confirmSignature({
+    failureMessage: `The ${input.operationLabel ?? 'stablecoin conversion'} failed on-chain.`,
+    rpcUrl: input.rpcUrl,
+    signature: input.expectedSignature,
+    signer: input.signer,
+  });
 }

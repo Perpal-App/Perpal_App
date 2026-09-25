@@ -12,65 +12,27 @@ import {
   signedSolanaRpc,
   SolanaRpcError,
 } from '@/integrations/api/signedSolanaRpc';
+import {
+  confirmSignature,
+  type SubmittedTransactionResult,
+} from '@/integrations/solana/transactionConfirmation';
+import { TransactionSigningError } from '@/integrations/solana/transactionSigningError';
 
-const CONFIRMATION_ATTEMPTS = 10;
-const CONFIRMATION_INTERVAL_MS = 1_200;
-
-export type SubmittedTransactionResult = {
-  readonly signature: string;
-  readonly status: 'confirmed' | 'submitted' | 'unknown';
-};
-
-export type SubmittedTransactionStatus = 'confirmed' | 'failed' | 'pending';
+// Re-exported from the modules that now own them, so the six files importing these from here are
+// unaffected by the split. The confirmation loop moved out because the versioned path had a second copy
+// of it that had already drifted, and a loop that decides whether money moved should not exist twice.
+export {
+  readSubmittedTransactionStatus,
+  type SubmittedTransactionResult,
+  type SubmittedTransactionStatus,
+} from '@/integrations/solana/transactionConfirmation';
+export { TransactionSigningError } from '@/integrations/solana/transactionSigningError';
 
 /** Transaction authority is separate from the signer that authenticates gateway RPC calls. */
 export type LegacyTransactionAuthority = {
   readonly publicKey: Uint8Array;
   readonly signTransaction: (transaction: Transaction) => Promise<Transaction>;
 };
-
-export async function readSubmittedTransactionStatus(input: {
-  readonly rpcUrl: string;
-  readonly signer: GatewayRequestSigner;
-  readonly signature: string;
-  readonly signal?: AbortSignal;
-}): Promise<SubmittedTransactionStatus> {
-  const result = await signedSolanaRpc<{
-    readonly context: { readonly slot: number };
-    readonly value: readonly (
-      | { readonly err: unknown; readonly confirmationStatus?: string }
-      | null
-    )[];
-  }>({
-    method: 'getSignatureStatuses',
-    params: [[input.signature], { searchTransactionHistory: true }],
-    rpcUrl: input.rpcUrl,
-    signer: input.signer,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
-  const status = result.value[0];
-
-  if (status?.err !== null && status?.err !== undefined) {
-    return 'failed';
-  }
-  if (
-    status?.confirmationStatus === 'confirmed' ||
-    status?.confirmationStatus === 'finalized'
-  ) {
-    return 'confirmed';
-  }
-  return 'pending';
-}
-
-export class TransactionSigningError extends Error {
-  constructor(
-    message: string,
-    readonly code: string,
-  ) {
-    super(message);
-    this.name = 'TransactionSigningError';
-  }
-}
 
 export async function signAndSubmitLegacyTransaction(input: {
   readonly idempotencyKey: string;
@@ -238,12 +200,13 @@ export async function signAndSubmitLegacyTransaction(input: {
 
   return {
     signature: expectedSignature,
-    status: await confirmSignature(
-      input.rpcUrl,
-      input.signer,
-      expectedSignature,
-      input.signal,
-    ),
+    status: await confirmSignature({
+      failureMessage: 'The transaction failed on-chain.',
+      rpcUrl: input.rpcUrl,
+      signature: expectedSignature,
+      signer: input.signer,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
   };
 }
 
@@ -298,7 +261,12 @@ export async function submitSignedLegacyTransaction(input: {
   return {
     signature: input.expectedSignature,
     status: submitted === input.expectedSignature
-      ? await confirmSignature(input.rpcUrl, input.signer, input.expectedSignature)
+      ? await confirmSignature({
+          failureMessage: 'The transaction failed on-chain.',
+          rpcUrl: input.rpcUrl,
+          signature: input.expectedSignature,
+          signer: input.signer,
+        })
       : 'unknown',
   };
 }
@@ -404,79 +372,11 @@ export async function signAndSubmitMultiSignerLegacyTransaction(input: {
   if (submitted !== expected) return { signature: expected, status: 'unknown' };
   return {
     signature: expected,
-    status: await confirmSignature(input.rpcUrl, input.requestSigner, expected),
+    status: await confirmSignature({
+      failureMessage: 'The transaction failed on-chain.',
+      rpcUrl: input.rpcUrl,
+      signature: expected,
+      signer: input.requestSigner,
+    }),
   };
-}
-
-async function confirmSignature(
-  rpcUrl: string,
-  signer: GatewayRequestSigner,
-  signature: string,
-  signal?: AbortSignal,
-): Promise<'confirmed' | 'submitted'> {
-  for (let attempt = 0; attempt < CONFIRMATION_ATTEMPTS; attempt += 1) {
-    if (signal?.aborted) {
-      return 'submitted';
-    }
-
-    try {
-      const result = await signedSolanaRpc<{
-        readonly context: { readonly slot: number };
-        readonly value: readonly (
-          | {
-              readonly err: unknown;
-              readonly confirmationStatus?: string;
-            }
-          | null
-        )[];
-      }>({
-        method: 'getSignatureStatuses',
-        params: [[signature], { searchTransactionHistory: true }],
-        rpcUrl,
-        signer,
-        ...(signal === undefined ? {} : { signal }),
-      });
-      const status = result.value[0];
-
-      if (status?.err !== null && status?.err !== undefined) {
-        throw new TransactionSigningError(
-          'The transaction failed on-chain.',
-          'transaction_failed',
-        );
-      }
-
-      if (
-        status?.confirmationStatus === 'confirmed' ||
-        status?.confirmationStatus === 'finalized'
-      ) {
-        return 'confirmed';
-      }
-    } catch (cause) {
-      if (cause instanceof TransactionSigningError) {
-        throw cause;
-      }
-
-      return 'submitted';
-    }
-
-    await waitForNextStatus(signal);
-  }
-
-  return 'submitted';
-}
-
-function waitForNextStatus(signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const finish = () => {
-      if (timer !== undefined) {
-        clearTimeout(timer);
-      }
-      signal?.removeEventListener('abort', finish);
-      resolve();
-    };
-
-    timer = setTimeout(finish, CONFIRMATION_INTERVAL_MS);
-    signal?.addEventListener('abort', finish, { once: true });
-  });
 }

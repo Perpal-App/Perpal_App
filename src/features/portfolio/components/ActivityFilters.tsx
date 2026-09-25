@@ -1,4 +1,4 @@
-import { LinearGradient } from 'expo-linear-gradient';
+import { RaisedMaterial } from '@/components/ui/RaisedMaterial';
 import { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -89,6 +89,10 @@ export function ActivityFilters({
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const [open, setOpen] = useState(false);
   const active = filter !== 'all';
+  // Each ramp's deepest stop. The overlays supply the lit top edge the first stop used to be.
+  const fill = active
+    ? gradients.accentAction.colors[1]
+    : gradients.surfaceRaise.colors[1];
 
   // Measured on press rather than on layout. The section sits in a scroll view, so the button's
   // window position changes as the reader scrolls and a position captured at layout time would hang
@@ -124,17 +128,14 @@ export function ActivityFilters({
             { borderColor: active ? colors.accentEdge : colors.border },
           ]}
         >
-          <LinearGradient
-            colors={active ? gradients.accentAction.colors : gradients.surfaceRaise.colors}
-            end={{ x: 0.5, y: 1 }}
-            locations={active
-              ? gradients.accentAction.locations
-              : gradients.surfaceRaise.locations}
-            start={{ x: 0.5, y: 0 }}
-            style={styles.buttonFill}
-          >
+          {/* A solid colour under fixed overlays, not a ramp that changes with the state. This chip
+              swapped a live gradient between the accent ramp and the grey one, which is the update
+              `expo-linear-gradient`'s Android view mishandles — see `RaisedMaterial`. A chip that had
+              just been used could come back as an empty block. */}
+          <View style={[styles.buttonFill, { backgroundColor: fill }]}>
+            <RaisedMaterial sheen={active ? 1 : 0.28} />
             <FilterGlyph tone={active ? colors.onAccent : colors.textSecondary} />
-          </LinearGradient>
+          </View>
         </PressableScale>
       </View>
 

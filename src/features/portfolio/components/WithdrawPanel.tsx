@@ -30,11 +30,17 @@ export function WithdrawPanel({
   balances,
   onBalancesChanged,
   onPacificaRefresh,
+  onReviewingChange,
+  reviewing,
   snapshot,
 }: {
   readonly balances: WalletBalances | null;
   readonly onBalancesChanged: () => void;
   readonly onPacificaRefresh: () => void;
+  /** Passed through from the panel that owns the sheet's chrome to the panel that reaches a review. */
+  readonly onReviewingChange: (reviewing: boolean) => void;
+  /** True while a prepared plan is on screen below. Withdraws this panel's own choice and its notice. */
+  readonly reviewing: boolean;
   readonly snapshot: PacificaPortfolioSnapshot | null;
 }) {
   const session = useTradingSession();
@@ -42,48 +48,61 @@ export function WithdrawPanel({
 
   return (
     <View style={withdrawSheetStyles.stack}>
-      <WithdrawChoice
-        label="Route"
-        note={route === 'direct'
-          ? 'Visible on Solana.'
-          : 'Routed privately through Umbra.'}
-      >
-        <ActionButton
-          accessibilityHint="Sends directly from your private balance without Umbra"
-          label="Direct"
-          onPress={() => setRoute('direct')}
-          radius={WITHDRAW_RADIUS}
-          selected={route === 'direct'}
-          style={withdrawOptionStyle}
-          tone={route === 'direct' ? 'accent' : 'neutral'}
-        />
-        <ActionButton
-          accessibilityHint="Routes the withdrawal privately through Umbra"
-          label="Private"
-          onPress={() => setRoute('private')}
-          radius={WITHDRAW_RADIUS}
-          selected={route === 'private'}
-          style={withdrawOptionStyle}
-          tone={route === 'private' ? 'accent' : 'neutral'}
-        />
-      </WithdrawChoice>
+      {/* Hidden during a review, along with the source choice above it. The route is built into the plan
+          the reader is being shown, and its privacy note describes a decision already taken. */}
+      {reviewing ? null : (
+        <WithdrawChoice
+          label="Route"
+          note={route === 'direct'
+            ? 'Visible on Solana.'
+            : 'Routed privately through Umbra.'}
+        >
+          <ActionButton
+            accessibilityHint="Sends directly from your private balance without Umbra"
+            label="Direct"
+            onPress={() => setRoute('direct')}
+            radius={WITHDRAW_RADIUS}
+            selected={route === 'direct'}
+            style={withdrawOptionStyle}
+            tone={route === 'direct' ? 'accent' : 'neutral'}
+          />
+          <ActionButton
+            accessibilityHint="Routes the withdrawal privately through Umbra"
+            label="Private"
+            onPress={() => setRoute('private')}
+            radius={WITHDRAW_RADIUS}
+            selected={route === 'private'}
+            style={withdrawOptionStyle}
+            tone={route === 'private' ? 'accent' : 'neutral'}
+          />
+        </WithdrawChoice>
+      )}
 
       {route === 'direct' ? (
         <View style={withdrawSheetStyles.stack}>
-          <PacificaPendingReleaseCard
-            onBalancesChanged={onBalancesChanged}
-            onPacificaRefresh={onPacificaRefresh}
-          />
+          {/* An unrelated recovery prompt. It has its own action, and beside a plan awaiting a signature
+              it is a second thing to decide about at the moment there should be one. */}
+          {reviewing ? null : (
+            <PacificaPendingReleaseCard
+              onBalancesChanged={onBalancesChanged}
+              onPacificaRefresh={onPacificaRefresh}
+            />
+          )}
           <DirectWithdrawPanel
             balances={balances}
             mainWalletAddress={session.mainWalletAddress}
             onBalancesChanged={onBalancesChanged}
             onPacificaRefresh={onPacificaRefresh}
+            onReviewingChange={onReviewingChange}
             snapshot={snapshot}
           />
         </View>
       ) : (
-        <PrivateWithdrawPanel balances={balances} snapshot={snapshot} />
+        <PrivateWithdrawPanel
+          balances={balances}
+          onReviewingChange={onReviewingChange}
+          snapshot={snapshot}
+        />
       )}
     </View>
   );

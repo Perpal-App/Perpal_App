@@ -253,7 +253,10 @@ export const gradients = {
    * matter how the rim was drawn — and why the rim was being asked to supply a dimension the fill was
    * not providing.
    *
-   * Paired with `glassActionSheen` laid over the top and no border at all. See `ActionButton`.
+   * `ActionButton` no longer uses these as ramps — it takes the middle stop as a solid fill and models it
+   * with `actionSheen` and `actionShade`, because a gradient whose stop count changes at runtime is one
+   * `expo-linear-gradient` can leave drawing nothing. They remain the ramp for controls whose material
+   * never changes: `RaisedChip`, `GlassButton`, and the market detail header's back button.
    */
   longAction: {
     colors: ['#6BEDA6', '#23BA6E', '#2FC77B'],
@@ -328,25 +331,39 @@ export const gradients = {
     locations: [0, 0.45, 1],
   },
   /**
-   * The same specular, for a raised surface in the palette's greys rather than a colour.
+   * The light on a raised action, and the shade under it — laid over a solid fill rather than built
+   * into one.
    *
-   * A quarter of the strength. `glassActionSheen` is tuned for a fill bright enough to absorb it; laid
-   * over `surfaceRaise` the same white lifts the top edge to nearly `borderStrong`, which turns a quiet
-   * secondary control into the loudest thing in a row of them. At this weight it reads as the same
-   * material catching the same light, several stops down.
+   * These two never change. That is the entire point of them, and it is a bug fix rather than a
+   * preference. `expo-linear-gradient`'s Android view takes `colors` and `locations` through separate
+   * setters that each rebuild the shader, and its redraw abandons the attempt whenever the two array
+   * lengths disagree — so swapping a live gradient between ramps of different lengths, which is what a
+   * selected button used to do, leaves the view holding the wrong shader or none. Selecting an option
+   * turned it into a flat block of colour with its label gone.
    *
-   * It exists so every tone of `ActionButton` can carry a sheen unconditionally. That is not a
-   * cosmetic preference: a tone change that mounts or unmounts a layer changes the child order around
-   * the label, and on Android that cost the label its place in the draw order — a selected button came
-   * up with its fill and no text on it.
+   * With the colour carried by a plain `backgroundColor` and the modelling by these, a tone change
+   * touches no native gradient prop at all. What varies per tone is a background colour and an opacity,
+   * which are the two most ordinary style props React Native has.
+   *
+   * Between them they say what a three-stop ramp said: `actionSheen` lights the top third, `actionShade`
+   * darkens the belly and then eases off again by the lower edge, which is the bounce light that makes a
+   * surface read as convex rather than as a plane tilted away.
    */
-  quietSheen: {
+  actionSheen: {
     colors: [
+      'rgba(255, 255, 255, 0.28)',
       'rgba(255, 255, 255, 0.06)',
-      'rgba(255, 255, 255, 0.015)',
       'rgba(255, 255, 255, 0)',
     ],
-    locations: [0, 0.4, 1],
+    locations: [0, 0.34, 0.54],
+  },
+  actionShade: {
+    colors: [
+      'rgba(0, 0, 0, 0)',
+      'rgba(0, 0, 0, 0.17)',
+      'rgba(0, 0, 0, 0.08)',
+    ],
+    locations: [0.4, 0.82, 1],
   },
   /**
    * Specular highlight along the top of the glass. It fades out well before the

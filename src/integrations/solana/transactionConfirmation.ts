@@ -1,0 +1,140 @@
+import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
+import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
+import { TransactionSigningError } from '@/integrations/solana/transactionSigningError';
+
+/**
+ * How long a submission keeps asking whether its signature landed.
+ *
+ * A deadline, not the attempt count both callers used to carry. Ten attempts at a 1,200ms interval is
+ * twelve seconds only if a status read is free; each one is a signed gateway round trip, so on a slow
+ * network the attempts were spent in half the wall time the interval implied and the caller was told the
+ * transfer was still in flight while it was seconds from confirming.
+ *
+ * Twenty seconds covers a `confirmed` commitment with room for a congested slot. It is deliberately not
+ * the whole life of the transaction: past this the caller gets a `submitted` answer and is expected to
+ * keep watching in the background rather than hold its UI open.
+ */
+const CONFIRMATION_WINDOW_MS = 20_000;
+const CONFIRMATION_INTERVAL_MS = 1_200;
+
+/**
+ * Consecutive unreadable status polls tolerated before the caller is told it is still in flight.
+ *
+ * The legacy path treated this as one: a single rate-limited or timed-out read ended the loop and
+ * returned `submitted`, so the usual reason a confirmation was abandoned was not a slow transaction but
+ * one unlucky request. The versioned path did not catch at all and turned the same blip into a thrown
+ * error on a transaction that was fine. A read failure says nothing about whether the transaction
+ * landed, so it decides nothing here beyond costing one attempt.
+ */
+const CONFIRMATION_READ_FAILURES = 4;
+
+export type SubmittedTransactionResult = {
+  readonly signature: string;
+  readonly status: 'confirmed' | 'submitted' | 'unknown';
+};
+
+export type SubmittedTransactionStatus = 'confirmed' | 'failed' | 'pending';
+
+/**
+ * What the cluster currently says about one signature.
+ *
+ * `pending` covers both "never seen" and "seen but only processed", which are the same thing to every
+ * caller: no decision can be taken on it yet. Only `confirmed` and `failed` are answers.
+ */
+export async function readSubmittedTransactionStatus(input: {
+  readonly rpcUrl: string;
+  readonly signer: GatewayRequestSigner;
+  readonly signature: string;
+  readonly signal?: AbortSignal;
+}): Promise<SubmittedTransactionStatus> {
+  const result = await signedSolanaRpc<{
+    readonly context: { readonly slot: number };
+    readonly value: readonly (
+      | { readonly err: unknown; readonly confirmationStatus?: string }
+      | null
+    )[];
+  }>({
+    method: 'getSignatureStatuses',
+    params: [[input.signature], { searchTransactionHistory: true }],
+    rpcUrl: input.rpcUrl,
+    signer: input.signer,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  const status = result.value[0];
+
+  if (status?.err !== null && status?.err !== undefined) {
+    return 'failed';
+  }
+  if (
+    status?.confirmationStatus === 'confirmed' ||
+    status?.confirmationStatus === 'finalized'
+  ) {
+    return 'confirmed';
+  }
+  return 'pending';
+}
+
+/**
+ * Polls one signature to a verdict, or to `submitted` if the window closes first.
+ *
+ * One implementation for the legacy and versioned paths, which had a copy each and had already drifted
+ * apart in how they handled a read failure. A confirmation loop is the last thing that should exist
+ * twice: it is the step that decides whether the caller believes money moved.
+ *
+ * `submitted` is not a failure and must not be reported as one. It means the question is still open, and
+ * the caller's job from there is to keep asking — see `useDirectWithdrawalRecovery`, where a transfer
+ * left in that state is watched until the signature status or its blockhash settles it.
+ */
+export async function confirmSignature(input: {
+  readonly failureMessage: string;
+  readonly rpcUrl: string;
+  readonly signature: string;
+  readonly signal?: AbortSignal;
+  readonly signer: GatewayRequestSigner;
+}): Promise<'confirmed' | 'submitted'> {
+  const deadline = Date.now() + CONFIRMATION_WINDOW_MS;
+  let readFailures = 0;
+
+  while (Date.now() < deadline) {
+    if (input.signal?.aborted) return 'submitted';
+
+    try {
+      const status = await readSubmittedTransactionStatus({
+        rpcUrl: input.rpcUrl,
+        signature: input.signature,
+        signer: input.signer,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+
+      if (status === 'failed') {
+        throw new TransactionSigningError(input.failureMessage, 'transaction_failed');
+      }
+      if (status === 'confirmed') return 'confirmed';
+      readFailures = 0;
+    } catch (cause) {
+      // An on-chain failure is an answer and ends the loop. Anything else is the gateway or the network.
+      if (cause instanceof TransactionSigningError) throw cause;
+
+      readFailures += 1;
+      if (readFailures >= CONFIRMATION_READ_FAILURES) return 'submitted';
+    }
+
+    await waitForNextStatus(input.signal);
+  }
+
+  return 'submitted';
+}
+
+function waitForNextStatus(signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+
+    timer = setTimeout(finish, CONFIRMATION_INTERVAL_MS);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}

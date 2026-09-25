@@ -40,7 +40,28 @@ import { DirectWithdrawalError } from '@/integrations/solana/directWithdrawalErr
 
 export { DirectWithdrawalError } from '@/integrations/solana/directWithdrawalError';
 
+/**
+ * How long a prepared preview may be signed against.
+ *
+ * A freshness bound on the quote: the fee, the rent and the balances in the plan were all read at one
+ * moment, and past this they are worth re-reading rather than signing. It is deliberately shorter than
+ * the blockhash's own 150-slot life, so there is room for the submission round trips inside it.
+ */
 const PLAN_LIFETIME_MS = 45_000;
+
+/**
+ * How long the pending-submission record outlives its signature before it is abandoned as untrackable.
+ *
+ * Measured from signing, which is the distinction that matters. The record used to inherit
+ * `plan.expiresAtMs` — the preview's deadline, counted from before the reader had seen the review — so a
+ * transaction was routinely signed and submitted with its record already expired, and recovery would
+ * delete it and report the transfer gone. This clock starts when there is something to track.
+ *
+ * It is only a backstop. `reconcilePendingTradeAction` settles a stored transaction by reading its
+ * signature status and its blockhash, both of which answer sooner and answer definitively; this bounds
+ * the case where neither can be asked.
+ */
+const SUBMISSION_RECORD_LIFETIME_MS = 120_000;
 const UNSUPPORTED_TOKEN_2022_EXTENSIONS = new Set([
   ExtensionType.ConfidentialTransferMint,
   ExtensionType.NonTransferable,
@@ -211,10 +232,12 @@ export async function prepareDirectWithdrawal(input: {
   const requiredSolLamports = feeLamports + rentLamports +
     (input.kind === 'native' ? amountBaseUnits : 0n);
   if (solBalance < requiredSolLamports) {
+    // Kept short because this surfaces as a toast, which gives a message two short lines before it
+    // ellipsizes — and the tail is where the reader is told what is short.
     throw new DirectWithdrawalError(
       input.kind === 'native'
-        ? 'This wallet needs enough SOL for the amount and network fee.'
-        : 'This wallet needs more SOL for the network fee and destination token-account rent.',
+        ? 'Not enough SOL for the amount and network fee.'
+        : 'Not enough SOL for the network fee and account rent.',
       'insufficient_sol',
     );
   }
@@ -267,15 +290,19 @@ export async function submitDirectWithdrawal(input: {
   }
   assertReviewedTransaction(input.plan);
 
-  const destinationExists = input.plan.destinationTokenAccount === null
-    ? true
-    : await readAccount(input.plan.destinationTokenAccount, input) !== null;
-  const [solBalance, tokenBalances] = await Promise.all([
+  // All three reads at once. The destination lookup used to be awaited on its own before the balances
+  // were even requested, which put a whole gateway round trip in front of them for no ordering reason —
+  // and every sequential round trip here is spent out of the blockhash's remaining life.
+  const [destination, solBalance, tokenBalances] = await Promise.all([
+    input.plan.destinationTokenAccount === null
+      ? Promise.resolve(null)
+      : readAccount(input.plan.destinationTokenAccount, input),
     readSolBalance(input.plan.owner, input),
     Promise.all(input.plan.sourceTokenAccounts.map((source) =>
       readTokenBalance(source.address, input),
     )),
   ]);
+  const destinationExists = input.plan.destinationTokenAccount === null || destination !== null;
   const requiredSol = input.plan.feeLamports +
     (destinationExists ? 0n : input.plan.tokenAccountRentLamports) +
     (input.plan.kind === 'native' ? input.plan.amountBaseUnits : 0n);
@@ -298,7 +325,7 @@ export async function submitDirectWithdrawal(input: {
       idempotencyKey: input.plan.idempotencyKey,
       onSigned: (signature, signedTransactionBase64) => writePendingTradeAction({
         amountBaseUnits: input.plan.amountBaseUnits.toString(),
-        expiresAtMs: input.plan.expiresAtMs,
+        expiresAtMs: Date.now() + SUBMISSION_RECORD_LIFETIME_MS,
         idempotencyKey: input.plan.idempotencyKey,
         kind: 'withdraw',
         owner: input.plan.owner,

@@ -35,6 +35,7 @@ export function DirectWithdrawForm({
   destinationMode,
   disabled,
   externalAddress,
+  maxDisabled,
   onAmountChange,
   onDestinationMode,
   onExternalAddress,
@@ -53,6 +54,11 @@ export function DirectWithdrawForm({
   /** True when the form cannot produce a valid request at all — no asset, or no destination wallet. */
   readonly disabled: boolean;
   readonly externalAddress: string;
+  /**
+   * True when there is no balance to fill in. Kept apart from `disabled` because Max only reads the
+   * selected token; a destination the review still needs is no reason to refuse to fill the amount.
+   */
+  readonly maxDisabled: boolean;
   readonly onAmountChange: (value: string) => void;
   readonly onDestinationMode: (mode: DirectDestinationMode) => void;
   readonly onExternalAddress: (value: string) => void;
@@ -112,9 +118,9 @@ export function DirectWithdrawForm({
           tokens={tokens}
         />
         <ActionButton
-          disabled={disabled || running}
+          accessibilityHint="Fills the amount with everything available to withdraw"
+          disabled={maxDisabled || running}
           label="Max"
-          loading={phase === 'quoting'}
           onPress={onMax}
           radius={WITHDRAW_RADIUS}
           style={styles.max}
@@ -155,7 +161,6 @@ export function DirectWithdrawForm({
  */
 function ctaLabel(phase: DirectWithdrawalPhase, source: DirectWithdrawalSource): string {
   if (phase === 'pending') return 'Withdrawal confirming';
-  if (phase === 'quoting') return 'Calculating max';
   if (phase === 'preparing') return 'Checking fees';
   if (phase === 'submitting') return 'Submitting withdrawal';
   return source === 'public' ? 'Review send' : 'Review direct withdrawal';

@@ -1,6 +1,5 @@
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { PublicKey } from '@solana/web3.js';
 
 import { readAppConfig } from '@/config/appConfig';
@@ -9,17 +8,19 @@ import {
   DirectWithdrawForm,
   type DirectDestinationMode,
 } from '@/features/portfolio/components/DirectWithdrawForm';
-import { withdrawSheetStyles as styles } from '@/features/portfolio/components/withdrawSheetStyles';
 import {
   formatTokenAmount,
   parseTokenAmount,
+  spendableMaximum,
 } from '@/features/portfolio/components/withdrawalAssets';
 import {
   DIRECT_REVIEW_NOTE,
   directErrorMessage,
   directReviewRows,
   directWithdrawalTokens,
-  maxCostMessage,
+  emptyBalanceMessage,
+  loadingMessage,
+  maxAmountMessage,
   pacificaReleaseRequirement,
   publicTransactionAuthority,
   shortAddress,
@@ -27,7 +28,7 @@ import {
   type DirectWithdrawalSource,
   type PacificaReleaseRequirement,
 } from '@/features/portfolio/components/directWithdrawPanelSupport';
-import { WithdrawReviewCard } from '@/features/portfolio/components/WithdrawReviewCard';
+import { WithdrawReviewStep } from '@/features/portfolio/components/WithdrawReviewStep';
 import {
   useDirectWithdrawalRecovery,
   type DirectWithdrawalPhase,
@@ -57,6 +58,7 @@ export function DirectWithdrawPanel({
   mainWalletAddress,
   onBalancesChanged,
   onPacificaRefresh,
+  onReviewingChange,
   snapshot = null,
   source = 'private',
 }: {
@@ -64,6 +66,13 @@ export function DirectWithdrawPanel({
   readonly mainWalletAddress: string | null;
   readonly onBalancesChanged: () => void | Promise<void>;
   readonly onPacificaRefresh?: () => void | Promise<void>;
+  /**
+   * Reports whether the review is on screen, so the sheet above can withdraw its own selectors.
+   *
+   * Required rather than optional: a call site that forgot it would leave the source and route choices
+   * sitting above a plan they can no longer change.
+   */
+  readonly onReviewingChange: (reviewing: boolean) => void;
   readonly snapshot?: PacificaPortfolioSnapshot | null;
   readonly source?: DirectWithdrawalSource;
 }) {
@@ -79,7 +88,6 @@ export function DirectWithdrawPanel({
   const [phase, setPhase] = useState<DirectWithdrawalPhase>('idle');
   /** The prepared plan awaiting the reader's slide. Non-null is what swaps the form for the review. */
   const [pending, setPending] = useState<DirectWithdrawalPlan | null>(null);
-  const [withdrawMaximum, setWithdrawMaximum] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const tokens = useMemo(
     () => directWithdrawalTokens(balances, source, snapshot),
@@ -87,24 +95,45 @@ export function DirectWithdrawPanel({
   );
   const selected = tokens.find((token) => token.id === chosenId) ?? tokens[0] ?? null;
   const asset = selected?.asset ?? null;
-  const availableBaseUnits = selected?.baseUnits ?? null;
+  /**
+   * The ceiling both "Max" and the typed-amount check work from.
+   *
+   * It is the spendable maximum, not the raw balance: for SOL those differ by the fee reserve, and
+   * validating against the balance accepted an amount that could only fail once the plan priced the
+   * transfer. One value now decides what Max fills in, what the range message quotes, and what a manual
+   * entry is allowed to be.
+   */
+  const maxBaseUnits = selected === null ? null : spendableMaximum(selected);
   const running = phase !== 'idle';
   const owner = source === 'public' ? mainWalletAddress : session.address;
 
   useEffect(() => () => controller.current?.abort(), []);
 
+  /**
+   * Derived from `pending` in one place rather than announced by each of the four transitions that set
+   * it. Missing one of those would leave the sheet's selectors on screen beside a prepared plan, and the
+   * plan is the only thing that knows which step the reader is on.
+   *
+   * A layout effect, not a passive one: the parent's re-render removes the title and the source choice
+   * from above this panel, and a passive effect lets the frame in between reach the screen — a flash of
+   * the form's chrome over the review, with the whole step jumping up once it clears.
+   */
+  useLayoutEffect(() => {
+    onReviewingChange(pending !== null);
+  }, [onReviewingChange, pending]);
+
   useDirectWithdrawalRecovery({
     onBalancesChanged,
     owner,
+    phase,
     rpcUrl: config.ok ? config.value.api.rpcUrl : null,
     setPhase,
     signer: session.signer,
   });
 
   const buildSolanaReview = async (input: {
-    readonly amountBaseUnits: bigint | 'max';
+    readonly amountBaseUnits: bigint;
     readonly destinationAddress: string;
-    readonly quoteOnly: boolean;
     readonly signal: AbortSignal;
   }) => {
     if (!config.ok || owner === null || session.signer === null || asset === null) {
@@ -126,20 +155,12 @@ export function DirectWithdrawPanel({
         : {}),
     });
     if (input.signal.aborted) return;
-    if (input.quoteOnly) {
-      setAmount(formatTokenAmount(plan.amountBaseUnits, plan.decimals));
-      setWithdrawMaximum(true);
-      setPhase('idle');
-      showAppToast({ outcome: 'info', message: maxCostMessage(plan) });
-      return;
-    }
     review(plan);
   };
 
   const releasePacificaAndContinue = async (input: {
-    readonly amountBaseUnits: bigint | 'max';
+    readonly amountBaseUnits: bigint;
     readonly destinationAddress: string;
-    readonly quoteOnly: boolean;
     readonly release: PacificaReleaseRequirement;
     readonly signal: AbortSignal;
   }) => {
@@ -183,10 +204,39 @@ export function DirectWithdrawPanel({
     }
   };
 
-  const prepare = async (
-    quoteOnly = false,
-    maximum = withdrawMaximum,
-  ) => {
+  /**
+   * Fills the amount field with everything that can be sent, from balances already on screen.
+   *
+   * This used to ask the network: it sent `'max'` through `prepareDirectWithdrawal` so the fee could be
+   * priced exactly, which meant Max needed a valid destination address before it could answer. On the
+   * public route the address field starts empty, so the first tap threw on `new PublicKey('')` and the
+   * reader was told to enter an amount up to their balance — advice for a problem they did not have, and
+   * for SOL a figure the fee made unsendable anyway. Max is now the same arithmetic as the range check
+   * that guards a typed amount, so it always produces a value that check accepts, and the exact fee is
+   * still priced against that amount when the plan is built for review.
+   */
+  const fillMaximumAmount = () => {
+    if (asset === null || maxBaseUnits === null) {
+      showAppToast({ outcome: 'error', message: loadingMessage(source) });
+      return;
+    }
+    if (maxBaseUnits <= 0n) {
+      showAppToast({ outcome: 'error', message: emptyBalanceMessage(asset) });
+      return;
+    }
+    setAmount(formatTokenAmount(maxBaseUnits, asset.decimals));
+    showAppToast({
+      outcome: 'info',
+      message: maxAmountMessage({
+        decimals: asset.decimals,
+        kind: asset.kind,
+        maxBaseUnits,
+        symbol: asset.symbol,
+      }),
+    });
+  };
+
+  const prepare = async () => {
     if (
       !config.ok ||
       session.status !== 'ready' ||
@@ -194,52 +244,50 @@ export function DirectWithdrawPanel({
       session.signer === null ||
       selected === null ||
       asset === null ||
-      availableBaseUnits === null
+      maxBaseUnits === null
     ) {
+      showAppToast({ outcome: 'error', message: loadingMessage(source) });
+      return;
+    }
+
+    // Amount and destination are checked apart because they fail for unrelated reasons. Reporting both
+    // as an amount problem is what made an empty address field read as an amount that was too large.
+    let amountBaseUnits: bigint;
+    try {
+      amountBaseUnits = parseTokenAmount(amount, asset.decimals);
+      if (amountBaseUnits <= 0n || amountBaseUnits > maxBaseUnits) throw new Error('out of range');
+    } catch {
       showAppToast({
-        outcome: 'error', 
-        message: `${source === 'public' ? 'Public' : 'Private'} balances are still loading.`,
+        outcome: 'error',
+        message: maxBaseUnits <= 0n
+          ? emptyBalanceMessage(asset)
+          : `Enter up to ${formatTokenAmount(maxBaseUnits, asset.decimals)} ${asset.symbol}.`,
       });
       return;
     }
 
-    let amountBaseUnits: bigint | 'max';
     let destinationAddress: string;
     try {
-      amountBaseUnits = maximum ? 'max' : parseTokenAmount(amount, asset.decimals);
       destinationAddress = new PublicKey(
         destinationMode === 'privy' ? mainWalletAddress ?? '' : externalAddress.trim(),
       ).toBase58();
-      if (amountBaseUnits !== 'max' && (
-        amountBaseUnits <= 0n || amountBaseUnits > availableBaseUnits
-      )) {
-        throw new Error('invalid amount');
-      }
     } catch {
       showAppToast({
-        outcome: 'error', 
-        message: `Enter up to ${formatTokenAmount(availableBaseUnits, asset.decimals)} ${asset.symbol}.`,
+        outcome: 'error',
+        message: destinationMode === 'privy'
+          ? 'Public wallet still loading.'
+          : 'Enter a destination address.',
       });
       return;
     }
 
     const privateUsdc = source === 'private' && asset.kind === 'spl' &&
       asset.mint === config.value.perps.usdcMint;
-    if (quoteOnly && privateUsdc) {
-      setAmount(formatTokenAmount(availableBaseUnits, asset.decimals));
-      setWithdrawMaximum(false);
-      setPhase('idle');
-      showAppToast({
-        outcome: 'info',
-        message: `Max set to ${formatTokenAmount(availableBaseUnits, asset.decimals)} USDC.`,
-      });
-      return;
-    }
 
     controller.current?.abort();
     const abort = new AbortController();
     controller.current = abort;
-    setPhase(quoteOnly ? 'quoting' : 'preparing');
+    setPhase('preparing');
     try {
       const pending = await reconcilePendingTradeAction({
         owner,
@@ -250,31 +298,22 @@ export function DirectWithdrawPanel({
       });
       if (pending === 'pending') {
         setPhase('pending');
-        showAppToast({
-          outcome: 'info', 
-          message: 'A signed withdrawal is still settling.',
-        });
+        showAppToast({ outcome: 'info', message: 'A signed withdrawal is still settling.' });
         return;
       }
       if (pending === 'confirmed') {
         setPhase('idle');
         onBalancesChanged();
-        showAppToast({
-          outcome: 'success', 
-          message: 'Previous withdrawal confirmed.',
-        });
+        showAppToast({ outcome: 'success', message: 'Previous withdrawal confirmed.' });
         return;
       }
 
       if (privateUsdc && session.address !== null) {
         const pendingProviderAmount = await pendingPacificaWithdrawalBaseUnits(session.address);
-        const targetWalletBalanceBaseUnits = amountBaseUnits === 'max'
-          ? availableBaseUnits
-          : amountBaseUnits;
         const release = pacificaReleaseRequirement({
           feeBaseUnits: config.value.perps.pacificaWithdrawalFeeBaseUnits,
           pendingBaseUnits: pendingProviderAmount,
-          targetWalletBalanceBaseUnits,
+          targetWalletBalanceBaseUnits: amountBaseUnits,
           walletBaseUnits: walletAssetBalance(balances?.privateWallet, selected),
         });
         if (release !== null) {
@@ -289,7 +328,6 @@ export function DirectWithdrawPanel({
             onConfirm: () => void releasePacificaAndContinue({
               amountBaseUnits,
               destinationAddress,
-              quoteOnly,
               release,
               signal: abort.signal,
             }),
@@ -301,7 +339,6 @@ export function DirectWithdrawPanel({
       await buildSolanaReview({
         amountBaseUnits,
         destinationAddress,
-        quoteOnly,
         signal: abort.signal,
       });
     } catch (cause) {
@@ -317,9 +354,10 @@ export function DirectWithdrawPanel({
    * Holds the review in place of the form rather than over it.
    *
    * This was an `Alert.alert`, which covered the very figures it asked about and put "Cancel" and
-   * "Confirm and sign" one thumb-width apart. The plan now lives in state, the form yields its space to
-   * `WithdrawReviewCard`, and confirming is a slide. Nothing about the plan itself changed: it is the
-   * same object, built by the same `prepareDirectWithdrawal`, and `submit` re-verifies it before signing.
+   * "Confirm and sign" one thumb-width apart. The plan now lives in state, the sheet yields its form and
+   * its selectors to `WithdrawReviewStep`, and confirming is a slide. Nothing about the plan itself
+   * changed: it is the same object, built by the same `prepareDirectWithdrawal`, and `submit`
+   * re-verifies it before signing.
    */
   const review = (plan: DirectWithdrawalPlan) => {
     setPhase('reviewing');
@@ -350,7 +388,6 @@ export function DirectWithdrawPanel({
       setPending(null);
       if (result.status === 'confirmed') {
         setAmount('');
-        setWithdrawMaximum(false);
         setPhase('idle');
         publishInAppNotification({
           correlations: [{ namespace: 'solana-transaction', value: result.signature }],
@@ -366,7 +403,7 @@ export function DirectWithdrawPanel({
           kind: 'withdrawal', outcome: 'info', title: 'Direct withdrawal submitted',
           scopeToken: notificationScope,
           status: 'submitted',
-          message: 'Solana confirmation is pending. Balances remain chain-backed and will refresh after settlement.',
+          message: 'Confirming on Solana. Balances refresh once settled.',
         });
       }
     } catch (cause) {
@@ -382,24 +419,23 @@ export function DirectWithdrawPanel({
     }
   };
 
-  // The whole form, not only the amount field. During review the destination is a fact of the prepared
-  // plan, so leaving the `To` selector live beside it would offer a choice that changes nothing — the
-  // plan was built for one address and re-verified against it before signing.
+  // The whole form gives way, not only the amount field, and the sheet's own selectors go with it. Every
+  // choice above this point is a fact of the prepared plan by now — the plan was built for one source,
+  // one token and one address, and re-verified against them before signing — so a live selector beside
+  // it would offer a decision that changes nothing.
   if (pending !== null) {
     return (
-      <View style={styles.panel}>
-        <WithdrawReviewCard
-          confirming={phase === 'submitting'}
-          headline={`${formatTokenAmount(pending.amountBaseUnits, pending.decimals)} ${pending.symbol}`}
-          note={DIRECT_REVIEW_NOTE}
-          onCancel={cancelReview}
-          onConfirm={() => void submit(pending)}
-          rows={directReviewRows(pending)}
-          slideLabel={source === 'public' ? 'Slide to send' : 'Slide to withdraw'}
-          title={source === 'public' ? 'Review send' : 'Review withdrawal'}
-          workingLabel={source === 'public' ? 'Sending' : 'Withdrawing'}
-        />
-      </View>
+      <WithdrawReviewStep
+        confirming={phase === 'submitting'}
+        headline={`${formatTokenAmount(pending.amountBaseUnits, pending.decimals)} ${pending.symbol}`}
+        note={DIRECT_REVIEW_NOTE}
+        onBack={cancelReview}
+        onConfirm={() => void submit(pending)}
+        rows={directReviewRows(pending)}
+        slideLabel={source === 'public' ? 'Slide to send' : 'Slide to withdraw'}
+        title={source === 'public' ? 'Review send' : 'Review withdrawal'}
+        workingLabel={source === 'public' ? 'Sending' : 'Withdrawing'}
+      />
     );
   }
 
@@ -409,18 +445,15 @@ export function DirectWithdrawPanel({
       destinationMode={destinationMode}
       disabled={asset === null || (destinationMode === 'privy' && mainWalletAddress === null)}
       externalAddress={externalAddress}
-      onAmountChange={(value) => {
-        setAmount(value);
-        setWithdrawMaximum(false);
-      }}
+      maxDisabled={asset === null}
+      onAmountChange={setAmount}
       onDestinationMode={setDestinationMode}
       onExternalAddress={setExternalAddress}
-      onMax={() => void prepare(true, true)}
+      onMax={fillMaximumAmount}
       onReview={() => void prepare()}
       onTokenChange={(id) => {
         setChosenId(id);
         setAmount('');
-        setWithdrawMaximum(false);
       }}
       phase={phase}
       running={running}

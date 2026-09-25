@@ -8,12 +8,14 @@ import {
   dismissAppToast,
   readAppToast,
   subscribeAppToast,
+  TOAST_MESSAGE_LIMIT,
+  TOAST_ONE_LINE_CHARACTERS,
   type AppToast,
 } from '@/storage/appToast';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 /**
- * How long a toast stays before it closes itself.
+ * How long a one-line toast stays before it closes itself.
  *
  * Every outcome, errors included. Errors used to be exempt from this entirely — the effect returned
  * early for them — so an error bar sat over the screen until it was tapped, which is why a failed RPC
@@ -25,7 +27,29 @@ import { colors, radii, spacing, typography } from '@/theme/tokens';
  */
 const DISMISS_AFTER_MS = 2_000;
 
-/** Bar height. One line of `bodyCompact` plus symmetric padding, and enough to seat a 20pt mark. */
+/**
+ * Reading time added for each character past the first line.
+ *
+ * Two seconds is comfortable for the short status lines most toasts are, and short for a two-line
+ * failure that has to be read to be acted on — roughly 200 words a minute puts a full bar at nearer
+ * three. The floor stays where it was, so nothing that already fit got slower.
+ */
+const READING_MS_PER_CHARACTER = 45;
+
+function dismissDelayMs(message: string): number {
+  // Clamped at the limit: past it the bar ellipsizes, and holding the bar longer does not bring back
+  // text that is not on screen.
+  const shown = Math.min(message.length, TOAST_MESSAGE_LIMIT);
+  const secondLine = Math.max(0, shown - TOAST_ONE_LINE_CHARACTERS);
+  return DISMISS_AFTER_MS + secondLine * READING_MS_PER_CHARACTER;
+}
+
+/**
+ * Resting bar height. One line of `bodyCompact` plus symmetric padding, and enough to seat a 20pt mark.
+ *
+ * A floor, not a fixed height: a message that needs a second line grows the bar instead of losing its
+ * tail to an ellipsis. Most messages fit on one and the bar stays at this.
+ */
 const BAR_HEIGHT = 52;
 const MARK = 20;
 
@@ -61,8 +85,8 @@ export function AppToastHost() {
 
     // Keyed by id, and `dismissAppToast` checks that id before clearing, so a timer left over from a
     // toast that was already replaced cannot cut the current one short. Two toasts in quick succession
-    // each get their own full two seconds.
-    const timer = setTimeout(() => dismissAppToast(toast.id), DISMISS_AFTER_MS);
+    // each get their own full reading time.
+    const timer = setTimeout(() => dismissAppToast(toast.id), dismissDelayMs(toast.message));
 
     return () => clearTimeout(timer);
   }, [toast]);
@@ -98,10 +122,12 @@ export function AppToastHost() {
                 <ToastMark outcome={toast.outcome} />
               </View>
 
-              {/* One line, and it truncates rather than wrapping. A bar that grows to two lines stops
-                  being a bar, which is how the old one reached 64pt. Anything too long to fit here is
-                  too long for a transient message and belongs in the panel that raised it. */}
-              <Text maxFontSizeMultiplier={1.3} numberOfLines={1} style={styles.message}>
+              {/* Two lines at most, and the bar is sized by `minHeight` so a short message still gets
+                  a one-line bar. The cap was one line, which read well until a message overran it: a
+                  tail ellipsis takes the end of a sentence, and the end is where the number or the
+                  instruction usually is. A second line is the smaller cost. Past two the bar stops
+                  being a bar, so `TOAST_MESSAGE_LIMIT` is the budget copy is written to. */}
+              <Text maxFontSizeMultiplier={1.3} numberOfLines={2} style={styles.message}>
                 {toast.message}
               </Text>
             </Pressable>
