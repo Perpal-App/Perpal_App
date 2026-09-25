@@ -152,10 +152,18 @@ export function OrderActionBar({
         />
       </View>
 
-      {/* No `restRatio`: the sheet's own default opens it at half the screen and the drag takes it the
-          rest of the way, which is what the ticket wants. Half of the screen every time, regardless of
-          which form the body is showing — the ticket's height changes as the balance loads, and a
-          resting position that followed it was how this sheet used to open wide and stick there.
+      {/* `restRatio={1}`: the ticket opens at the full height of the dock rather than at the sheet's
+          half-screen default. It is a form of ten-odd controls that ends in the figures a reader is
+          meant to check before signing, and at half height the action and every row under it began
+          below the fold — reachable only by dragging, because the card's box was taller than the part
+          of it on screen and so the body's own scroll could not reach them either.
+
+          Still one flat number taken from the host alone, which is the part that has to stay true. What
+          made this sheet stick was a resting height derived from the *content*: the ticket's height
+          changes as the balance loads, so a position that followed it was being computed against a
+          measurement that had not settled. A share of the host cannot have that problem — at `1` it is
+          the same value the drag's expanded target already springs to, so the sheet gains no position
+          it did not already have.
 
           The title is the instrument alone. It used to carry the side as well, which contradicted the
           body whenever the account had nothing credited: a sheet headed `Buy / Long` over a deposit
@@ -165,6 +173,7 @@ export function OrderActionBar({
       <DraggableSheet
         closeLabel="Close order ticket"
         onClose={() => setSide(null)}
+        restRatio={1}
         title={`${market.baseAsset}-USD`}
         visible={side !== null && tradable}
       >

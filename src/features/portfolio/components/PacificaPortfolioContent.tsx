@@ -184,7 +184,7 @@ export function PacificaPortfolioContent({
         generation={session.generation}
         metadata={balances?.tokenMetadata ?? EMPTY_METADATA}
         pacificaProgramId={config.ok ? config.value.perps.pacificaProgramId : ''}
-        paused={fundsRequest !== null}
+        paused={fundsRequest !== null || balances === null}
         publicAccount={session.mainWalletAddress}
         rpcUrl={config.ok ? config.value.api.rpcUrl : ''}
         signer={session.signer}

@@ -88,7 +88,6 @@ export function PacificaOrderTicket(props: {
     account: session.address,
     apiOrigin: props.apiOrigin,
     enabled: session.status === 'ready',
-    marketRef: props.market.venueRef,
   });
   const portfolio = portfolioState.portfolio;
   // A zero `availableToSpend` is not an unfunded account: open margin, pending risk changes, or reserved
@@ -213,32 +212,39 @@ export function PacificaOrderTicket(props: {
   return (
     <View style={styles.panel}>
       <PacificaTicketHeading fundingOnly={fundingOnly} />
-      {fundingOnly ? null : <View style={styles.controls}>
-        <StaticControl
-          accessibilityLabel={`Margin mode ${marginMode}`}
-          label={marginMode === 'cross' ? 'Cross' : 'Isolated'}
-        />
-        <Field
-          accessibilityLabel="Leverage"
-          align="center"
-          onChangeText={(value) => { reset(); setLeverage(value); }}
-          suffix="×"
-          value={leverage}
-        />
-      </View>}
-      {fundingOnly ? null : <PacificaOrderTypeFields
-        disabled={reduceOnly}
-        limitPrice={limitPrice}
-        markPrice={`$${formatAmountWithCommas(props.snapshot.price)}`}
-        onLimitPriceChange={(value) => { reset(); setLimitPrice(value); }}
-        onOrderTypeChange={(value) => {
-          reset(); setOrderType(value); setLimitPrice(''); setTriggerPrice('');
-          if (value === 'stop-market' || value === 'stop-limit') setTpSlEnabled(false);
-        }}
-        onTriggerPriceChange={(value) => { reset(); setTriggerPrice(value); }}
-        orderType={orderType}
-        triggerPrice={triggerPrice}
-      />}
+      {/* What the order *is*, as opposed to how big it is: margin mode, leverage, order type, and the
+          mark those last two are judged against. One group and one condition — these were two adjacent
+          `fundingOnly` branches saying the same thing twice. */}
+      {fundingOnly ? null : (
+        <View style={styles.group}>
+          <View style={styles.controls}>
+            <StaticControl
+              accessibilityLabel={`Margin mode ${marginMode}`}
+              label={marginMode === 'cross' ? 'Cross' : 'Isolated'}
+            />
+            <Field
+              accessibilityLabel="Leverage"
+              align="center"
+              onChangeText={(value) => { reset(); setLeverage(value); }}
+              suffix="×"
+              value={leverage}
+            />
+          </View>
+          <PacificaOrderTypeFields
+            disabled={reduceOnly}
+            limitPrice={limitPrice}
+            markPrice={`$${formatAmountWithCommas(props.snapshot.price)}`}
+            onLimitPriceChange={(value) => { reset(); setLimitPrice(value); }}
+            onOrderTypeChange={(value) => {
+              reset(); setOrderType(value); setLimitPrice(''); setTriggerPrice('');
+              if (value === 'stop-market' || value === 'stop-limit') setTpSlEnabled(false);
+            }}
+            onTriggerPriceChange={(value) => { reset(); setTriggerPrice(value); }}
+            orderType={orderType}
+            triggerPrice={triggerPrice}
+          />
+        </View>
+      )}
       {fundingOnly ? null : <View style={styles.controls}>
         <Choice
           accessibilityLabel={reduceOnly
@@ -263,7 +269,9 @@ export function PacificaOrderTicket(props: {
           four percentage presets are all ways of choosing how much of a balance to commit, and there is
           no balance — every one of them would be a control whose only possible value is zero. */}
       {reduceOnly || cannotFund ? null : (
-        <>
+        // A group rather than a fragment: the field, the slider and the presets are three ways of
+        // setting one number, and at the panel's interval they read as three unrelated controls.
+        <View style={styles.group}>
           <Field
             accessibilityLabel="Collateral amount"
             onChangeText={(value) => {
@@ -288,28 +296,34 @@ export function PacificaOrderTicket(props: {
             }}
             selected={presetPercent}
           />
-        </>
+        </View>
       )}
-      {fundingOnly ? null : <Toggle
-        label="Reduce only"
-        onChange={(value) => {
-          reset();
-          setAction(value ? 'close' : 'open');
-          if (value) {
-            setOrderType('market');
-            setLimitPrice('');
-            setTriggerPrice('');
-            setTpSlEnabled(false);
-          }
-        }}
-        value={reduceOnly}
-      />}
-      {fundingOnly ? null : <Toggle disabled={reduceOnly || stopOrder} label="TP / SL" onChange={(value) => { reset(); setTpSlEnabled(value); }} value={tpSlEnabled} />}
+      {/* The two switches as one block, so they read as the ticket's options rather than as two more
+          rows in the stack. Both were separate `fundingOnly` branches. */}
+      {fundingOnly ? null : (
+        <View style={styles.group}>
+          <Toggle
+            label="Reduce only"
+            onChange={(value) => {
+              reset();
+              setAction(value ? 'close' : 'open');
+              if (value) {
+                setOrderType('market');
+                setLimitPrice('');
+                setTriggerPrice('');
+                setTpSlEnabled(false);
+              }
+            }}
+            value={reduceOnly}
+          />
+          <Toggle disabled={reduceOnly || stopOrder} label="TP / SL" onChange={(value) => { reset(); setTpSlEnabled(value); }} value={tpSlEnabled} />
+        </View>
+      )}
       {!fundingOnly && tpSlEnabled && !reduceOnly ? (
-        <>
+        <View style={styles.group}>
           <Field accessibilityLabel="Take-profit price" onChangeText={(value) => { reset(); setTakeProfit(value); }} placeholder="Take profit" suffix="USD" value={takeProfit} />
           <Field accessibilityLabel="Stop-loss price" onChangeText={(value) => { reset(); setStopLoss(value); }} placeholder="Stop loss" suffix="USD" value={stopLoss} />
-        </>
+        </View>
       ) : null}
       {recovery.pending && fundingOnly ? (
         <ActionButton

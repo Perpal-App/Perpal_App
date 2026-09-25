@@ -36,7 +36,6 @@ export function usePacificaTicketPortfolio(input: {
   readonly account: string | null;
   readonly apiOrigin: string;
   readonly enabled: boolean;
-  readonly marketRef: string;
 }) {
   const subscribe = useCallback((listener: () => void) => (
     input.account === null || input.apiOrigin.length === 0
@@ -61,36 +60,36 @@ export function usePacificaTicketPortfolio(input: {
     const abort = new AbortController();
     const scopeToken = captureInAppNotificationScope();
 
-    const load = async () => {
-      try {
-        const recovery = await reconcilePendingPacificaCommand({
-          account,
-          apiOrigin: input.apiOrigin,
-          signal: abort.signal,
-        });
-        if (!abort.signal.aborted && recovery.status !== 'none') {
-          publishRecovery(recovery, scopeToken);
-        }
-      } catch (cause) {
-        if (!abort.signal.aborted && __DEV__) {
-          console.warn('[Perpal Pacifica command recovery failed]', {
-            error: cause instanceof Error ? cause.message : typeof cause,
-          });
-        }
-      }
-      await refreshPacificaPortfolioSnapshot({
-        account,
-        apiOrigin: input.apiOrigin,
-        forceNetwork: true,
-        signal: abort.signal,
-      });
-    };
-
-    void load().catch(() => undefined).finally(() => {
+    // Account display and command recovery are independent. Starting them together means a long
+    // paginated recovery scan cannot hold the current balance behind it; order submission remains
+    // separately guarded by the command/recovery owners.
+    void refreshPacificaPortfolioSnapshot({
+      account,
+      apiOrigin: input.apiOrigin,
+      forceNetwork: true,
+      signal: abort.signal,
+    }).catch(() => undefined).finally(() => {
       if (!abort.signal.aborted) setChecking(false);
     });
+
+    void reconcilePendingPacificaCommand({
+      account,
+      apiOrigin: input.apiOrigin,
+      signal: abort.signal,
+    }).then((recovery) => {
+      if (!abort.signal.aborted && recovery.status !== 'none') {
+        publishRecovery(recovery, scopeToken);
+      }
+    }).catch((cause) => {
+      if (!abort.signal.aborted && __DEV__) {
+        console.warn('[Perpal Pacifica command recovery failed]', {
+          error: cause instanceof Error ? cause.message : typeof cause,
+        });
+      }
+    });
+
     return () => abort.abort();
-  }, [input.account, input.apiOrigin, input.enabled, input.marketRef]);
+  }, [input.account, input.apiOrigin, input.enabled]);
 
   const refresh = useCallback(() => {
     if (input.account === null || input.apiOrigin.length === 0) return;

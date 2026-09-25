@@ -32,6 +32,18 @@ type HistorySource = {
 
 const HISTORY_LIMIT = 40;
 const TRANSACTION_BATCH_CONCURRENCY = 2;
+const TRANSACTION_CACHE_LIMIT = 256;
+const TRANSACTION_CACHE_MS = 6 * 60 * 60_000;
+const MISSING_TRANSACTION_CACHE_MS = 15_000;
+
+type CachedTransaction = {
+  readonly expiresAtMs: number;
+  readonly value: ParsedWalletTransaction | null;
+};
+
+// Confirmed transaction details are immutable. Signature pages remain the authority for which entries
+// are current; this bounded cache only prevents re-downloading and JSON-decoding the same returned IDs.
+const transactionCache = new Map<string, CachedTransaction>();
 
 export async function fetchSolanaWalletActivity(input: {
   readonly pacificaProgramId: string;
@@ -103,6 +115,8 @@ export async function fetchSolanaWalletActivity(input: {
   if (__DEV__) {
     console.info('[Perpal Solana activity]', JSON.stringify({
       decodedCount: transactions.values.size,
+      detailCacheHitCount: transactions.cacheHitCount,
+      detailFetchCount: transactions.fetchCount,
       detailFailureCount: transactions.failureCount,
       event: 'history_decoded',
       monetaryCount: items.length,
@@ -120,11 +134,23 @@ async function fetchTransactions(
   signer: GatewayRequestSigner,
   signal?: AbortSignal,
 ): Promise<{
+  readonly cacheHitCount: number;
   readonly failureCount: number;
+  readonly fetchCount: number;
   readonly values: ReadonlyMap<string, ParsedWalletTransaction | null>;
 }> {
-  const batches = chunks(signatures, MAX_GATEWAY_RPC_BATCH_ENTRIES);
   const values = new Map<string, ParsedWalletTransaction | null>();
+  const missing: string[] = [];
+  let cacheHitCount = 0;
+  for (const signature of signatures) {
+    const cached = readCachedTransaction(signature);
+    if (cached === undefined) missing.push(signature);
+    else {
+      cacheHitCount += 1;
+      values.set(signature, cached);
+    }
+  }
+  const batches = chunks(missing, MAX_GATEWAY_RPC_BATCH_ENTRIES);
   let failureCount = 0;
   let nextBatch = 0;
 
@@ -152,8 +178,10 @@ async function fetchTransactions(
         results.forEach((result, index) => {
           const signature = batch[index];
           if (signature === undefined) return;
-          if (result.ok) values.set(signature, result.value);
-          else failureCount += 1;
+          if (result.ok) {
+            values.set(signature, result.value);
+            writeCachedTransaction(signature, result.value);
+          } else failureCount += 1;
         });
       } catch {
         if (isAborted(signal)) throw new Error('Wallet activity request cancelled.');
@@ -171,7 +199,40 @@ async function fetchTransactions(
     throw new Error('Wallet transaction details are unavailable.');
   }
 
-  return { failureCount, values };
+  return {
+    cacheHitCount,
+    failureCount,
+    fetchCount: missing.length,
+    values,
+  };
+}
+
+function readCachedTransaction(signature: string): ParsedWalletTransaction | null | undefined {
+  const cached = transactionCache.get(signature);
+  if (cached === undefined) return undefined;
+  if (cached.expiresAtMs <= Date.now()) {
+    transactionCache.delete(signature);
+    return undefined;
+  }
+  // Move to the end so eviction is access-ordered rather than insertion-ordered.
+  transactionCache.delete(signature);
+  transactionCache.set(signature, cached);
+  return cached.value;
+}
+
+function writeCachedTransaction(signature: string, value: ParsedWalletTransaction | null): void {
+  transactionCache.delete(signature);
+  transactionCache.set(signature, {
+    expiresAtMs: Date.now() + (
+      value === null ? MISSING_TRANSACTION_CACHE_MS : TRANSACTION_CACHE_MS
+    ),
+    value,
+  });
+  while (transactionCache.size > TRANSACTION_CACHE_LIMIT) {
+    const oldest = transactionCache.keys().next().value as string | undefined;
+    if (oldest === undefined) return;
+    transactionCache.delete(oldest);
+  }
 }
 
 function chunks<T>(values: readonly T[], size: number): readonly (readonly T[])[] {

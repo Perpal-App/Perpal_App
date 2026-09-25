@@ -1,34 +1,34 @@
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
 import { StatusRow } from '@/components/ui/StatusRow';
 import { formatAmountWithCommas, parseAmount } from '@/domain/money/amount';
-import {
-  fetchPacificaActivity,
-  mergePacificaActivity,
-  type PacificaActivity,
-  type PacificaOrderActivity,
-  type PacificaTradeActivity,
+import type {
+  PacificaActivity,
+  PacificaOrderActivity,
+  PacificaTradeActivity,
 } from '@/integrations/perps/pacifica/pacificaActivity';
-import { publishPacificaActivitySnapshot } from '@/integrations/perps/pacifica/pacificaActivityStore';
 import {
-  isPacificaRateLimited,
-  pacificaRetryDelay,
-  PacificaApiError,
-} from '@/integrations/perps/pacifica/pacificaApi';
+  readPacificaActivitySnapshot,
+  subscribePacificaActivitySnapshot,
+  type PacificaActivitySnapshot,
+} from '@/integrations/perps/pacifica/pacificaActivityStore';
 import {
   cancelPacificaOrder,
   PacificaCommandPendingError,
 } from '@/integrations/perps/pacifica/pacificaOrder';
-import {
-  fetchFreshPacificaPortfolio,
-  fetchPacificaPortfolio,
-  type PacificaOpenOrder,
-  type PacificaPortfolioSnapshot,
-  type PacificaPosition,
+import type {
+  PacificaOpenOrder,
+  PacificaPortfolioSnapshot,
+  PacificaPosition,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import {
+  readPacificaPortfolioSnapshot,
+  refreshPacificaPortfolioSnapshot,
+  subscribePacificaPortfolioSnapshot,
+  type PacificaPortfolioStoreSnapshot,
+} from '@/integrations/perps/pacifica/pacificaPortfolioStore';
 import {
   captureInAppNotificationScope,
   publishInAppNotification,
@@ -43,14 +43,23 @@ type AccountState = {
   readonly status: 'error' | 'loading' | 'ready' | 'stale';
 };
 
+const EMPTY_ACTIVITY: PacificaActivitySnapshot = {
+  data: null,
+  status: 'loading',
+  updatedAtMs: 0,
+};
+const EMPTY_PORTFOLIO: PacificaPortfolioStoreSnapshot = {
+  data: null,
+  status: 'loading',
+  updatedAtMs: 0,
+};
+
 const TABS: readonly UnderlineTabOption<AccountTab>[] = [
   { id: 'positions', label: 'Positions' },
   { id: 'balance', label: 'Balance' },
   { id: 'orders', label: 'Open orders' },
   { id: 'history', label: 'History' },
 ];
-const REFRESH_INTERVAL_MS = 5_000;
-const MAX_RETRY_INTERVAL_MS = 60_000;
 
 export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: string }) {
   const session = useTradingSession();
@@ -297,115 +306,42 @@ function Empty({ message }: { readonly message: string }) {
 }
 
 function useTradeAccountData(apiOrigin: string, account: string | null) {
-  const [state, setState] = useState<AccountState>({ activity: null, portfolio: null, status: 'loading' });
-  const [refreshKey, setRefreshKey] = useState(0);
-  const hasData = useRef(false);
-  const activityData = useRef<PacificaActivity | null>(null);
-  const forceNetwork = useRef(false);
-  const refresh = useCallback(() => {
-    forceNetwork.current = true;
-    setRefreshKey((value) => value + 1);
-  }, []);
+  const subscribePortfolio = useCallback((listener: () => void) => (
+    account === null ? () => undefined : subscribePacificaPortfolioSnapshot(apiOrigin, account, listener)
+  ), [account, apiOrigin]);
+  const readPortfolio = useCallback(() => (
+    account === null ? EMPTY_PORTFOLIO : readPacificaPortfolioSnapshot(apiOrigin, account)
+  ), [account, apiOrigin]);
+  const portfolio = useSyncExternalStore(subscribePortfolio, readPortfolio, readPortfolio);
 
-  useEffect(() => {
-    hasData.current = false;
-    activityData.current = null;
-    setState({ activity: null, portfolio: null, status: 'loading' });
+  const subscribeActivity = useCallback((listener: () => void) => (
+    account === null ? () => undefined : subscribePacificaActivitySnapshot(apiOrigin, account, listener)
+  ), [account, apiOrigin]);
+  const readActivity = useCallback(() => (
+    account === null ? EMPTY_ACTIVITY : readPacificaActivitySnapshot(apiOrigin, account)
+  ), [account, apiOrigin]);
+  const activity = useSyncExternalStore(subscribeActivity, readActivity, readActivity);
+
+  // The root lifecycle monitor owns polling/backfill. This panel only subscribes, eliminating a second
+  // six-endpoint five-second loop while a market is open. Explicit Retry refreshes the account snapshot;
+  // activity remains independently maintained by the root owner.
+  const refresh = useCallback(() => {
+    if (account === null) return;
+    void refreshPacificaPortfolioSnapshot({
+      account,
+      apiOrigin,
+      forceNetwork: true,
+    }).catch(() => undefined);
   }, [account, apiOrigin]);
 
-  useFocusEffect(useCallback(() => {
-    if (account === null || apiOrigin.length === 0) return undefined;
-    let active = true;
-    let controller: AbortController | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let consecutiveFailures = 0;
-    const load = async () => {
-      controller?.abort();
-      controller = new AbortController();
-      let nextRefreshMs = REFRESH_INTERVAL_MS;
-      try {
-        const previousActivity = activityData.current;
-        const network = forceNetwork.current;
-        forceNetwork.current = false;
-        const [portfolio, activity] = await Promise.all([
-          (network ? fetchFreshPacificaPortfolio : fetchPacificaPortfolio)(
-            apiOrigin,
-            account,
-            controller.signal,
-          ),
-          fetchPacificaActivity(
-            apiOrigin,
-            account,
-            controller.signal,
-            previousActivity === null || previousActivity.incomplete ? 'backfill' : 'latest',
-            network ? 'network' : 'cached',
-          ),
-        ]);
-        if (active) {
-          const mergedActivity = previousActivity === null
-            ? activity
-            : mergePacificaActivity(previousActivity, activity);
-          consecutiveFailures = mergedActivity.incomplete ? consecutiveFailures + 1 : 0;
-          if (mergedActivity.incomplete) {
-            nextRefreshMs = pacificaRetryDelay(
-              null,
-              consecutiveFailures,
-              REFRESH_INTERVAL_MS,
-              MAX_RETRY_INTERVAL_MS,
-            );
-          }
-          hasData.current = true;
-          activityData.current = mergedActivity;
-          publishPacificaActivitySnapshot({
-            account,
-            activity: mergedActivity,
-            apiOrigin,
-          });
-          setState({
-            activity: mergedActivity,
-            portfolio,
-            status: mergedActivity.incomplete ? 'stale' : 'ready',
-          });
-        }
-      } catch (cause) {
-        if (active && !controller.signal.aborted) {
-          consecutiveFailures += 1;
-          nextRefreshMs = pacificaRetryDelay(
-            cause,
-            consecutiveFailures,
-            REFRESH_INTERVAL_MS,
-            MAX_RETRY_INTERVAL_MS,
-          );
-          if (__DEV__ && !isPacificaRateLimited(cause)) {
-            console.warn('[Perpal Pacifica trade account refresh failed]',
-              cause instanceof PacificaApiError
-                ? {
-                    errorCode: cause.code,
-                    errorName: cause.name,
-                    requestPath: cause.requestPath,
-                    status: cause.status,
-                  }
-                : { errorName: cause instanceof Error ? cause.name : typeof cause },
-            );
-          }
-          setState((current) => ({
-            ...current,
-            status: hasData.current ? 'stale' : isPacificaRateLimited(cause) ? 'loading' : 'error',
-          }));
-        }
-      } finally {
-        if (active) timer = setTimeout(() => void load(), nextRefreshMs);
-      }
-    };
-    void load();
-    return () => {
-      active = false;
-      controller?.abort();
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [account, apiOrigin, refreshKey]));
-
-  return { refresh, state };
+  return {
+    refresh,
+    state: {
+      activity: activity.data,
+      portfolio: portfolio.data,
+      status: portfolio.status,
+    } satisfies AccountState,
+  };
 }
 
 function decimal(value: string): string {

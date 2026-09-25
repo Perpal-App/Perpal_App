@@ -172,7 +172,11 @@ export function DraggableSheet({
     if (!visible || hostHeight === 0 || presented.current) return;
 
     presented.current = true;
-    expanded.set(false);
+    // True when resting *is* expanded, which is what `restRatio: 1` means. The flag only decides which
+    // position a host resize re-derives against, and at that ratio both of its branches come to the same
+    // offset — but a flag reading "not expanded" about a sheet filling the host would mislead whoever
+    // reads the resize effect next.
+    expanded.set(restRatio >= 1);
     const target = restOffset(hostHeight, restRatio);
     offset.set(hostHeight);
     offset.set(reduceMotion ? target : withSpring(target, motion.sheet));

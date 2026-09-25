@@ -189,6 +189,7 @@ export async function submitSignedMultiAuthorityLegacyTransaction(input: {
   readonly requestSigner: GatewayRequestSigner;
   readonly rpcUrl: string;
   readonly signedTransactionBase64: string;
+  readonly waitForConfirmation?: boolean;
 }): Promise<SubmittedTransactionResult> {
   const transaction = Transaction.from(base64.decode(input.signedTransactionBase64));
   const tradingOwner = new PublicKey(input.owner);
@@ -220,7 +221,9 @@ export async function submitSignedMultiAuthorityLegacyTransaction(input: {
   return {
     signature: input.expectedSignature,
     status: submitted === input.expectedSignature
-      ? await confirmSignature({
+      ? input.waitForConfirmation === false
+        ? 'submitted'
+        : await confirmSignature({
           failureMessage: 'The fast deposit failed on-chain.',
           rpcUrl: input.rpcUrl,
           signature: input.expectedSignature,

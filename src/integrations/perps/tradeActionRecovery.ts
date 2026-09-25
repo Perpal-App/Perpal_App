@@ -124,6 +124,7 @@ export async function reconcilePendingTradeAction(input: {
           rpcUrl: input.rpcUrl,
           signedTransactionBase64: record.signedTransactionBase64,
           signer: input.signer,
+          waitForConfirmation: false,
         })
       : record.kind === 'fast-collateral'
         ? await submitSignedMultiAuthorityLegacyTransaction({
@@ -133,6 +134,7 @@ export async function reconcilePendingTradeAction(input: {
             requestSigner: input.signer,
             rpcUrl: input.rpcUrl,
             signedTransactionBase64: record.signedTransactionBase64,
+            waitForConfirmation: false,
           })
         : await submitSignedLegacyTransaction({
           expectedSignature: record.signature,
@@ -141,6 +143,7 @@ export async function reconcilePendingTradeAction(input: {
           rpcUrl: input.rpcUrl,
           signedTransactionBase64: record.signedTransactionBase64,
           signer: input.signer,
+          waitForConfirmation: false,
         });
     if (result.status === 'confirmed') {
       if (tracksPacificaCredit(record)) return 'indexing';

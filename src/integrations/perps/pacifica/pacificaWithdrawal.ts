@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { pacificaPostSigned } from '@/integrations/perps/pacifica/pacificaApi';
-import { fetchFreshPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import { fetchFreshPacificaAccount } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import {
   openPacificaWithdrawalMonitor,
   type PacificaWithdrawalConfirmation,
@@ -130,7 +130,7 @@ async function performWithdrawal(
   }
 
   if (pending === null) {
-    const portfolio = await fetchFreshPacificaPortfolio(
+    const portfolio = await fetchFreshPacificaAccount(
       input.apiOrigin,
       input.account,
       input.signal,

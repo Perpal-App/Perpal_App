@@ -27,6 +27,7 @@ type ProviderRuntime = {
   inFlight: number;
   consecutiveFailures: number;
   breaker: BreakerState;
+  halfOpenProbeInFlight: boolean;
   openedAtMs: number;
   /** Exponentially weighted mean latency, milliseconds. */
   latencyEwmaMs: number;
@@ -93,6 +94,7 @@ export class ProviderRouter {
         inFlight: 0,
         consecutiveFailures: 0,
         breaker: 'closed',
+        halfOpenProbeInFlight: false,
         openedAtMs: 0,
         latencyEwmaMs: 0,
       });
@@ -104,14 +106,14 @@ export class ProviderRouter {
     const eligible = this.endpoints.filter((endpoint) => {
       const state = this.runtimeFor(endpoint.id);
 
-      if (state.breaker === 'closed' || state.breaker === 'half-open') {
-        return true;
-      }
+      if (state.breaker === 'closed') return true;
+      if (state.breaker === 'half-open') return !state.halfOpenProbeInFlight;
 
       // An open breaker becomes half-open once the cooldown has elapsed, letting
       // exactly one probe through instead of resuming full traffic.
       if (this.now() - state.openedAtMs >= this.options.openDurationMs) {
         state.breaker = 'half-open';
+        state.halfOpenProbeInFlight = false;
         return true;
       }
 
@@ -149,7 +151,9 @@ export class ProviderRouter {
   }
 
   beginAttempt(id: ProviderId): void {
-    this.runtimeFor(id).inFlight += 1;
+    const state = this.runtimeFor(id);
+    state.inFlight += 1;
+    if (state.breaker === 'half-open') state.halfOpenProbeInFlight = true;
   }
 
   recordSuccess(id: ProviderId, durationMs: number): void {
@@ -158,6 +162,7 @@ export class ProviderRouter {
     state.inFlight = Math.max(0, state.inFlight - 1);
     state.consecutiveFailures = 0;
     state.breaker = 'closed';
+    state.halfOpenProbeInFlight = false;
     state.latencyEwmaMs =
       state.latencyEwmaMs === 0
         ? durationMs
@@ -168,6 +173,7 @@ export class ProviderRouter {
     const state = this.runtimeFor(id);
 
     state.inFlight = Math.max(0, state.inFlight - 1);
+    state.halfOpenProbeInFlight = false;
     state.consecutiveFailures += 1;
 
     // A failed half-open probe re-opens immediately; the provider is still sick.

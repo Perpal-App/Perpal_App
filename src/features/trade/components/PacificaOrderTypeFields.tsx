@@ -8,7 +8,6 @@ import {
   type MenuOption,
 } from '@/components/ui/AnchoredMenu';
 import { ChevronDown } from '@/components/ui/ChevronDown';
-import { TicketRow } from '@/features/trade/components/OrderTicketControls';
 import type { PacificaOrderType } from '@/integrations/perps/pacifica/pacificaOrder';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
@@ -71,9 +70,22 @@ export function PacificaOrderTypeFields(props: {
           <ChevronDown />
         </Pressable>
       </View>
-      {/* `Mark` beside a six-figure price is all that fits in the ticket's column; the
-          full phrase goes to the screen reader. */}
-      <TicketRow label="Mark" screenReaderLabel="Live mark price" value={props.markPrice} />
+      {/* The one figure on the ticket that nothing here sets — every price the reader types is judged
+          against it — so it is not another `TicketRow` in the summary's 12pt caption. A caps metric
+          label and the value a step up in weight, which is the least that separates a reference price
+          from the rows of derived figures below the action — and it is the treatment the market header
+          behind the sheet already gives the same word and the same number.
+
+          `MARK` beside a six-figure price is all that fits in this column; the full phrase goes to the
+          screen reader. */}
+      <View
+        accessible
+        accessibilityLabel={`Live mark price: ${props.markPrice}`}
+        style={styles.markRow}
+      >
+        <Text style={styles.markLabel}>MARK</Text>
+        <Text numberOfLines={1} style={styles.markValue}>{props.markPrice}</Text>
+      </View>
       {needsTrigger ? (
         <PriceField
           accessibilityLabel="Trigger price"
@@ -139,6 +151,15 @@ const styles = StyleSheet.create({
   selectorLabel: { ...typography.bodyCompact, flexShrink: 1, color: colors.textPrimary },
   pressed: { opacity: 0.72 },
   disabled: { opacity: 0.6 },
+  markRow: { minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
+  // `basisLabel`'s treatment from `MarketDetailHeader`, down to the tracking: that is the same word
+  // against the same price one screen behind this sheet, and the two should not be different objects.
+  markLabel: { ...typography.eyebrow, flexShrink: 0, letterSpacing: 0.5, color: colors.textMuted },
+  // No `fontVariant: ['tabular-nums']`, for the reason `MarketTable` records: Poppins ships
+  // proportional figures and no `tnum` feature, so the declaration draws nothing. The price holds its
+  // place because the row is `space-between` and the text right-aligned, not because the digits are
+  // equal width.
+  markValue: { ...typography.label, flexShrink: 1, color: colors.textPrimary, textAlign: 'right' },
   priceField: { minWidth: 0, minHeight: 40, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm, backgroundColor: colors.surface },
   input: { flex: 1, minWidth: 0, minHeight: 38, paddingHorizontal: spacing.xs, color: colors.textPrimary, ...typography.bodyCompact },
   suffix: { ...typography.caption, paddingRight: spacing.xs, color: colors.textMuted },

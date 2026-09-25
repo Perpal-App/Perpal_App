@@ -57,16 +57,18 @@ export async function fetchPacificaPortfolio(
   apiOrigin: string,
   account: string,
   signal?: AbortSignal,
+  onAccount?: (snapshot: PacificaAccountSnapshot) => void,
 ): Promise<PacificaPortfolioSnapshot> {
-  return loadPacificaPortfolio(apiOrigin, account, signal, 'cached');
+  return loadPacificaPortfolio(apiOrigin, account, signal, 'cached', onAccount);
 }
 
 export async function fetchFreshPacificaPortfolio(
   apiOrigin: string,
   account: string,
   signal?: AbortSignal,
+  onAccount?: (snapshot: PacificaAccountSnapshot) => void,
 ): Promise<PacificaPortfolioSnapshot> {
-  return loadPacificaPortfolio(apiOrigin, account, signal, 'network');
+  return loadPacificaPortfolio(apiOrigin, account, signal, 'network', onAccount);
 }
 
 /** One-endpoint balance read used while waiting for a confirmed deposit to become tradeable. */
@@ -94,19 +96,23 @@ async function loadPacificaPortfolio(
   account: string,
   signal: AbortSignal | undefined,
   freshness: 'cached' | 'network',
+  onAccount?: (snapshot: PacificaAccountSnapshot) => void,
 ): Promise<PacificaPortfolioSnapshot> {
   try {
-    const [rawAccount, rawPositions, rawOrders] = await Promise.all([
-      pacificaGet<unknown>({ apiOrigin, freshness, path: '/account', query: { account }, signal }),
-      pacificaGet<readonly unknown[]>({
-        apiOrigin, freshness, path: '/positions', query: { account }, signal,
-      }),
-      pacificaGet<readonly unknown[]>({
-        apiOrigin, freshness, path: '/orders', query: { account }, signal,
-      }),
-    ]);
+    const accountRequest = pacificaGet<unknown>({
+      apiOrigin, freshness, path: '/account', query: { account }, signal,
+    });
+    const positionsRequest = pacificaGet<readonly unknown[]>({
+      apiOrigin, freshness, path: '/positions', query: { account }, signal,
+    });
+    const ordersRequest = pacificaGet<readonly unknown[]>({
+      apiOrigin, freshness, path: '/orders', query: { account }, signal,
+    });
+    const accountSnapshot = parseAccount(await accountRequest);
+    onAccount?.(accountSnapshot);
+    const [rawPositions, rawOrders] = await Promise.all([positionsRequest, ordersRequest]);
     return {
-      ...parseAccount(rawAccount),
+      ...accountSnapshot,
       positions: parsePositions(rawPositions),
       orders: parseOrders(rawOrders),
     };

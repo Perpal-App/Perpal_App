@@ -93,7 +93,29 @@ export async function authenticateRequest({
     return { ok: false, code: 'auth_expired', status: 401 };
   }
 
-  const bodyHash = await sha256Hex(body);
+  let bodyHash: string;
+  let actorHash: string;
+  let nonceHash: string;
+  let importedKey: CryptoKey;
+  try {
+    // These four operations are independent. Running them together removes three serial WebCrypto
+    // barriers from every authenticated request without caching wallet keys across requests.
+    [bodyHash, actorHash, nonceHash, importedKey] = await Promise.all([
+      sha256Hex(body),
+      sha256Hex(publicKeyHex),
+      sha256Hex(nonce),
+      crypto.subtle.importKey(
+        'raw',
+        new Uint8Array(publicKeyBytes),
+        { name: 'Ed25519' },
+        false,
+        ['verify'],
+      ),
+    ]);
+  } catch {
+    return { ok: false, code: 'auth_invalid', status: 401 };
+  }
+
   const signingMessage = buildGatewaySigningMessage({
     bodyHash,
     idempotencyKey:
@@ -105,16 +127,9 @@ export async function authenticateRequest({
   });
 
   try {
-    const publicKey = await crypto.subtle.importKey(
-      'raw',
-      new Uint8Array(publicKeyBytes),
-      { name: 'Ed25519' },
-      false,
-      ['verify'],
-    );
     const valid = await crypto.subtle.verify(
       { name: 'Ed25519' },
-      publicKey,
+      importedKey,
       new Uint8Array(signatureBytes),
       new Uint8Array(signingMessage),
     );
@@ -125,9 +140,6 @@ export async function authenticateRequest({
   } catch {
     return { ok: false, code: 'auth_invalid', status: 401 };
   }
-
-  const actorHash = await sha256Hex(publicKeyHex);
-  const nonceHash = await sha256Hex(nonce);
 
   try {
     const fresh = await redis.reserve(

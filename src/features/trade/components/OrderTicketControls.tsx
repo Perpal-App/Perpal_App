@@ -107,6 +107,16 @@ export function StaticControl({
   );
 }
 
+/**
+ * A switched option, read left to right: what it is, then whether it is on.
+ *
+ * The switch used to lead and the label follow it. Two of these stack in the ticket, and putting the
+ * control first left both switches floating against the gutter with their labels starting at a ragged
+ * inboard edge — the one element in a column of full-width controls that did not reach the far margin.
+ * Label first puts the words on the same left edge as every other row in the sheet and pins the
+ * switches to a single right-hand column, which is also where a reader of any settings list on either
+ * platform already looks for them.
+ */
 export function Toggle(props: {
   readonly disabled?: boolean;
   readonly label: string;
@@ -115,6 +125,7 @@ export function Toggle(props: {
 }) {
   return (
     <View style={[styles.toggleRow, props.disabled && styles.disabled]}>
+      <Text numberOfLines={1} style={styles.toggleLabel}>{props.label}</Text>
       <Switch
         accessibilityLabel={props.label}
         disabled={props.disabled}
@@ -123,7 +134,6 @@ export function Toggle(props: {
         trackColor={{ false: colors.borderStrong, true: colors.accent }}
         value={props.value}
       />
-      <Text numberOfLines={1} style={styles.toggleLabel}>{props.label}</Text>
     </View>
   );
 }
@@ -413,8 +423,11 @@ const styles = StyleSheet.create({
   },
   presetSelected: { borderColor: colors.accent, backgroundColor: colors.surfaceElevated },
   presetLabel: { ...typography.caption, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
-  toggleRow: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  toggleLabel: { ...typography.bodyCompact, flexShrink: 1, color: colors.textSecondary },
+  toggleRow: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  // `flex: 1` is what holds the switch against the right edge, and it belongs on the label rather than
+  // arriving from `justifyContent: 'space-between'` on the row: the label is the part that should give
+  // up width when the type scale is turned up, and only a flexible child can.
+  toggleLabel: { ...typography.rowLabel, flex: 1, minWidth: 0, color: colors.textSecondary },
   ticketRow: {
     minHeight: 22,
     flexDirection: 'row',

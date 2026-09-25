@@ -249,7 +249,6 @@ export async function dispatchRpc(
   }
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let hedgeWindowElapsed = false;
   let secondaryAttempt:
     | Promise<{ response: Response; provider: ProviderEndpoint }>
     | undefined;
@@ -257,33 +256,27 @@ export async function dispatchRpc(
     secondaryAttempt ??= attemptRequest(secondary);
     return secondaryAttempt;
   };
-  const hedgeAttempt = new Promise<{
-    response: Response;
-    provider: ProviderEndpoint;
+  const primaryCandidate = primaryAttempt
+    .then((result) => ({ result, routing: 'single' as const }))
+    .catch(async () => ({ result: await startSecondary(), routing: 'failover' as const }));
+  const hedgeCandidate = new Promise<{
+    readonly result: { response: Response; provider: ProviderEndpoint };
+    readonly routing: 'hedged';
   }>((resolve, reject) => {
     timer = setTimeout(() => {
-      hedgeWindowElapsed = true;
-      void startSecondary().then(resolve, reject);
+      void startSecondary().then(
+        (result) => resolve({ result, routing: 'hedged' }),
+        reject,
+      );
     }, DEFAULT_ROUTER_OPTIONS.hedgeAfterMs);
   });
 
   try {
-    const result = await Promise.race([
-      primaryAttempt.catch(() => startSecondary()),
-      hedgeAttempt,
-    ]);
-    return {
-      ...result,
-      routing:
-        result.provider.id === primary.id
-          ? 'single'
-          : hedgeWindowElapsed
-            ? 'hedged'
-            : 'failover',
-    };
+    // First success, not first settlement. A quick secondary failure must not reject a primary request
+    // that is still healthy and about to return.
+    const winner = await Promise.any([primaryCandidate, hedgeCandidate]);
+    return { ...winner.result, routing: winner.routing };
   } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
+    if (timer !== undefined) clearTimeout(timer);
   }
 }

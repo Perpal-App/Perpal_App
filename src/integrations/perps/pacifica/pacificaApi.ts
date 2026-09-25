@@ -15,6 +15,7 @@ const API_PREFIX = '/api/v1';
 const EXPIRY_WINDOW_MS = 5_000;
 const MAX_RESPONSE_BYTES = 1_000_000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const UTF8_ENCODER = new TextEncoder();
 
 export class PacificaApiError extends Error {
   constructor(
@@ -233,7 +234,13 @@ async function requestEnvelope(
     }
 
     const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
+    // UTF-8 is at most four bytes per UTF-16 code unit. Most Pacifica JSON is far below one quarter of
+    // the cap, so it cannot exceed the byte bound and does not need a second full response allocation.
+    const canExceedByteLimit = text.length > MAX_RESPONSE_BYTES / 4;
+    if (
+      text.length > MAX_RESPONSE_BYTES ||
+      (canExceedByteLimit && UTF8_ENCODER.encode(text).byteLength > MAX_RESPONSE_BYTES)
+    ) {
       throw responseError(
         'Pacifica response exceeded the size limit.',
         'response_too_large',

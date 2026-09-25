@@ -14,7 +14,10 @@ import {
   type TokenHolding,
 } from '@/domain/money/tokenValuation';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
-import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
+import {
+  signedSolanaRpcBatch,
+  type SignedRpcBatchResult,
+} from '@/integrations/api/signedSolanaRpc';
 import {
   fetchTokenPrices,
   type TokenPriceBatch,
@@ -53,6 +56,8 @@ type TokenAccountHolding = TokenHolding & {
 
 type BalanceStatus = 'idle' | 'loading' | 'ready' | 'error';
 const REFRESH_INTERVAL_MS = 30_000;
+const FOCUS_REUSE_MS = 15_000;
+const PRICE_REFRESH_INTERVAL_MS = 60_000;
 const PRICE_CACHE_MAX_AGE_MS = 120_000;
 const STARTUP_RETRY_LIMIT = 3;
 const STARTUP_RETRY_MS = 1_000;
@@ -66,13 +71,19 @@ export function useWalletBalances(input: {
   const [status, setStatus] = useState<BalanceStatus>('idle');
   const [refreshRevision, setRefreshRevision] = useState(0);
   const hasBalances = useRef(false);
+  const balanceUpdatedAtMs = useRef(0);
   const balancesRef = useRef<WalletBalances | null>(null);
   const pricingRef = useRef<TokenPriceBatch | null>(null);
   const metadataRef = useRef<TokenMetadataMap>(new Map());
-  const refresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
+  const forceRefresh = useRef(false);
+  const refresh = useCallback(() => {
+    forceRefresh.current = true;
+    setRefreshRevision((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     hasBalances.current = false;
+    balanceUpdatedAtMs.current = 0;
     balancesRef.current = null;
     setBalances(null);
     setStatus(
@@ -138,6 +149,7 @@ export function useWalletBalances(input: {
           if (active) {
             startupFailures = 0;
             hasBalances.current = true;
+            balanceUpdatedAtMs.current = Date.now();
             const raw = {
               publicWallet: walletWithPricing(publicWallet, cachedPricing),
               privateWallet: walletWithPricing(privateWallet, cachedPricing),
@@ -156,7 +168,10 @@ export function useWalletBalances(input: {
             || (privateWallet?.solLamports ?? 0n) > 0n;
           const nativeMint = NATIVE_MINT.toBase58();
           const [pricing, metadata] = await Promise.all([
-            fetchTokenPrices(
+            pricingRef.current !== null &&
+              Date.now() - pricingRef.current.timestampMs < PRICE_REFRESH_INTERVAL_MS
+              ? Promise.resolve(null)
+              : fetchTokenPrices(
               uniqueMints([
                 ...holdings,
                 ...(hasNativeSol
@@ -224,7 +239,14 @@ export function useWalletBalances(input: {
         }
       };
 
-      void load();
+      const ageMs = Date.now() - balanceUpdatedAtMs.current;
+      const forced = forceRefresh.current;
+      forceRefresh.current = false;
+      if (!forced && hasBalances.current && ageMs < FOCUS_REUSE_MS) {
+        timer = setTimeout(() => void load(), Math.max(0, REFRESH_INTERVAL_MS - ageMs));
+      } else {
+        void load();
+      }
       return () => {
         active = false;
         controller?.abort();
@@ -284,57 +306,72 @@ async function readWalletBalance(
   usdtMint: string,
   signal: AbortSignal,
 ): Promise<RawWalletBalance> {
-  const [sol, legacy, token2022] = await Promise.all([
-    signedSolanaRpc<{ readonly value: number }>({
-      method: 'getBalance',
-      params: [owner, { commitment: 'confirmed' }],
-      rpcUrl,
-      signal,
-      signer,
-    }),
-    readTokenHoldings(owner, TOKEN_PROGRAM_ID.toBase58(), rpcUrl, signer, signal),
-    readTokenHoldings(owner, TOKEN_2022_PROGRAM_ID.toBase58(), rpcUrl, signer, signal),
-  ]);
-  if (!Number.isSafeInteger(sol.value) || sol.value < 0) {
+  // One signed gateway envelope per wallet instead of three independently hashed, signed and posted
+  // requests. The gateway preserves one result/error per entry, so a malformed balance still fails this
+  // wallet without coupling it to the other wallet's parallel batch.
+  const results = await signedSolanaRpcBatch<unknown>({
+    requests: [
+      {
+        method: 'getBalance',
+        params: [owner, { commitment: 'confirmed' }],
+      },
+      {
+        method: 'getTokenAccountsByOwner',
+        params: [
+          owner,
+          { programId: TOKEN_PROGRAM_ID.toBase58() },
+          { commitment: 'confirmed', encoding: 'jsonParsed' },
+        ],
+      },
+      {
+        method: 'getTokenAccountsByOwner',
+        params: [
+          owner,
+          { programId: TOKEN_2022_PROGRAM_ID.toBase58() },
+          { commitment: 'confirmed', encoding: 'jsonParsed' },
+        ],
+      },
+    ],
+    rpcUrl,
+    signal,
+    signer,
+  });
+  const sol = object(batchValue(results[0])).value;
+  if (!Number.isSafeInteger(sol) || Number(sol) < 0) {
     throw new Error('SOL balance is invalid.');
   }
 
-  const solLamports = BigInt(sol.value);
-  const tokenAccounts = [...legacy, ...token2022];
+  const tokenAccounts = [
+    ...tokenHoldings(batchValue(results[1]), owner),
+    ...tokenHoldings(batchValue(results[2]), owner),
+  ];
   const holdings = mergeHoldings(tokenAccounts);
-
   return {
     holdings,
-    solLamports,
+    solLamports: BigInt(Number(sol)),
     usdcBaseUnits: associatedTokenAmount(tokenAccounts, owner, usdcMint),
     usdtBaseUnits: associatedTokenAmount(tokenAccounts, owner, usdtMint),
   };
 }
 
-async function readTokenHoldings(
-  owner: string,
-  programId: string,
-  rpcUrl: string,
-  signer: GatewayRequestSigner,
-  signal: AbortSignal,
-): Promise<readonly TokenAccountHolding[]> {
-  const result = await signedSolanaRpc<{
-    readonly value: readonly {
-      readonly pubkey: string;
-      readonly account: { readonly data: unknown };
-    }[];
-  }>({
-    method: 'getTokenAccountsByOwner',
-    params: [owner, { programId }, { commitment: 'confirmed', encoding: 'jsonParsed' }],
-    rpcUrl,
-    signal,
-    signer,
-  });
+function batchValue(result: SignedRpcBatchResult<unknown> | undefined): unknown {
+  if (result === undefined) throw new Error('Wallet balance response is incomplete.');
+  if (!result.ok) throw result.error;
+  return result.value;
+}
 
-  return result.value.map((entry) => ({
-    ...parseTokenHolding(entry.account.data, owner),
-    address: new PublicKey(entry.pubkey).toBase58(),
-  }));
+function tokenHoldings(value: unknown, owner: string): readonly TokenAccountHolding[] {
+  const entries = object(value).value;
+  if (!Array.isArray(entries)) throw new Error('Token accounts are invalid.');
+  return entries.map((raw) => {
+    const entry = object(raw);
+    const account = object(entry.account);
+    if (typeof entry.pubkey !== 'string') throw new Error('Token account is invalid.');
+    return {
+      ...parseTokenHolding(account.data, owner),
+      address: new PublicKey(entry.pubkey).toBase58(),
+    };
+  });
 }
 
 function parseTokenHolding(value: unknown, owner: string): TokenHolding {

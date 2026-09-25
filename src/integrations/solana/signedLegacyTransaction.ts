@@ -251,6 +251,8 @@ export async function submitSignedLegacyTransaction(input: {
   readonly rpcUrl: string;
   readonly signedTransactionBase64: string;
   readonly signer: GatewayRequestSigner;
+  /** Recovery owners already poll status; false avoids nesting a 20-second confirmation loop. */
+  readonly waitForConfirmation?: boolean;
 }): Promise<SubmittedTransactionResult> {
   const transaction = Transaction.from(base64.decode(input.signedTransactionBase64));
   const owner = new PublicKey(input.owner);
@@ -295,7 +297,9 @@ export async function submitSignedLegacyTransaction(input: {
   return {
     signature: input.expectedSignature,
     status: submitted === input.expectedSignature
-      ? await confirmSignature({
+      ? input.waitForConfirmation === false
+        ? 'submitted'
+        : await confirmSignature({
           failureMessage: 'The transaction failed on-chain.',
           rpcUrl: input.rpcUrl,
           signature: input.expectedSignature,

@@ -117,6 +117,7 @@ export async function submitSignedVersionedTransaction(input: {
   readonly rpcUrl: string;
   readonly signedTransactionBase64: string;
   readonly signer: GatewayRequestSigner;
+  readonly waitForConfirmation?: boolean;
 }): Promise<SubmittedTransactionResult> {
   const transaction = VersionedTransaction.deserialize(
     base64.decode(input.signedTransactionBase64),
@@ -161,7 +162,9 @@ export async function submitSignedVersionedTransaction(input: {
     signature: input.expectedSignature,
     status:
       submitted === input.expectedSignature
-        ? await confirm(input)
+        ? input.waitForConfirmation === false
+          ? 'submitted'
+          : await confirm(input)
         : 'unknown',
   };
 }

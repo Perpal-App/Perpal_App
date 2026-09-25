@@ -4,6 +4,11 @@ type CachedRead = {
   readonly value: unknown;
 };
 
+type PendingRead = {
+  readonly generation: number;
+  readonly promise: Promise<unknown>;
+};
+
 type RateLimit = {
   readonly lastLimitedAtMs: number;
   readonly strikes: number;
@@ -16,7 +21,7 @@ const DEFAULT_RATE_LIMIT_MS = 30_000;
 const MAX_RATE_LIMIT_MS = 2 * 60_000;
 
 const cache = new Map<string, CachedRead>();
-const pending = new Map<string, Promise<unknown>>();
+const pending = new Map<string, PendingRead>();
 const rateLimits = new Map<string, RateLimit>();
 let generation = 0;
 
@@ -34,11 +39,20 @@ export async function coordinatePacificaRead<T>(input: {
     cached.generation === generation &&
     cached.expiresAtMs > now
   ) {
+    // Access-order eviction keeps hot account/market keys through a history backfill instead of letting
+    // thirty one-off cursor pages evict them merely because they were inserted earlier.
+    cache.delete(input.cacheKey);
+    cache.set(input.cacheKey, cached);
     return cached.value as T;
   }
 
   const inFlight = pending.get(input.cacheKey);
-  if (inFlight !== undefined) return inFlight as Promise<T>;
+  // A post-mutation authoritative read may join work only when that work started in the same cache
+  // generation. Older physical requests are allowed to finish for their original caller, but cannot
+  // satisfy or overwrite a read made after the invalidation barrier.
+  if (inFlight !== undefined && inFlight.generation === generation) {
+    return inFlight.promise as Promise<T>;
+  }
 
   const readGeneration = generation;
   const request: Promise<T> = input.read()
@@ -54,9 +68,9 @@ export async function coordinatePacificaRead<T>(input: {
       return value;
     })
     .finally(() => {
-      if (pending.get(input.cacheKey) === request) pending.delete(input.cacheKey);
+      if (pending.get(input.cacheKey)?.promise === request) pending.delete(input.cacheKey);
     });
-  pending.set(input.cacheKey, request);
+  pending.set(input.cacheKey, { generation: readGeneration, promise: request });
   return request;
 }
 

@@ -26,7 +26,7 @@ import {
 } from '@/storage/inAppNotifications';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
-const VISIBLE_PAGE_SIZE = 40;
+const VISIBLE_PAGE_SIZE = 20;
 
 /**
  * The account's history: trades from the venue, fund movements from the venue and from this device.

@@ -48,7 +48,10 @@ export function publishPacificaPortfolioSnapshot(input: {
   readonly apiOrigin: string;
   readonly snapshot: PacificaPortfolioSnapshot;
 }): void {
-  write(key(input.apiOrigin, input.account), {
+  const id = key(input.apiOrigin, input.account);
+  // Direct authoritative publications supersede every refresh that started before them.
+  generations.set(id, (generations.get(id) ?? 0) + 1);
+  write(id, {
     data: input.snapshot,
     status: 'ready',
     updatedAtMs: Date.now(),
@@ -62,14 +65,7 @@ export function publishPacificaAccountSnapshot(input: {
   readonly snapshot: PacificaAccountSnapshot;
 }): PacificaPortfolioSnapshot {
   const id = key(input.apiOrigin, input.account);
-  const previous = snapshots.get(id)?.data;
-  const snapshot: PacificaPortfolioSnapshot = {
-    ...input.snapshot,
-    positions: previous?.positions ?? [],
-    orders: previous?.orders ?? [],
-  };
-  write(id, { data: snapshot, status: 'ready', updatedAtMs: Date.now() });
-  return snapshot;
+  return writeAccountSnapshot(id, input.snapshot, true);
 }
 
 /**
@@ -86,15 +82,28 @@ export async function refreshPacificaPortfolioSnapshot(input: {
   readonly signal?: AbortSignal;
 }): Promise<PacificaPortfolioSnapshot> {
   const id = key(input.apiOrigin, input.account);
-  const generation = (generations.get(id) ?? 0) + 1;
-  generations.set(id, generation);
+  const currentGeneration = generations.get(id) ?? 0;
+  const generation = input.forceNetwork === true ? currentGeneration + 1 : currentGeneration;
+  if (input.forceNetwork === true || !generations.has(id)) generations.set(id, generation);
   const previous = snapshots.get(id) ?? EMPTY;
   if (previous.data === null) write(id, { ...previous, status: 'loading' });
 
   try {
-    const snapshot = await (input.forceNetwork === true
+    const loader = input.forceNetwork === true
       ? fetchFreshPacificaPortfolio
-      : fetchPacificaPortfolio)(input.apiOrigin, input.account, input.signal);
+      : fetchPacificaPortfolio;
+    const snapshot = await loader(
+      input.apiOrigin,
+      input.account,
+      input.signal,
+      (accountSnapshot) => {
+        if (input.signal?.aborted !== true && generations.get(id) === generation) {
+          // Same refresh generation: publish useful account figures now, then allow the complete result
+          // to replace only the retained position/order arrays when they finish.
+          writeAccountSnapshot(id, accountSnapshot, false);
+        }
+      },
+    );
     if (input.signal?.aborted !== true && generations.get(id) === generation) {
       publishPacificaPortfolioSnapshot({
         account: input.account,
@@ -105,9 +114,10 @@ export async function refreshPacificaPortfolioSnapshot(input: {
     return snapshot;
   } catch (cause) {
     if (input.signal?.aborted !== true && generations.get(id) === generation) {
+      const latest = snapshots.get(id) ?? previous;
       write(id, {
-        ...previous,
-        status: previous.data === null ? 'error' : 'stale',
+        ...latest,
+        status: latest.data === null ? 'error' : 'stale',
       });
     }
     throw cause;
@@ -119,6 +129,25 @@ export function clearPacificaPortfolioSnapshot(apiOrigin: string, account: strin
   generations.set(id, (generations.get(id) ?? 0) + 1);
   snapshots.delete(id);
   emit(id);
+}
+
+function writeAccountSnapshot(
+  id: string,
+  account: PacificaAccountSnapshot,
+  advanceGeneration: boolean,
+): PacificaPortfolioSnapshot {
+  if (advanceGeneration) {
+    // A credited account-only result must not be regressed by a request started before it.
+    generations.set(id, (generations.get(id) ?? 0) + 1);
+  }
+  const previous = snapshots.get(id)?.data;
+  const snapshot: PacificaPortfolioSnapshot = {
+    ...account,
+    positions: previous?.positions ?? [],
+    orders: previous?.orders ?? [],
+  };
+  write(id, { data: snapshot, status: 'ready', updatedAtMs: Date.now() });
+  return snapshot;
 }
 
 function write(id: string, snapshot: PacificaPortfolioStoreSnapshot): void {
