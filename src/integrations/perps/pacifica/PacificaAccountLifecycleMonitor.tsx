@@ -24,10 +24,16 @@ import {
   type PacificaLifecycleCheckpoint,
 } from '@/integrations/perps/pacifica/pacificaLifecycleCheckpoint';
 import {
-  fetchPacificaPortfolio,
-  type PacificaOpenOrder,
-  type PacificaPortfolioSnapshot,
+  recoverPacificaDepositLifecycle,
+} from '@/integrations/perps/pacifica/pacificaDepositSettlement';
+import type {
+  PacificaOpenOrder,
+  PacificaPortfolioSnapshot,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import {
+  clearPacificaPortfolioSnapshot,
+  refreshPacificaPortfolioSnapshot,
+} from '@/integrations/perps/pacifica/pacificaPortfolioStore';
 import { clearPacificaReadCache } from '@/integrations/perps/pacifica/pacificaReadCoordinator';
 import {
   captureInAppNotificationScope,
@@ -56,7 +62,9 @@ export function PacificaAccountLifecycleMonitor() {
   const config = readAppConfig();
   const ownerAddress = session.mainWalletAddress;
   const account = session.status === 'ready' ? session.address : null;
+  const signer = session.status === 'ready' ? session.signer : null;
   const apiOrigin = config.ok ? config.value.perps.pacificaApiOrigin : '';
+  const rpcUrl = config.ok ? config.value.api.rpcUrl : '';
   const network = config.ok ? config.value.cluster : null;
 
   useLayoutEffect(() => {
@@ -69,9 +77,11 @@ export function PacificaAccountLifecycleMonitor() {
   useEffect(() => {
     if (
       account === null ||
+      signer === null ||
       ownerAddress === null ||
       network === null ||
-      apiOrigin.length === 0
+      apiOrigin.length === 0 ||
+      rpcUrl.length === 0
     ) return undefined;
 
     const scope = pacificaLifecycleScope({ account, network, ownerAddress });
@@ -111,10 +121,49 @@ export function PacificaAccountLifecycleMonitor() {
       try {
         const mode = needsBackfill ? 'backfill' : 'latest';
         const [portfolioResult, activityResult] = await Promise.allSettled([
-          fetchPacificaPortfolio(apiOrigin, account, request.signal),
+          refreshPacificaPortfolioSnapshot({
+            account,
+            apiOrigin,
+            signal: request.signal,
+          }),
           fetchPacificaActivity(apiOrigin, account, request.signal, mode),
         ]);
         if (disposed || request.signal.aborted || controller !== request) return;
+        if (portfolioResult.status === 'rejected') throw portfolioResult.reason;
+        const portfolio = portfolioResult.value;
+        const deposit = await recoverPacificaDepositLifecycle({
+          account,
+          apiOrigin,
+          portfolio,
+          rpcUrl,
+          signal: request.signal,
+          signer,
+        }).catch(() => null);
+        if (deposit?.status === 'credited' && deposit.fast && deposit.signature !== null) {
+          publishInAppNotification({
+            correlations: [{ namespace: 'solana-transaction', value: deposit.signature }],
+            kind: 'funding',
+            message: 'USDC is available for trading.',
+            outcome: 'success',
+            scopeToken: notificationScope,
+            status: 'settled',
+            title: 'Pacifica deposit credited',
+          });
+        } else if (deposit?.status === 'failed' && deposit.fast && deposit.signature !== null) {
+          publishInAppNotification({
+            correlations: [{ namespace: 'solana-transaction', value: deposit.signature }],
+            kind: 'funding',
+            message: 'USDC stayed at source. A network fee may apply.',
+            outcome: 'error',
+            scopeToken: notificationScope,
+            status: 'failed',
+            title: 'Pacifica deposit failed',
+          });
+        }
+
+        // Account funding is safety-critical and is settled even when the independent history feed is
+        // unavailable. The old ordering threw on activity first, so one history timeout could stop a
+        // confirmed deposit from being reconciled and published to the market ticket.
         if (activityResult.status === 'fulfilled') {
           publishPacificaActivitySnapshot({
             account,
@@ -125,10 +174,7 @@ export function PacificaAccountLifecycleMonitor() {
           activityFailed = true;
           throw activityResult.reason;
         }
-        if (portfolioResult.status === 'rejected') throw portfolioResult.reason;
-
         const activity = activityResult.value;
-        const portfolio = portfolioResult.value;
 
         if (checkpoint === null) {
           // A partial first read cannot establish which feed is empty and which failed. Wait for
@@ -214,9 +260,10 @@ export function PacificaAccountLifecycleMonitor() {
       stopPending();
       clearPacificaReadCache();
       clearPacificaActivitySnapshot(apiOrigin, account);
+      clearPacificaPortfolioSnapshot(apiOrigin, account);
       subscription.remove();
     };
-  }, [account, apiOrigin, network, ownerAddress]);
+  }, [account, apiOrigin, network, ownerAddress, rpcUrl, signer]);
 
   return null;
 }

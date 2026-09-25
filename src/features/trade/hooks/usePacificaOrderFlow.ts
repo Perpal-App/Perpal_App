@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 
 import { AmountError, parseAmount } from '@/domain/money/amount';
@@ -25,6 +25,7 @@ import {
   type PacificaOrderSide,
   type PacificaOrderType,
 } from '@/integrations/perps/pacifica/pacificaOrder';
+import { waitForPacificaDepositCredit } from '@/integrations/perps/pacifica/pacificaDepositSettlement';
 import { fetchFreshPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import {
   preparePacificaTradeCollateral,
@@ -40,7 +41,12 @@ import {
 import { showAppToast } from '@/storage/appToast';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
-export type PacificaOrderPhase = 'idle' | 'preparing' | 'prepared' | 'submitting' | 'complete';
+export type PacificaOrderPhase =
+  | 'idle'
+  | 'preparing'
+  | 'prepared'
+  | 'submitting'
+  | 'indexing';
 
 /**
  * Everything the reader typed, as one value.
@@ -116,6 +122,12 @@ export function usePacificaOrderFlow(input: {
     setPhase('idle');
   };
 
+  // A shared portfolio publication can turn the ticket into its normal trading form while this hook is
+  // still carrying the local indexing label. Once funding-only is false, that label has done its job.
+  useEffect(() => {
+    if (!input.fundingOnly && phase === 'indexing') setPhase('idle');
+  }, [input.fundingOnly, phase]);
+
   const abortPending = () => controller.current?.abort();
 
   const prepare = async () => {
@@ -159,8 +171,11 @@ export function usePacificaOrderFlow(input: {
     setPreparation(null);
     setFundingRequirement(null);
     try {
-      if (await input.recovery.reconcile(abort.signal) === 'pending') {
-        throw new Error('A previous collateral transaction is still confirming.');
+      const recoveryStatus = await input.recovery.reconcile(abort.signal);
+      if (recoveryStatus === 'pending' || recoveryStatus === 'indexing') {
+        throw new Error(recoveryStatus === 'indexing'
+          ? 'Pacifica is crediting the previous deposit.'
+          : 'A previous collateral transaction is still confirming.');
       }
       const collateralBaseUnits = draft.action === 'open'
         ? parseAmount(draft.collateral, 6).baseUnits
@@ -250,17 +265,51 @@ export function usePacificaOrderFlow(input: {
       });
       if (result.status !== 'confirmed') {
         input.recovery.setPending(true);
-        throw new Error('Collateral was signed and is still confirming. Do not submit it again.');
+        setPreparation(null);
+        setPhase('indexing');
+        publishInAppNotification({
+          kind: 'funding',
+          outcome: 'info',
+          title: 'Collateral submitted',
+          message: 'Waiting for Solana and Pacifica. Do not submit it again.',
+          scopeToken,
+        });
+        return;
       }
-      input.recovery.setPending(false);
+
+      // Solana confirmation does not mean the venue API has indexed the credit. Keep the durable
+      // collateral record and the non-actionable ticket state until a forced account read proves the
+      // exact balance increase; the shared store updates every mounted and future ticket together.
       setPreparation(null);
-      setPhase('complete');
+      setPhase('indexing');
+      const settlement = await waitForPacificaDepositCredit({
+        account: session.address,
+        apiOrigin: input.venue.apiOrigin,
+        rpcUrl: input.venue.rpcUrl,
+        signal: abort.signal,
+        signer: session.signer,
+      });
+      if (settlement.status !== 'credited') {
+        input.recovery.setPending(true);
+        publishInAppNotification({
+          kind: 'funding',
+          outcome: 'info',
+          title: 'Pacifica is crediting collateral',
+          message: 'The transfer confirmed. Trading balance is still syncing.',
+          scopeToken,
+        });
+        return;
+      }
+
+      input.recovery.setPending(false);
+      if (settlement.snapshot !== null) input.portfolioState.update(settlement.snapshot);
+      setPhase('idle');
       setFundingRequirement(null);
       publishInAppNotification({
         kind: 'funding',
         outcome: 'success',
-        title: 'Trading collateral confirmed',
-        message: 'Pacifica is updating the available trading balance.',
+        title: 'Trading collateral ready',
+        message: 'USDC is available for trading.',
         scopeToken,
       });
     } catch (cause) {

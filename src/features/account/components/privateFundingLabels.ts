@@ -80,15 +80,20 @@ export function storedError(code: string | null | undefined): string | null {
 }
 
 /** Where a run has reached, in the reader's terms rather than the state machine's. */
-export function phaseLabel(phase: string | undefined): string {
+export function phaseLabel(
+  phase: string | undefined,
+  destination?: PrivateFundingRecord['destination'],
+): string {
   switch (phase) {
     case 'depositing': return 'Preparing private transfer';
     case 'proving': return 'Preparing privacy proof';
     case 'scanning':
     case 'relaying':
-    case 'fee-funding':
-    case 'provider-depositing': return 'Getting trading funds ready';
-    case 'complete': return 'Ready to trade';
+    case 'fee-funding': return 'Getting trading funds ready';
+    case 'provider-depositing': return 'Crediting Pacifica';
+    case 'complete': return destination === 'private'
+      ? 'USDC staged for your next top-up'
+      : 'Ready to trade';
     default: return 'Ready';
   }
 }

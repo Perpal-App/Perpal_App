@@ -78,7 +78,7 @@ export function WithdrawReviewStep({
           already in flight would be a promise this cannot keep. */}
       <View style={styles.header}>
         <PressableScale
-          accessibilityHint="Returns to the withdrawal form"
+          accessibilityHint="Returns to the previous form"
           accessibilityLabel="Back"
           accessibilityRole="button"
           disabled={confirming}

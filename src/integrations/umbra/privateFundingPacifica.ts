@@ -1,3 +1,4 @@
+import { parseAmount } from '@/domain/money/amount';
 import type { AppConfig } from '@/config/appConfig';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import {
@@ -6,6 +7,8 @@ import {
   submitPacificaDeposit,
   type PacificaDepositPlan,
 } from '@/integrations/perps/pacifica/pacificaDeposit';
+import { waitForPacificaDepositCredit } from '@/integrations/perps/pacifica/pacificaDepositSettlement';
+import { refreshPacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolioStore';
 import {
   removePendingTradeAction,
   writePendingTradeAction,
@@ -57,6 +60,8 @@ async function announceDeposit(
     kind: 'collateral',
     owner,
     provider: 'pacifica',
+    providerBalanceBeforeBaseUnits: plan.providerBalanceBeforeBaseUnits.toString(),
+    expectedProviderCreditBaseUnits: plan.amountBaseUnits.toString(),
     signature,
     signedTransactionBase64,
     updatedAtMs: Date.now(),
@@ -89,12 +94,18 @@ export async function fundPacificaFromPrivateWallet(input: {
 
   let plan: PacificaDepositPlan;
   try {
+    const portfolio = await refreshPacificaPortfolioSnapshot({
+      account: input.record.tradingWalletAddress,
+      apiOrigin: input.config.perps.pacificaApiOrigin,
+      forceNetwork: true,
+    });
     plan = await preparePacificaDeposit({
       amountBaseUnits,
       centralState: input.config.perps.pacificaCentralState,
       mint: input.config.perps.usdcMint,
       owner: input.record.tradingWalletAddress,
       programId: input.config.perps.pacificaProgramId,
+      providerBalanceBeforeBaseUnits: parseAmount(portfolio.balance, 6).baseUnits,
       rpcUrl: input.config.api.rpcUrl,
       signer: input.signer,
       vault: input.config.perps.pacificaVault,
@@ -142,8 +153,14 @@ export async function fundPacificaFromPrivateWallet(input: {
     });
 
     if (result.status === 'confirmed') {
-      await withdrawAnnouncement(owner);
-      return result.signature;
+      const settlement = await waitForPacificaDepositCredit({
+        account: owner,
+        apiOrigin: input.config.perps.pacificaApiOrigin,
+        rpcUrl: input.config.api.rpcUrl,
+        signer: input.signer,
+      });
+      if (settlement.status === 'credited') return result.signature;
+      throw indexingDeposit();
     }
     throw pendingDeposit();
   } catch (cause) {
@@ -177,8 +194,14 @@ async function reconcileSignedDeposit(input: {
     signer: input.signer,
   });
   if (status === 'confirmed') {
-    await withdrawAnnouncement(owner);
-    return signature;
+    const settlement = await waitForPacificaDepositCredit({
+      account: owner,
+      apiOrigin: input.config.perps.pacificaApiOrigin,
+      rpcUrl: input.config.api.rpcUrl,
+      signer: input.signer,
+    });
+    if (settlement.status === 'credited') return signature;
+    throw indexingDeposit();
   }
   if (status === 'failed') {
     await input.onCheckpoint(emptyCheckpoint());
@@ -202,6 +225,7 @@ async function reconcileSignedDeposit(input: {
     signer: input.signer,
   });
   if (!current) {
+    if (status === 'processed') throw pendingDeposit();
     await input.onCheckpoint(emptyCheckpoint());
     await withdrawAnnouncement(owner);
     return null;
@@ -217,8 +241,14 @@ async function reconcileSignedDeposit(input: {
       signer: input.signer,
     });
     if (result.status === 'confirmed') {
-      await withdrawAnnouncement(owner);
-      return result.signature;
+      const settlement = await waitForPacificaDepositCredit({
+        account: owner,
+        apiOrigin: input.config.perps.pacificaApiOrigin,
+        rpcUrl: input.config.api.rpcUrl,
+        signer: input.signer,
+      });
+      if (settlement.status === 'credited') return result.signature;
+      throw indexingDeposit();
     }
     throw pendingDeposit();
   } catch (cause) {
@@ -240,7 +270,12 @@ function privateDepositAmount(record: PrivateFundingRecord): bigint {
       'pacifica_deposit_amount_unavailable',
     );
   }
-  return BigInt(record.noteAmountBaseUnits);
+
+  // The baseline was visible on the confirmation as "Private USDC included". Freeze it at start and add
+  // only this operation's confirmed note: reading the live wallet balance here would silently sweep any
+  // unrelated USDC that arrived while the privacy route was running, whereas ignoring the baseline is
+  // what stranded small earlier deposits in the intermediary wallet.
+  return BigInt(record.privateUsdcBaseUnitsAtStart) + BigInt(record.noteAmountBaseUnits);
 }
 
 function emptyCheckpoint(): ProviderDepositCheckpoint {
@@ -256,6 +291,13 @@ function pendingDeposit(): PrivateFundingError {
   return new PrivateFundingError(
     'The Pacifica deposit is submitted and still confirming.',
     'pacifica_deposit_pending',
+  );
+}
+
+function indexingDeposit(): PrivateFundingError {
+  return new PrivateFundingError(
+    'The transfer confirmed. Pacifica is still crediting the trading balance.',
+    'pacifica_deposit_indexing',
   );
 }
 

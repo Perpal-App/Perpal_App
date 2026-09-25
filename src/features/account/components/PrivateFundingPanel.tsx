@@ -31,9 +31,6 @@ import {
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
 const SOL_DECIMALS = 9;
 const FIELD_MIN_HEIGHT = layout.minTouchTarget;
-const MINIMUM_PUBLIC_USDC_BASE_UNITS = minimumUmbraInputForCredit(
-  PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS,
-);
 
 export function PrivateFundingPanel({
   balances,
@@ -60,19 +57,22 @@ export function PrivateFundingPanel({
   }, []);
   const symbol = collateral?.symbol ?? 'USDC';
   const selectedBalance = balances?.publicWallet?.usdcBaseUnits ?? null;
+  const privateUsdcBaseUnits = balances?.privateWallet?.usdcBaseUnits ?? null;
   const solLamports = balances?.publicWallet?.solLamports ?? null;
 
   const pending = funding.record?.phase === 'complete' ? null : funding.record;
+  const providerSettling = funding.record?.errorCode === 'pacifica_deposit_pending' ||
+    funding.record?.errorCode === 'pacifica_deposit_indexing';
   const shownSymbol = pending?.symbol ?? symbol;
   const balanceError = pending === null
     ? null
     : preflightError(funding.preflight, shownSymbol) ?? funding.preflightError;
   const visibleError = inputError ?? balanceError ?? funding.error
-    ?? storedError(funding.record?.errorCode);
+    ?? (providerSettling ? null : storedError(funding.record?.errorCode));
   const balanceMissing = funding.preflight !== null
     && (funding.preflight.missingCollateralBaseUnits > 0n
       || funding.preflight.missingSolLamports > 0n);
-  const locked = funding.isRunning || !tradingReady;
+  const locked = funding.isRunning || providerSettling || !tradingReady;
 
   useEffect(() => {
     const record = funding.record;
@@ -101,15 +101,19 @@ export function PrivateFundingPanel({
       const parsed = parseAmount(amount, collateral.decimals);
       const parsedFeeReserve = parseAmount(feeReserve, SOL_DECIMALS);
 
-      if (parsed.baseUnits <= 0n || parsedFeeReserve.baseUnits <= 0n) {
+      if (
+        parsed.baseUnits <= 0n ||
+        parsedFeeReserve.baseUnits <= 0n ||
+        privateUsdcBaseUnits === null
+      ) {
         throw new Error('invalid amount');
       }
       if (
-        creditedUmbraAmount(parsed.baseUnits) <
+        privateUsdcBaseUnits + creditedUmbraAmount(parsed.baseUnits) <
           PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS
       ) {
         throw new PrivateFundingError(
-          `Enter at least ${minimumPublicUsdc()} USDC so Pacifica receives 10 USDC after the Umbra fee.`,
+          `Top up at least ${minimumPublicUsdc(privateUsdcBaseUnits)} USDC.`,
           'pacifica_deposit_below_minimum',
         );
       }
@@ -136,6 +140,7 @@ export function PrivateFundingPanel({
         estimatedNetworkFeeLamports: preflight.estimatedNetworkFeeLamports,
         feeReserveLamports: parsedFeeReserve.baseUnits,
         hasSubmittedTransaction: false,
+        privateUsdcBaseUnitsAtStart: privateUsdcBaseUnits,
         mode: 'start',
         requiredSolLamports: preflight.requiredSolLamports,
         symbol: collateral.symbol,
@@ -171,6 +176,7 @@ export function PrivateFundingPanel({
           estimatedNetworkFeeLamports: 0n,
           feeReserveLamports: reserveLamports,
           hasSubmittedTransaction: hasSubmittedTransaction(record),
+          privateUsdcBaseUnitsAtStart: BigInt(record.privateUsdcBaseUnitsAtStart),
           mode: 'resume',
           requiredSolLamports: 0n,
           symbol: record.symbol,
@@ -197,6 +203,7 @@ export function PrivateFundingPanel({
         estimatedNetworkFeeLamports: preflight.estimatedNetworkFeeLamports,
         feeReserveLamports: reserveLamports,
         hasSubmittedTransaction: hasSubmittedTransaction(record),
+        privateUsdcBaseUnitsAtStart: BigInt(record.privateUsdcBaseUnitsAtStart),
         mode: 'resume',
         requiredSolLamports: preflight.requiredSolLamports,
         symbol: record.symbol,
@@ -232,15 +239,15 @@ export function PrivateFundingPanel({
       confirmed.amountBaseUnits,
       confirmed.feeReserveLamports,
       collateral,
+      confirmed.privateUsdcBaseUnitsAtStart,
     );
   };
 
   return (
     <View style={styles.panel}>
-      <Text accessibilityRole="header" style={styles.title}>Add funds</Text>
       {funding.record ? (
         <Text accessibilityLiveRegion="polite" style={styles.status}>
-          {phaseLabel(funding.record.phase)}
+          {phaseLabel(funding.record.phase, funding.record.destination)}
         </Text>
       ) : null}
 
@@ -248,7 +255,13 @@ export function PrivateFundingPanel({
         <>
           <View style={styles.summary}>
             <Text numberOfLines={1} style={styles.summaryProvider}>Pacifica · USDC</Text>
-            <Text numberOfLines={1} style={styles.summaryMinimum}>Min 10 USDC credited</Text>
+            <Text numberOfLines={1} style={styles.summaryMinimum}>
+              {privateUsdcBaseUnits === null
+                ? 'Checking private balance'
+                : privateUsdcBaseUnits > 0n
+                  ? `${privateUsdcText(privateUsdcBaseUnits)} already staged`
+                  : 'Min 10 USDC credited'}
+            </Text>
           </View>
           <View style={styles.field}>
             <FieldHead
@@ -281,7 +294,9 @@ export function PrivateFundingPanel({
               <TokenTag label="USDC" />
             </View>
             <Text numberOfLines={1} style={styles.hint}>
-              Min {minimumPublicUsdc()} USDC including privacy fee
+              {privateUsdcBaseUnits === null
+                ? 'Checking the amount already ready for Pacifica'
+                : `Minimum top-up ${minimumPublicUsdc(privateUsdcBaseUnits)} USDC`}
             </Text>
           </View>
         </>
@@ -312,9 +327,11 @@ export function PrivateFundingPanel({
         </View>
       ) : null}
 
-      {funding.isRunning ? (
+      {funding.isRunning || providerSettling ? (
         <Text accessibilityLiveRegion="polite" style={styles.note}>
-          {runningMessage(funding.record?.phase)}
+          {providerSettling
+            ? 'Transfer confirmed. Pacifica is crediting your trading balance.'
+            : runningMessage(funding.record?.phase)}
         </Text>
       ) : null}
       {visibleError ? (
@@ -322,21 +339,35 @@ export function PrivateFundingPanel({
       ) : null}
 
       {pending !== null ? (
-        <ActionButton
-          disabled={!tradingReady || funding.isChecking || balanceMissing}
-          label={pendingActionLabel({
-            isChecking: funding.isChecking,
-            isRunning: funding.isRunning,
-            preflight: funding.preflight,
-            symbol: funding.record?.symbol ?? null,
-          })}
-          loading={funding.isRunning || funding.isChecking}
-          onPress={() => void confirmResume()}
-          tone="neutral"
-        />
+        providerSettling ? (
+          <ActionButton
+            disabled
+            label="Pacifica crediting funds"
+            loading
+            onPress={() => undefined}
+            tone="neutral"
+          />
+        ) : (
+          <ActionButton
+            disabled={!tradingReady || funding.isChecking || balanceMissing}
+            label={pendingActionLabel({
+              isChecking: funding.isChecking,
+              isRunning: funding.isRunning,
+              preflight: funding.preflight,
+              symbol: funding.record?.symbol ?? null,
+            })}
+            loading={funding.isRunning || funding.isChecking}
+            onPress={() => void confirmResume()}
+            tone="neutral"
+          />
+        )
       ) : (
         <ActionButton
-          disabled={!tradingReady || collateral === null}
+          disabled={
+            !tradingReady ||
+            collateral === null ||
+            privateUsdcBaseUnits === null
+          }
           label={funding.record?.phase === 'complete' ? 'Add more funds' : 'Add funds'}
           loading={funding.isRunning}
           onPress={() => void confirmStart()}
@@ -377,13 +408,19 @@ function TokenTag({ label }: { readonly label: string }) {
   );
 }
 
-function minimumPublicUsdc(): string {
-  return formatAmount(amountFromBaseUnits(MINIMUM_PUBLIC_USDC_BASE_UNITS, 6));
+function minimumPublicUsdc(privateUsdcBaseUnits: bigint): string {
+  const remainingCredit = privateUsdcBaseUnits >= PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS
+    ? 0n
+    : PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS - privateUsdcBaseUnits;
+  return formatAmount(amountFromBaseUnits(minimumUmbraInputForCredit(remainingCredit), 6));
+}
+
+function privateUsdcText(baseUnits: bigint): string {
+  return `${formatAmount(amountFromBaseUnits(baseUnits, 6))} USDC`;
 }
 
 const styles = StyleSheet.create({
   panel: { gap: spacing.md },
-  title: { ...typography.heading, color: colors.textPrimary },
   note: { ...typography.bodyCompact, color: colors.textSecondary },
   status: { ...typography.label, color: colors.accentSoft },
   summary: {

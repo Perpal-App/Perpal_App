@@ -31,7 +31,7 @@ export type DirectWithdrawalPhase =
  * signature status and the blockhash, and a blockhash cannot outlive roughly 150 slots, so it reaches a
  * definitive answer inside a couple of minutes and the loop ends on that rather than on the clock.
  */
-const WATCH_INTERVAL_MS = 5_000;
+const WATCH_INTERVAL_MS = 2_000;
 const WATCH_WINDOW_MS = 150_000;
 
 export function useDirectWithdrawalRecovery({

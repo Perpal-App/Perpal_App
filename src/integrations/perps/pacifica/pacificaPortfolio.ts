@@ -48,6 +48,11 @@ export type PacificaPortfolioSnapshot = {
   readonly fetchedAtMs: number;
 };
 
+export type PacificaAccountSnapshot = Omit<
+  PacificaPortfolioSnapshot,
+  'positions' | 'orders'
+>;
+
 export async function fetchPacificaPortfolio(
   apiOrigin: string,
   account: string,
@@ -62,6 +67,26 @@ export async function fetchFreshPacificaPortfolio(
   signal?: AbortSignal,
 ): Promise<PacificaPortfolioSnapshot> {
   return loadPacificaPortfolio(apiOrigin, account, signal, 'network');
+}
+
+/** One-endpoint balance read used while waiting for a confirmed deposit to become tradeable. */
+export async function fetchFreshPacificaAccount(
+  apiOrigin: string,
+  account: string,
+  signal?: AbortSignal,
+): Promise<PacificaAccountSnapshot> {
+  try {
+    return parseAccount(await pacificaGet<unknown>({
+      apiOrigin,
+      freshness: 'network',
+      path: '/account',
+      query: { account },
+      signal,
+    }));
+  } catch (cause) {
+    if (missingAccount(cause)) return emptyAccount();
+    throw cause;
+  }
 }
 
 async function loadPacificaPortfolio(
@@ -80,38 +105,43 @@ async function loadPacificaPortfolio(
         apiOrigin, freshness, path: '/orders', query: { account }, signal,
       }),
     ]);
-    const value = object(rawAccount, 'account');
     return {
-      initialized: true,
-      balance: decimal(value.balance, 'balance'),
-      accountEquity: decimal(value.account_equity, 'account equity'),
-      crossMmr: decimal(value.cross_mmr, 'cross maintenance margin'),
-      availableToSpend: decimal(value.available_to_spend, 'available balance'),
-      availableToWithdraw: decimal(value.available_to_withdraw, 'withdrawable balance'),
-      pendingBalance: decimal(value.pending_balance, 'pending balance'),
-      totalMarginUsed: decimal(value.total_margin_used, 'margin used'),
-      makerFee: decimal(value.maker_fee, 'maker fee'),
-      takerFee: decimal(value.taker_fee, 'taker fee'),
-      updatedAtMs: optionalTimestamp(value.updated_at),
-      positionsCount: nonNegativeInteger(value.positions_count, 'positions count'),
-      ordersCount: nonNegativeInteger(value.orders_count, 'orders count'),
-      stopOrdersCount: nonNegativeInteger(value.stop_orders_count, 'stop orders count'),
+      ...parseAccount(rawAccount),
       positions: parsePositions(rawPositions),
       orders: parseOrders(rawOrders),
-      fetchedAtMs: Date.now(),
     };
   } catch (cause) {
-    if (
-      cause instanceof PacificaApiError &&
-      (
-        (cause.status === 404 && cause.requestPath === '/api/v1/account') ||
-        /account not found/iu.test(cause.message)
-      )
-    ) {
-      return emptyPortfolio();
-    }
+    if (missingAccount(cause)) return emptyPortfolio();
     throw cause;
   }
+}
+
+function parseAccount(raw: unknown): PacificaAccountSnapshot {
+  const value = object(raw, 'account');
+  return {
+    initialized: true,
+    balance: decimal(value.balance, 'balance'),
+    accountEquity: decimal(value.account_equity, 'account equity'),
+    crossMmr: decimal(value.cross_mmr, 'cross maintenance margin'),
+    availableToSpend: decimal(value.available_to_spend, 'available balance'),
+    availableToWithdraw: decimal(value.available_to_withdraw, 'withdrawable balance'),
+    pendingBalance: decimal(value.pending_balance, 'pending balance'),
+    totalMarginUsed: decimal(value.total_margin_used, 'margin used'),
+    makerFee: decimal(value.maker_fee, 'maker fee'),
+    takerFee: decimal(value.taker_fee, 'taker fee'),
+    updatedAtMs: optionalTimestamp(value.updated_at),
+    positionsCount: nonNegativeInteger(value.positions_count, 'positions count'),
+    ordersCount: nonNegativeInteger(value.orders_count, 'orders count'),
+    stopOrdersCount: nonNegativeInteger(value.stop_orders_count, 'stop orders count'),
+    fetchedAtMs: Date.now(),
+  };
+}
+
+function missingAccount(cause: unknown): boolean {
+  return cause instanceof PacificaApiError && (
+    (cause.status === 404 && cause.requestPath === '/api/v1/account') ||
+    /account not found/iu.test(cause.message)
+  );
 }
 
 function parsePositions(value: unknown): readonly PacificaPosition[] {
@@ -154,7 +184,7 @@ function parseOrders(value: unknown): readonly PacificaOpenOrder[] {
   });
 }
 
-function emptyPortfolio(): PacificaPortfolioSnapshot {
+function emptyAccount(): PacificaAccountSnapshot {
   return {
     initialized: false,
     balance: '0',
@@ -170,9 +200,15 @@ function emptyPortfolio(): PacificaPortfolioSnapshot {
     positionsCount: 0,
     ordersCount: 0,
     stopOrdersCount: 0,
+    fetchedAtMs: Date.now(),
+  };
+}
+
+function emptyPortfolio(): PacificaPortfolioSnapshot {
+  return {
+    ...emptyAccount(),
     positions: [],
     orders: [],
-    fetchedAtMs: Date.now(),
   };
 }
 

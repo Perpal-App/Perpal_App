@@ -44,19 +44,35 @@ export type SubmittedTransactionResult = {
   readonly status: 'confirmed' | 'submitted' | 'unknown';
 };
 
-export type SubmittedTransactionStatus = 'confirmed' | 'failed' | 'pending';
+export type TransactionFailureDiagnostic = {
+  readonly customCode?: number;
+  readonly errorType: string;
+  readonly instructionIndex?: number;
+  readonly instructionName?: string;
+  readonly kind: 'instruction' | 'transaction';
+};
+
+export type SubmittedTransactionStatus =
+  | 'confirmed'
+  | 'failed'
+  | 'processed'
+  | 'not-found';
 
 /**
  * What the cluster currently says about one signature.
  *
- * `pending` covers both "never seen" and "seen but only processed", which are the same thing to every
- * caller: no decision can be taken on it yet. Only `confirmed` and `failed` are answers.
+ * `not-found` and `processed` remain distinct because an expired blockhash proves safety only for a
+ * signature the cluster never observed. A processed transaction may still settle after its blockhash can
+ * no longer be used for a new landing, so recovery must keep tracking it.
  */
 export async function readSubmittedTransactionStatus(input: {
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
   readonly signature: string;
   readonly signal?: AbortSignal;
+  /** Safe labels for known top-level instruction positions; no account data is logged. */
+  readonly instructionNames?: readonly string[];
+  readonly operation?: string;
 }): Promise<SubmittedTransactionStatus> {
   const result = await signedSolanaRpc<{
     readonly context: { readonly slot: number };
@@ -73,16 +89,22 @@ export async function readSubmittedTransactionStatus(input: {
   });
   const status = result.value[0];
 
-  if (status?.err !== null && status?.err !== undefined) {
+  if (status === null || status === undefined) return 'not-found';
+  if (status.err !== null && status.err !== undefined) {
+    console.error('[Perpal transaction failed]', JSON.stringify({
+      event: 'transaction_failed',
+      operation: input.operation ?? 'transaction',
+      ...failureDiagnostic(status.err, input.instructionNames),
+    }));
     return 'failed';
   }
   if (
-    status?.confirmationStatus === 'confirmed' ||
-    status?.confirmationStatus === 'finalized'
+    status.confirmationStatus === 'confirmed' ||
+    status.confirmationStatus === 'finalized'
   ) {
     return 'confirmed';
   }
-  return 'pending';
+  return 'processed';
 }
 
 /**
@@ -98,6 +120,8 @@ export async function readSubmittedTransactionStatus(input: {
  */
 export async function confirmSignature(input: {
   readonly failureMessage: string;
+  readonly instructionNames?: readonly string[];
+  readonly operation?: string;
   readonly rpcUrl: string;
   readonly signature: string;
   readonly signal?: AbortSignal;
@@ -114,6 +138,10 @@ export async function confirmSignature(input: {
         rpcUrl: input.rpcUrl,
         signature: input.signature,
         signer: input.signer,
+        ...(input.instructionNames === undefined
+          ? {}
+          : { instructionNames: input.instructionNames }),
+        ...(input.operation === undefined ? {} : { operation: input.operation }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
 
@@ -134,6 +162,48 @@ export async function confirmSignature(input: {
   }
 
   return 'submitted';
+}
+
+function failureDiagnostic(
+  value: unknown,
+  instructionNames?: readonly string[],
+): TransactionFailureDiagnostic {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const instruction = (value as Record<string, unknown>).InstructionError;
+    if (
+      Array.isArray(instruction) &&
+      instruction.length >= 2 &&
+      Number.isSafeInteger(instruction[0]) &&
+      Number(instruction[0]) >= 0
+    ) {
+      const instructionIndex = Number(instruction[0]);
+      const detail = instruction[1];
+      const custom = typeof detail === 'object' && detail !== null && !Array.isArray(detail)
+        ? (detail as Record<string, unknown>).Custom
+        : undefined;
+      const customCode = Number.isSafeInteger(custom) && Number(custom) >= 0
+        ? Number(custom)
+        : undefined;
+      return {
+        ...(customCode === undefined ? {} : { customCode }),
+        errorType: customCode === undefined ? safeErrorType(detail) : 'Custom',
+        instructionIndex,
+        ...(instructionNames?.[instructionIndex] === undefined
+          ? {}
+          : { instructionName: instructionNames[instructionIndex] }),
+        kind: 'instruction',
+      };
+    }
+  }
+  return { errorType: safeErrorType(value), kind: 'transaction' };
+}
+
+function safeErrorType(value: unknown): string {
+  if (typeof value === 'string') return value.slice(0, 64);
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    return Object.keys(value)[0]?.slice(0, 64) ?? 'unknown';
+  }
+  return 'unknown';
 }
 
 function waitForNextStatus(signal?: AbortSignal): Promise<void> {

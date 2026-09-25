@@ -20,7 +20,13 @@ export type PendingTradeAction = {
    * `conversion` is live, despite reading like residue of the same era — `walletStablecoinSwap` writes
    * it and `tradeActionRecovery` treats it as one of the two versioned kinds.
    */
-  readonly kind: 'conversion' | 'setup' | 'collateral' | 'trade' | 'close' | 'withdraw';
+  readonly kind: 'conversion' | 'setup' | 'collateral' | 'fast-collateral' | 'trade' | 'close' | 'withdraw';
+  /**
+   * Pacifica balance immediately before a collateral deposit and the expected exact increase.
+   * Present only for collateral records that remain locked through Pacifica's indexing phase.
+   */
+  readonly providerBalanceBeforeBaseUnits?: string | null;
+  readonly expectedProviderCreditBaseUnits?: string | null;
   readonly owner: string;
   readonly provider: TradeActionScope;
   readonly signature: string;
@@ -86,7 +92,9 @@ function valid(
   const record = value as Record<string, unknown>;
   return record.version === 1 && record.owner === owner &&
     record.provider === provider &&
-    ['conversion', 'setup', 'collateral', 'trade', 'close', 'withdraw'].includes(String(record.kind)) &&
+    ['conversion', 'setup', 'collateral', 'fast-collateral', 'trade', 'close', 'withdraw'].includes(String(record.kind)) &&
+    optionalInteger(record.providerBalanceBeforeBaseUnits) &&
+    optionalUnsigned(record.expectedProviderCreditBaseUnits) &&
     typeof record.amountBaseUnits === 'string' &&
     /^\d+$/u.test(record.amountBaseUnits) &&
     typeof record.signature === 'string' && record.signature.length > 0 &&
@@ -95,4 +103,16 @@ function valid(
       typeof record.signedTransactionBase64 === 'string') &&
     Number.isSafeInteger(record.expiresAtMs) &&
     Number.isSafeInteger(record.updatedAtMs);
+}
+
+function optionalInteger(value: unknown): boolean {
+  return value === undefined || value === null || (
+    typeof value === 'string' && /^-?\d+$/u.test(value)
+  );
+}
+
+function optionalUnsigned(value: unknown): boolean {
+  return value === undefined || value === null || (
+    typeof value === 'string' && /^\d+$/u.test(value)
+  );
 }

@@ -144,7 +144,11 @@ export function DirectWithdrawForm({
       <ActionButton
         disabled={disabled || running}
         label={ctaLabel(phase, source)}
-        loading={phase === 'preparing' || phase === 'submitting'}
+        loading={
+          phase === 'preparing' ||
+          phase === 'submitting' ||
+          phase === 'pending'
+        }
         onPress={onReview}
         radius={WITHDRAW_RADIUS}
         style={styles.cta}

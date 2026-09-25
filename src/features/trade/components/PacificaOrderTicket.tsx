@@ -33,6 +33,7 @@ import { usePacificaTicketPortfolio } from '@/features/trade/hooks/usePacificaTi
 import { useTradingStablecoinBalances } from '@/features/trade/hooks/useTradingStablecoinBalances';
 import { PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS } from '@/integrations/perps/pacifica/pacificaDeposit';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
+import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import type {
   PacificaMarginMode,
   PacificaOrderAction,
@@ -90,8 +91,11 @@ export function PacificaOrderTicket(props: {
     marketRef: props.market.venueRef,
   });
   const portfolio = portfolioState.portfolio;
-  const fundingOnly = portfolio !== null &&
-    parseAmount(portfolio.availableToSpend, 6).baseUnits <= 0n;
+  // A zero `availableToSpend` is not an unfunded account: open margin, pending risk changes, or reserved
+  // collateral can consume spendable funds while the account still exists. The first-funding screen is
+  // for an account with no credited cash/activity evidence; actual order insufficiency is checked during
+  // preparation against a fresh snapshot.
+  const fundingOnly = portfolio !== null && !hasCreditedPacificaCollateral(portfolio);
   // `null` while the balance is still being read. Insufficiency is a claim about a number, so it waits
   // for the number rather than assuming zero — a ticket that flashed "Insufficient funds" on every open
   // and then corrected itself would be worse than the button it replaces.
@@ -186,7 +190,10 @@ export function PacificaOrderTicket(props: {
   // `fundingOnly` is the only branch that needs the second fact: a tradable account's form does not
   // depend on the wallet at all, so it still renders as soon as the venue answers. With both values now
   // seeded from their caches this wait is usually zero frames, not a round trip.
-  if (portfolio === null || (fundingOnly && privateUsdc === null)) {
+  if (
+    portfolio === null ||
+    (fundingOnly && (privateUsdc === null || portfolioState.checking))
+  ) {
     return (
       <PacificaBalanceState
         failed={portfolioState.failed}
@@ -304,7 +311,15 @@ export function PacificaOrderTicket(props: {
           <Field accessibilityLabel="Stop-loss price" onChangeText={(value) => { reset(); setStopLoss(value); }} placeholder="Stop loss" suffix="USD" value={stopLoss} />
         </>
       ) : null}
-      {preparation !== null ? (
+      {recovery.pending && fundingOnly ? (
+        <ActionButton
+          disabled
+          label={phase === 'indexing' ? 'Pacifica crediting funds' : 'Deposit confirming'}
+          loading
+          onPress={noop}
+          tone="neutral"
+        />
+      ) : preparation !== null ? (
         <TradeCollateralStepView loading={phase === 'submitting'} onConfirm={() => void flow.submitPreparation()} step={preparation} />
       ) : plan !== null ? (
         <PacificaPreparedOrder
@@ -338,19 +353,9 @@ export function PacificaOrderTicket(props: {
         </View>
       ) : (
         <ActionButton
-          label={fundingOnly
-            ? phase === 'complete' ? 'Refresh balance' : 'Review deposit'
-            : `Review ${reduceOnly ? 'close' : side}`}
+          label={fundingOnly ? 'Review deposit' : `Review ${reduceOnly ? 'close' : side}`}
           loading={phase === 'preparing'}
-          // `reset` rather than a bare phase change: after a confirmed deposit the stale plan, any
-          // collateral step and the funding shortfall all have to go with the phase, and `reset` is the
-          // one place that knows the full set.
-          onPress={phase === 'complete' && fundingOnly
-            ? () => {
-                reset();
-                portfolioState.refresh();
-              }
-            : () => void flow.prepare()}
+          onPress={() => void flow.prepare()}
           tone={fundingOnly ? 'accent' : side === 'long' ? 'positive' : 'negative'}
         />
       )}
@@ -359,6 +364,7 @@ export function PacificaOrderTicket(props: {
       <PacificaFundingRequirementRows requirement={flow.fundingRequirement ?? belowMinimum} />
       <PacificaRiskRows
         collateral={collateral}
+        fundingBlocked={cannotFund}
         fundingOnly={fundingOnly}
         minimumOrderSize={props.market.minOrderSize}
         portfolio={portfolio}
@@ -368,4 +374,11 @@ export function PacificaOrderTicket(props: {
       />
     </View>
   );
+}
+
+function hasCreditedPacificaCollateral(portfolio: PacificaPortfolioSnapshot): boolean {
+  return parseAmount(portfolio.balance, 6).baseUnits > 0n ||
+    portfolio.positionsCount > 0 ||
+    portfolio.ordersCount > 0 ||
+    portfolio.stopOrdersCount > 0;
 }

@@ -22,7 +22,10 @@ import {
   readPrivateExitRecord,
   type PrivateExitRecord,
 } from '@/integrations/umbra/privateExitStorage';
-import { PrivateFundingError } from '@/integrations/umbra/privateFundingErrors';
+import {
+  classifyPrivateFundingFailure,
+  PrivateFundingError,
+} from '@/integrations/umbra/privateFundingErrors';
 import {
   captureInAppNotificationScope,
   publishInAppNotification,
@@ -120,21 +123,27 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
         });
       }
     } catch (cause) {
+      const code = classifyPrivateFundingFailure(cause);
+      const waiting = code === 'relay_pending' || code === 'relay_cancelled';
       const message = cause instanceof PrivateFundingError
         ? cause.message
         : 'Private withdrawal did not complete. Progress is saved for a safe retry.';
-      setError(message);
-      publishInAppNotification({
-        ...(record === null
-          ? {}
-          : { correlations: [{ namespace: 'umbra-request' as const, value: record.id }] }),
-        kind: 'withdrawal',
-        outcome: 'error',
-        scopeToken: notificationScope,
-        status: 'failed',
-        title: 'Private withdrawal needs attention',
-        message,
-      });
+      if (waiting) {
+        setError(null);
+      } else {
+        setError(message);
+        publishInAppNotification({
+          ...(record === null
+            ? {}
+            : { correlations: [{ namespace: 'umbra-request' as const, value: record.id }] }),
+          kind: 'withdrawal',
+          outcome: 'error',
+          scopeToken: notificationScope,
+          status: 'failed',
+          title: 'Private withdrawal needs attention',
+          message,
+        });
+      }
     } finally {
       runningRef.current = false;
       setIsRunning(false);
@@ -201,6 +210,22 @@ export function PrivateExitProvider({ children }: { readonly children: ReactNode
     if (record === null || record.phase === 'complete') return;
     await run(() => resumePrivateExit(record, operationInput(), setRecord));
   }, [operationInput, record, run]);
+
+  useEffect(() => {
+    if (
+      isRunning ||
+      record === null ||
+      record.phase === 'complete' ||
+      (record.errorCode !== null &&
+        record.errorCode !== 'relay_pending' &&
+        record.errorCode !== 'relay_cancelled')
+    ) return undefined;
+    // The persisted record is the original confirmed intent. Continue recoverable work automatically on
+    // restore as well as relay polling; user rejection and balance/validation failures carry different
+    // codes and remain behind the explicit retry path.
+    const timer = setTimeout(() => void resume(), 3_000);
+    return () => clearTimeout(timer);
+  }, [isRunning, record, resume]);
 
   const reset = useCallback(async () => {
     if (record === null || runningRef.current) return;

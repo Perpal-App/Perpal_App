@@ -53,6 +53,8 @@ export type PrivateFundingInput = {
   readonly feeReserveLamports: bigint;
   readonly gatewaySigner: GatewayRequestSigner;
   readonly mainWalletAddress: string;
+  /** Confirmed private-wallet USDC explicitly included in the final Pacifica credit. */
+  readonly privateUsdcBaseUnitsAtStart: bigint;
   readonly privyProvider: PrivySolanaProvider;
   readonly tradingWalletAddress: string;
 };
@@ -61,7 +63,11 @@ export async function beginPrivateFunding(
   input: PrivateFundingInput,
   onRecord: (record: PrivateFundingRecord) => void,
 ): Promise<PrivateFundingRecord> {
-  if (input.amountBaseUnits <= 0n || input.feeReserveLamports <= 0n) {
+  if (
+    input.amountBaseUnits <= 0n ||
+    input.feeReserveLamports <= 0n ||
+    input.privateUsdcBaseUnitsAtStart < 0n
+  ) {
     throw new PrivateFundingError(
       'Enter collateral and a SOL fee reserve greater than zero.',
       'amount_invalid',
@@ -92,11 +98,11 @@ export async function beginPrivateFunding(
     );
   }
   if (
-    creditedUmbraAmount(input.amountBaseUnits) <
+    input.privateUsdcBaseUnitsAtStart + creditedUmbraAmount(input.amountBaseUnits) <
       PACIFICA_MINIMUM_CREDITED_DEPOSIT_BASE_UNITS
   ) {
     throw new PrivateFundingError(
-      'Enter enough USDC for Pacifica to receive at least 10 USDC after the Umbra fee.',
+      'The private balance and this top-up must give Pacifica at least 10 USDC.',
       'pacifica_deposit_below_minimum',
     );
   }
@@ -109,6 +115,7 @@ export async function beginPrivateFunding(
     destination: 'pacifica',
     mint: collateral.mint,
     symbol: collateral.symbol,
+    privateUsdcBaseUnitsAtStart: input.privateUsdcBaseUnitsAtStart.toString(),
     amountBaseUnits: input.amountBaseUnits.toString(),
     phase: 'depositing',
     generationIndex: null,
@@ -147,7 +154,10 @@ export async function resumePrivateFunding(
   initialRecord: PrivateFundingRecord,
   input: Omit<
     PrivateFundingInput,
-    'amountBaseUnits' | 'collateral' | 'feeReserveLamports'
+    | 'amountBaseUnits'
+    | 'collateral'
+    | 'feeReserveLamports'
+    | 'privateUsdcBaseUnitsAtStart'
   >,
   onRecord: (record: PrivateFundingRecord) => void,
   legacyFeeReserveLamports?: bigint,
@@ -198,6 +208,7 @@ export async function resumePrivateFunding(
         symbol: record.symbol,
       },
       feeReserveLamports: BigInt(record.feeFundingLamports),
+      privateUsdcBaseUnitsAtStart: BigInt(record.privateUsdcBaseUnitsAtStart),
     },
     onRecord,
   );

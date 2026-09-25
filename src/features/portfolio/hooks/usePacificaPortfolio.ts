@@ -1,97 +1,59 @@
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import {
-  isPacificaRateLimited,
-  pacificaRetryDelay,
-  PacificaApiError,
-} from '@/integrations/perps/pacifica/pacificaApi';
-import {
-  fetchFreshPacificaPortfolio,
-  fetchPacificaPortfolio,
-  type PacificaPortfolioSnapshot,
-} from '@/integrations/perps/pacifica/pacificaPortfolio';
+  readPacificaPortfolioSnapshot,
+  refreshPacificaPortfolioSnapshot,
+  subscribePacificaPortfolioSnapshot,
+  type PacificaPortfolioStoreSnapshot,
+} from '@/integrations/perps/pacifica/pacificaPortfolioStore';
 
-type PortfolioState = 'idle' | 'loading' | 'ready' | 'error' | 'stale';
-const REFRESH_INTERVAL_MS = 5_000;
-const MAX_RETRY_INTERVAL_MS = 60_000;
+const IDLE: PacificaPortfolioStoreSnapshot = {
+  data: null,
+  status: 'loading',
+  updatedAtMs: 0,
+};
 
+/**
+ * Screen adapter for the account snapshot owned by the root Pacifica monitor.
+ *
+ * Portfolio and Home used to run independent five-second loops while market tickets had a third module
+ * cache. A deposit could therefore be visible in one place and zero in another. All consumers now read
+ * the same external-store object; Retry performs one forced network read and publishes it to all of them.
+ */
 export function usePacificaPortfolio(apiOrigin: string, walletAddress: string | null) {
-  const [snapshot, setSnapshot] = useState<PacificaPortfolioSnapshot | null>(null);
-  const [status, setStatus] = useState<PortfolioState>('idle');
-  const [refreshKey, setRefreshKey] = useState(0);
-  const hasSnapshot = useRef(false);
-  const forceNetwork = useRef(false);
-  const refresh = useCallback(() => {
-    forceNetwork.current = true;
-    setRefreshKey((value) => value + 1);
-  }, []);
+  const request = useRef<AbortController | null>(null);
+  const subscribe = useCallback((listener: () => void) => (
+    walletAddress === null || apiOrigin.length === 0
+      ? () => undefined
+      : subscribePacificaPortfolioSnapshot(apiOrigin, walletAddress, listener)
+  ), [apiOrigin, walletAddress]);
+  const read = useCallback(() => (
+    walletAddress === null || apiOrigin.length === 0
+      ? IDLE
+      : readPacificaPortfolioSnapshot(apiOrigin, walletAddress)
+  ), [apiOrigin, walletAddress]);
+  const state = useSyncExternalStore(subscribe, read, read);
 
-  useEffect(() => {
-    hasSnapshot.current = false;
-    setSnapshot(null);
-    setStatus(walletAddress === null ? 'idle' : 'loading');
+  useEffect(() => () => request.current?.abort(), [apiOrigin, walletAddress]);
+
+  const refresh = useCallback(() => {
+    if (walletAddress === null || apiOrigin.length === 0) return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    void refreshPacificaPortfolioSnapshot({
+      account: walletAddress,
+      apiOrigin,
+      forceNetwork: true,
+      signal: controller.signal,
+    }).catch(() => undefined).finally(() => {
+      if (request.current === controller) request.current = null;
+    });
   }, [apiOrigin, walletAddress]);
 
-  useFocusEffect(useCallback(() => {
-    if (walletAddress === null || apiOrigin.length === 0) return undefined;
-    let active = true;
-    let controller: AbortController | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let consecutiveFailures = 0;
-    const load = async () => {
-      controller?.abort();
-      controller = new AbortController();
-      let nextRefreshMs = REFRESH_INTERVAL_MS;
-      if (!hasSnapshot.current) setStatus('loading');
-      try {
-        const network = forceNetwork.current;
-        forceNetwork.current = false;
-        const next = await (network ? fetchFreshPacificaPortfolio : fetchPacificaPortfolio)(
-          apiOrigin,
-          walletAddress,
-          controller.signal,
-        );
-        if (active) {
-          consecutiveFailures = 0;
-          hasSnapshot.current = true;
-          setSnapshot(next);
-          setStatus('ready');
-        }
-      } catch (cause) {
-        if (active && !controller.signal.aborted) {
-          consecutiveFailures += 1;
-          nextRefreshMs = pacificaRetryDelay(
-            cause,
-            consecutiveFailures,
-            REFRESH_INTERVAL_MS,
-            MAX_RETRY_INTERVAL_MS,
-          );
-          if (__DEV__ && !isPacificaRateLimited(cause)) {
-            console.warn('[Perpal Pacifica portfolio refresh failed]',
-              cause instanceof PacificaApiError
-                ? {
-                    errorCode: cause.code,
-                    errorName: cause.name,
-                    requestPath: cause.requestPath,
-                    status: cause.status,
-                  }
-                : { errorName: cause instanceof Error ? cause.name : typeof cause },
-            );
-          }
-          setStatus(hasSnapshot.current ? 'stale' : 'loading');
-        }
-      } finally {
-        if (active) timer = setTimeout(() => void load(), nextRefreshMs);
-      }
-    };
-    void load();
-    return () => {
-      active = false;
-      controller?.abort();
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [apiOrigin, refreshKey, walletAddress]));
-
-  return { snapshot, status, refresh };
+  return {
+    refresh,
+    snapshot: state.data,
+    status: walletAddress === null ? 'idle' as const : state.status,
+  };
 }

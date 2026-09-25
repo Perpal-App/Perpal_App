@@ -1,65 +1,66 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
   reconcilePendingPacificaCommand,
   type PacificaCommandReconciliation,
 } from '@/integrations/perps/pacifica/pacificaOrderReconciliation';
+import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import {
-  fetchPacificaPortfolio,
-  type PacificaPortfolioSnapshot,
-} from '@/integrations/perps/pacifica/pacificaPortfolio';
+  publishPacificaPortfolioSnapshot,
+  readPacificaPortfolioSnapshot,
+  refreshPacificaPortfolioSnapshot,
+  subscribePacificaPortfolioSnapshot,
+  type PacificaPortfolioStoreSnapshot,
+} from '@/integrations/perps/pacifica/pacificaPortfolioStore';
 import {
   captureInAppNotificationScope,
   publishInAppNotification,
   type InAppNotificationScopeToken,
 } from '@/storage/inAppNotifications';
 
+const EMPTY: PacificaPortfolioStoreSnapshot = {
+  data: null,
+  status: 'loading',
+  updatedAtMs: 0,
+};
+
 /**
- * The last snapshot read, so a remount has something to render on its first frame.
+ * Market-ticket adapter over the same Pacifica account snapshot used by Portfolio and Home.
  *
- * The ticket is mounted inside a sheet that unmounts on close, so every open used to restart at `null`
- * and hold a skeleton until the venue answered — and then, one frame after the answer, replace the
- * controls it had just drawn once the wallet balance arrived too.
- *
- * Safe to render because it is only ever rendered. `usePacificaOrderFlow.prepare` calls
- * `fetchFreshPacificaPortfolio` and passes *that* to `preparePacificaOrder`, so no order is ever priced
- * against this value; it fills a card while the live one is in flight.
- *
- * One entry carrying its own account, so it cannot be read for a different identity and a rotation
- * replaces it rather than accumulating. In memory only.
+ * The removed module cache was the reason a newly opened market could render the old zero after a
+ * deposit had already appeared elsewhere. A fresh read on open still protects decision freshness, but
+ * it now publishes into one account-keyed store, so a mounted ticket also changes the instant any other
+ * owner observes the credit.
  */
-let cached: { readonly account: string; readonly value: PacificaPortfolioSnapshot } | null = null;
-
-function readCache(account: string | null): PacificaPortfolioSnapshot | null {
-  return account !== null && cached?.account === account ? cached.value : null;
-}
-
 export function usePacificaTicketPortfolio(input: {
   readonly account: string | null;
   readonly apiOrigin: string;
   readonly enabled: boolean;
   readonly marketRef: string;
 }) {
-  const [portfolio, setPortfolio] = useState<PacificaPortfolioSnapshot | null>(
-    () => readCache(input.account),
-  );
-  const [failed, setFailed] = useState(false);
-  const [revision, setRevision] = useState(0);
-
-  const publish = useCallback((next: PacificaPortfolioSnapshot) => {
-    if (input.account !== null) cached = { account: input.account, value: next };
-    setPortfolio(next);
-  }, [input.account]);
+  const subscribe = useCallback((listener: () => void) => (
+    input.account === null || input.apiOrigin.length === 0
+      ? () => undefined
+      : subscribePacificaPortfolioSnapshot(input.apiOrigin, input.account, listener)
+  ), [input.account, input.apiOrigin]);
+  const read = useCallback(() => (
+    input.account === null || input.apiOrigin.length === 0
+      ? EMPTY
+      : readPacificaPortfolioSnapshot(input.apiOrigin, input.account)
+  ), [input.account, input.apiOrigin]);
+  const state = useSyncExternalStore(subscribe, read, read);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // The cached snapshot rather than nothing, so a reopen shows the last known state while the refresh
-    // runs instead of starting from a skeleton it already had the answer for.
-    setPortfolio(readCache(input.account));
-    setFailed(false);
-    if (!input.enabled || input.account === null) return;
+    if (!input.enabled || input.account === null || input.apiOrigin.length === 0) {
+      setChecking(false);
+      return undefined;
+    }
+    setChecking(true);
     const account = input.account;
     const abort = new AbortController();
     const scopeToken = captureInAppNotificationScope();
+
     const load = async () => {
       try {
         const recovery = await reconcilePendingPacificaCommand({
@@ -77,24 +78,44 @@ export function usePacificaTicketPortfolio(input: {
           });
         }
       }
-      const next = await fetchPacificaPortfolio(input.apiOrigin, account, abort.signal);
-      cached = { account, value: next };
-      if (!abort.signal.aborted) setPortfolio(next);
+      await refreshPacificaPortfolioSnapshot({
+        account,
+        apiOrigin: input.apiOrigin,
+        forceNetwork: true,
+        signal: abort.signal,
+      });
     };
-    void load().catch(() => {
-      if (!abort.signal.aborted) setFailed(true);
+
+    void load().catch(() => undefined).finally(() => {
+      if (!abort.signal.aborted) setChecking(false);
     });
     return () => abort.abort();
-  }, [input.account, input.apiOrigin, input.enabled, input.marketRef, revision]);
+  }, [input.account, input.apiOrigin, input.enabled, input.marketRef]);
+
+  const refresh = useCallback(() => {
+    if (input.account === null || input.apiOrigin.length === 0) return;
+    void refreshPacificaPortfolioSnapshot({
+      account: input.account,
+      apiOrigin: input.apiOrigin,
+      forceNetwork: true,
+    }).catch(() => undefined);
+  }, [input.account, input.apiOrigin]);
+
+  const update = useCallback((next: PacificaPortfolioSnapshot) => {
+    if (input.account === null) return;
+    publishPacificaPortfolioSnapshot({
+      account: input.account,
+      apiOrigin: input.apiOrigin,
+      snapshot: next,
+    });
+  }, [input.account, input.apiOrigin]);
 
   return {
-    failed,
-    portfolio,
-    refresh: () => setRevision((value) => value + 1),
-    // `publish`, not `setPortfolio`: the flow hands back the fresh snapshot it fetched before pricing an
-    // order, which is the most current one the app will see. Dropping it on the floor would leave the
-    // next open seeding from something older than what was just in hand.
-    update: publish,
+    checking,
+    failed: state.status === 'error',
+    portfolio: state.data,
+    refresh,
+    update,
   };
 }
 

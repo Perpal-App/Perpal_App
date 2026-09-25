@@ -24,7 +24,7 @@ export function useTradeActionRecovery(input: {
         signer: input.signer,
         ...(signal === undefined ? {} : { signal }),
       });
-      setPending(status === 'pending');
+      setPending(status === 'pending' || status === 'indexing');
       return status;
     } catch (cause) {
       if (!signal?.aborted) {
@@ -42,6 +42,24 @@ export function useTradeActionRecovery(input: {
     void reconcile(controller.signal).catch(() => undefined);
     return () => controller.abort();
   }, [reconcile]);
+
+  // Pending includes Pacifica's backend-indexing phase. Keep the local flag synchronized with the
+  // durable record so a root settlement that clears it removes the ticket's non-actionable funding
+  // state without requiring the user to close or press Refresh.
+  useEffect(() => {
+    if (!pending) return undefined;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      await reconcile(controller.signal).catch(() => undefined);
+      if (!controller.signal.aborted) timer = setTimeout(() => void poll(), 3_000);
+    };
+    timer = setTimeout(() => void poll(), 3_000);
+    return () => {
+      controller.abort();
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [pending, reconcile]);
 
   return { error, pending, reconcile, setPending };
 }

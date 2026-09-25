@@ -111,6 +111,16 @@ export function DirectWithdrawPanel({
 
   useEffect(() => () => controller.current?.abort(), []);
 
+  // A reviewed plan remains on screen while its signed transaction settles. Recovery resolves the phase
+  // to idle on confirmation, failure, or definitive expiry; only then does the buffer yield back to the
+  // form. This avoids showing editable inputs again while the same withdrawal is still in flight.
+  useEffect(() => {
+    if (phase === 'idle' && pending !== null) {
+      setPending(null);
+      setAmount('');
+    }
+  }, [pending, phase]);
+
   /**
    * Derived from `pending` in one place rather than announced by each of the four transitions that set
    * it. Missing one of those would leave the sheet's selectors on screen beside a prepared plan, and the
@@ -389,8 +399,8 @@ export function DirectWithdrawPanel({
         signer: session.signer,
         ...(transactionAuthority === undefined ? {} : { transactionAuthority }),
       });
-      setPending(null);
       if (result.status === 'confirmed') {
+        setPending(null);
         onBalancesChanged();
         setAmount('');
         setPhase('idle');
@@ -433,7 +443,7 @@ export function DirectWithdrawPanel({
   if (pending !== null) {
     return (
       <WithdrawReviewStep
-        confirming={phase === 'submitting'}
+        confirming={phase === 'submitting' || phase === 'pending'}
         headline={`${formatTokenAmount(pending.amountBaseUnits, pending.decimals)} ${pending.symbol}`}
         note={DIRECT_REVIEW_NOTE}
         onBack={cancelReview}

@@ -3,6 +3,7 @@ import { base58 } from '@scure/base';
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 import type { LegacyTransactionAuthority } from '@/integrations/solana/signedLegacyTransaction';
+import type { PublicMultiAuthorityLegacySigner } from '@/integrations/solana/signedMultiAuthorityLegacyTransaction';
 import type { VersionedTransactionAuthority } from '@/integrations/solana/signedVersionedTransaction';
 
 export type PrivySolanaTransactionProvider = {
@@ -100,6 +101,63 @@ export function createPrivyLegacyTransactionAuthority(input: {
         !ed25519.verify(signature, message, publicKeyBytes)
       ) {
         throw new Error('Privy returned an invalid public-wallet transaction signature.');
+      }
+
+      return signedTransaction;
+    },
+  };
+}
+
+/**
+ * Privy M signer for the atomic fast-deposit transaction.
+ *
+ * Unlike the ordinary legacy adapter, this intentionally accepts exactly two required signer slots:
+ * public M first as fee payer, then local T as Pacifica owner. Privy may fill only M. Any message change,
+ * extra signer, reordered slot, or attempt to fill T is rejected before the local signer sees it.
+ */
+export function createPrivyMultiAuthorityLegacySigner(input: {
+  readonly address: string;
+  readonly coSignerAddress: string;
+  readonly provider: PrivySolanaLegacyTransactionProvider;
+}): PublicMultiAuthorityLegacySigner {
+  const publicKey = new PublicKey(input.address);
+  const coSigner = new PublicKey(input.coSignerAddress);
+  const publicKeyBytes = publicKey.toBytes();
+
+  return {
+    publicKey: publicKeyBytes,
+    signTransaction: async (transaction) => {
+      const [publicSlot, localSlot] = transaction.signatures;
+      const message = transaction.serializeMessage();
+      if (
+        transaction.signatures.length !== 2 ||
+        !transaction.feePayer?.equals(publicKey) ||
+        !publicSlot?.publicKey.equals(publicKey) ||
+        !localSlot?.publicKey.equals(coSigner) ||
+        transaction.signatures.some((entry) => entry.signature !== null)
+      ) {
+        throw new Error('The fast deposit requested unexpected public-wallet signers.');
+      }
+
+      const { signedTransaction } = await input.provider.request({
+        method: 'signTransaction',
+        params: { transaction },
+      });
+      const [signedPublic, signedLocal] = signedTransaction.signatures;
+      const signature = signedPublic?.signature;
+      if (
+        !equalBytes(signedTransaction.serializeMessage(), message) ||
+        signedTransaction.signatures.length !== 2 ||
+        !signedTransaction.feePayer?.equals(publicKey) ||
+        !signedPublic?.publicKey.equals(publicKey) ||
+        !signedLocal?.publicKey.equals(coSigner) ||
+        signedLocal.signature !== null ||
+        signature === null ||
+        signature === undefined ||
+        signature.length !== 64 ||
+        !ed25519.verify(signature, message, publicKeyBytes)
+      ) {
+        throw new Error('Privy returned an invalid fast-deposit signature.');
       }
 
       return signedTransaction;

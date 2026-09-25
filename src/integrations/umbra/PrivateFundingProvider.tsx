@@ -19,6 +19,7 @@ import {
   beginPrivateFunding,
   resumePrivateFunding,
 } from '@/integrations/umbra/privateFunding';
+import { automaticProviderContinuationKey } from '@/integrations/umbra/privateFundingContinuation';
 import {
   classifyPrivateFundingFailure,
   PrivateFundingError,
@@ -66,6 +67,7 @@ type PrivateFundingState = {
     amountBaseUnits: bigint,
     feeReserveLamports: bigint,
     collateral: ProviderCollateral,
+    privateUsdcBaseUnitsAtStart: bigint,
   ) => Promise<void>;
   readonly resume: (feeReserveLamports?: bigint) => Promise<void>;
 };
@@ -87,11 +89,14 @@ export function PrivateFundingProvider({
   const [isChecking, setIsChecking] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [activeRefresh, setActiveRefresh] = useState(0);
+  const [providerRetry, setProviderRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const runningRef = useRef(false);
   const preflightRef = useRef<AbortController | null>(null);
   const passiveRecoveryAbortRef = useRef<AbortController | null>(null);
   const passiveRecoveryRef = useRef<string | null>(null);
+  /** Last Pacifica handoff this mount attempted automatically; guards effect rerenders. */
+  const providerContinuationRef = useRef<string | null>(null);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
@@ -108,6 +113,7 @@ export function PrivateFundingProvider({
     passiveRecoveryAbortRef.current?.abort();
     passiveRecoveryAbortRef.current = null;
     passiveRecoveryRef.current = null;
+    providerContinuationRef.current = null;
     setRecord(null);
     setPreflight(null);
     setPreflightError(null);
@@ -174,7 +180,7 @@ export function PrivateFundingProvider({
           title: 'Deposit completed',
           message: next.destination === 'pacifica'
             ? 'USDC is credited to Pacifica and ready to trade.'
-            : 'Funds are available in the private wallet.',
+            : 'USDC is staged for the next Pacifica top-up.',
         });
       }
     }).catch((cause) => {
@@ -336,32 +342,38 @@ export function PrivateFundingProvider({
           title: 'Deposit completed',
           message: next.destination === 'pacifica'
             ? 'USDC is credited to Pacifica and ready to trade.'
-            : 'Funds are available in the private wallet.',
+            : 'USDC is staged for the next Pacifica top-up.',
         });
       }
     } catch (cause) {
       const errorCode = classifyPrivateFundingFailure(cause);
-      console.error('[Perpal private funding]', JSON.stringify({
-        event: 'failed',
-        errorCode,
-        errorName: cause instanceof Error ? cause.name : typeof cause,
-      }));
-      setError(
-        `${cause instanceof PrivateFundingError
-          ? cause.message
-          : privateFundingUserMessage(errorCode)} Error reference: ${errorCode}.`,
-      );
-      publishInAppNotification({
-        ...(record === null
-          ? {}
-          : { correlations: [{ namespace: 'umbra-request' as const, value: record.id }] }),
-        kind: 'funding',
-        outcome: 'error',
-        scopeToken: notificationScope,
-        status: 'failed',
-        title: 'Private deposit needs attention',
-        message: 'Open Portfolio to review and safely resume the deposit.',
-      });
+      const waiting = errorCode === 'pacifica_deposit_pending' ||
+        errorCode === 'pacifica_deposit_indexing';
+      if (waiting) {
+        setError(null);
+      } else {
+        console.error('[Perpal private funding]', JSON.stringify({
+          event: 'failed',
+          errorCode,
+          errorName: cause instanceof Error ? cause.name : typeof cause,
+        }));
+        setError(
+          `${cause instanceof PrivateFundingError
+            ? cause.message
+            : privateFundingUserMessage(errorCode)} Error reference: ${errorCode}.`,
+        );
+        publishInAppNotification({
+          ...(record === null
+            ? {}
+            : { correlations: [{ namespace: 'umbra-request' as const, value: record.id }] }),
+          kind: 'funding',
+          outcome: 'error',
+          scopeToken: notificationScope,
+          status: 'failed',
+          title: 'Private deposit needs attention',
+          message: 'Open Portfolio to review and safely resume the deposit.',
+        });
+      }
     } finally {
       runningRef.current = false;
       setIsRunning(false);
@@ -373,6 +385,7 @@ export function PrivateFundingProvider({
       amountBaseUnits: bigint,
       feeReserveLamports: bigint,
       collateral: ProviderCollateral,
+      privateUsdcBaseUnitsAtStart: bigint,
     ) => {
       await run(async () =>
         beginPrivateFunding(
@@ -381,6 +394,7 @@ export function PrivateFundingProvider({
             amountBaseUnits,
             feeReserveLamports,
             collateral,
+            privateUsdcBaseUnitsAtStart,
           },
           setRecord,
         ),
@@ -406,6 +420,40 @@ export function PrivateFundingProvider({
       ),
     );
   }, [operationInput, record, run]);
+
+  useEffect(() => {
+    const attemptKey = automaticProviderContinuationKey(
+      record,
+      `${activeRefresh}:${providerRetry}`,
+    );
+    if (
+      attemptKey === null ||
+      isRunning ||
+      runningRef.current ||
+      providerContinuationRef.current === attemptKey
+    ) return;
+
+    // The original funding confirmation explicitly approved `Public → Umbra → Pacifica`. Once both
+    // claims are confirmed, continuing that same persisted intent does not create a new action; stopping
+    // here is what exposed the internal wallet as a destination. `resume` owns checkpoint reconciliation
+    // and idempotency, so the effect never constructs or submits a transaction itself.
+    providerContinuationRef.current = attemptKey;
+    void resume();
+  }, [activeRefresh, isRunning, providerRetry, record, resume]);
+
+  useEffect(() => {
+    if (
+      isRunning ||
+      (record?.errorCode !== 'pacifica_deposit_pending' &&
+        record?.errorCode !== 'pacifica_deposit_indexing')
+    ) return undefined;
+
+    // Chain and provider indexing are waiting states, not failures requiring another button press. A
+    // bounded delayed resume checks the saved signature/idempotency record; it never builds a concurrent
+    // deposit and stops as soon as the provider record becomes complete or needs real user action.
+    const timer = setTimeout(() => setProviderRetry((value) => value + 1), 3_000);
+    return () => clearTimeout(timer);
+  }, [isRunning, record?.errorCode, record?.updatedAtMs]);
 
   const value = useMemo(
     () => ({

@@ -12,6 +12,10 @@ import {
   TransactionSigningError,
 } from '@/integrations/solana/signedLegacyTransaction';
 import {
+  FAST_DEPOSIT_INSTRUCTION_NAMES,
+  submitSignedMultiAuthorityLegacyTransaction,
+} from '@/integrations/solana/signedMultiAuthorityLegacyTransaction';
+import {
   storedVersionedTransactionIsCurrent,
   submitSignedVersionedTransaction,
 } from '@/integrations/solana/signedVersionedTransaction';
@@ -19,6 +23,7 @@ import {
 export type TradeActionRecoveryStatus =
   | 'none'
   | 'pending'
+  | 'indexing'
   | 'confirmed'
   | 'expired';
 
@@ -53,9 +58,19 @@ export async function reconcilePendingTradeAction(input: {
     rpcUrl: input.rpcUrl,
     signature: record.signature,
     signer: input.signer,
+    ...(record.kind === 'fast-collateral'
+      ? {
+          instructionNames: FAST_DEPOSIT_INSTRUCTION_NAMES,
+          operation: 'pacifica_fast_deposit_recovery',
+        }
+      : {}),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (status === 'confirmed') {
+    // A Pacifica collateral transaction is not finished when Solana confirms it. Keep its duplicate
+    // lock until the provider balance reflects the exact expected increase; the root settlement monitor
+    // owns that second boundary.
+    if (tracksPacificaCredit(record)) return 'indexing';
     await removePendingTradeAction(input.owner, input.provider);
     return 'confirmed';
   }
@@ -90,13 +105,16 @@ export async function reconcilePendingTradeAction(input: {
         signer: input.signer,
       });
   if (!current) {
+    // `processed` means a node has already observed execution. A dead recent blockhash prevents a new
+    // landing, but it does not erase that observation; keep tracking until the cluster resolves it.
+    if (status === 'processed') return 'pending';
     await removePendingTradeAction(input.owner, input.provider);
     return 'expired';
   }
 
-  // Submitted with `maxRetries: 0`, so the node does not rebroadcast on its own and a landable
-  // transaction depends on this resend. The idempotency key is the record's, so a repeat is the same
-  // request rather than a second one.
+  // The original submission already asks each provider for bounded rebroadcasts. This resend covers
+  // app/network interruption and carries the record's idempotency key, so it is the same request and
+  // exact signed bytes rather than a second financial action.
   try {
     const result = versioned
       ? await submitSignedVersionedTransaction({
@@ -107,7 +125,16 @@ export async function reconcilePendingTradeAction(input: {
           signedTransactionBase64: record.signedTransactionBase64,
           signer: input.signer,
         })
-      : await submitSignedLegacyTransaction({
+      : record.kind === 'fast-collateral'
+        ? await submitSignedMultiAuthorityLegacyTransaction({
+            expectedSignature: record.signature,
+            idempotencyKey: record.idempotencyKey,
+            owner: record.owner,
+            requestSigner: input.signer,
+            rpcUrl: input.rpcUrl,
+            signedTransactionBase64: record.signedTransactionBase64,
+          })
+        : await submitSignedLegacyTransaction({
           expectedSignature: record.signature,
           idempotencyKey: record.idempotencyKey,
           owner: record.owner,
@@ -116,6 +143,7 @@ export async function reconcilePendingTradeAction(input: {
           signer: input.signer,
         });
     if (result.status === 'confirmed') {
+      if (tracksPacificaCredit(record)) return 'indexing';
       await removePendingTradeAction(input.owner, input.provider);
       return 'confirmed';
     }
@@ -130,4 +158,14 @@ export async function reconcilePendingTradeAction(input: {
     }
     throw cause;
   }
+}
+
+function tracksPacificaCredit(record: {
+  readonly expectedProviderCreditBaseUnits?: string | null;
+  readonly provider: TradeActionScope;
+  readonly providerBalanceBeforeBaseUnits?: string | null;
+}): boolean {
+  return record.provider === 'pacifica' &&
+    typeof record.providerBalanceBeforeBaseUnits === 'string' &&
+    typeof record.expectedProviderCreditBaseUnits === 'string';
 }

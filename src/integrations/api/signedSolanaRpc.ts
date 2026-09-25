@@ -68,7 +68,10 @@ export async function signedSolanaRpc<T>({
   signal,
   timeoutMs,
 }: SignedRpcRequest): Promise<T> {
-  const id = Crypto.randomUUID();
+  // A write's idempotency key also fixes its JSON-RPC correlation id. Recovery then recreates the exact
+  // body hash—same signed bytes, options and id—instead of deterministically conflicting at the gateway
+  // because a random id made the same financial request look different.
+  const id = idempotencyKey ?? Crypto.randomUUID();
   let response: RpcResponse<T>;
 
   try {

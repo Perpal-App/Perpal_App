@@ -50,7 +50,7 @@ function summary(step: TradeCollateralStep): readonly (readonly [string, string]
     ['Action', 'Deposit collateral to Pacifica'],
     ['Collateral', token(step.plan.amountBaseUnits, 'USDC')],
     ['Network fee', sol(step.plan.feeLamports)],
-    ['T wallet SOL', sol(step.plan.solBalanceLamports)],
+    ['Fee balance', sol(step.plan.solBalanceLamports)],
   ];
 }
 

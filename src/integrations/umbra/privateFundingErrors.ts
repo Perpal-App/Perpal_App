@@ -80,7 +80,7 @@ export function privateFundingFailureDiagnostic(cause: unknown): string | null {
 
 export function privateFundingUserMessage(code: string): string {
   if (code === 'pacifica_deposit_below_minimum') {
-    return 'Pacifica must receive at least 10 USDC after the Umbra fee.';
+    return 'Pacifica needs 10 USDC total. Top up the staged balance.';
   }
 
   if (code === 'pacifica_deposit_insufficient_usdc') {
@@ -91,8 +91,10 @@ export function privateFundingUserMessage(code: string): string {
     return 'The private wallet needs more SOL to finish the Pacifica deposit.';
   }
 
-  if (code === 'pacifica_deposit_pending') {
-    return 'The Pacifica deposit is submitted and still confirming. Resume to reconcile it.';
+  if (code === 'pacifica_deposit_pending' || code === 'pacifica_deposit_indexing') {
+    return code === 'pacifica_deposit_indexing'
+      ? 'Transfer confirmed. Pacifica is crediting the trading balance.'
+      : 'The Pacifica deposit is submitted and still confirming. Resume to reconcile it.';
   }
 
   if (code.startsWith('pacifica_deposit_')) {

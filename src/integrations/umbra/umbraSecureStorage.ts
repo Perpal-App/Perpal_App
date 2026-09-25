@@ -27,6 +27,14 @@ export type PrivateFundingRecord = {
   readonly destination: PrivateFundingDestination;
   readonly mint: string;
   readonly symbol: 'USDC' | 'USDT';
+  /**
+   * Confirmed canonical USDC already in the private trading wallet when this route was approved.
+   *
+   * It is frozen into the intent so a later balance increase is not silently swept into Pacifica. New
+   * funding adds the exact Umbra note credited by this record to this baseline; older records normalize
+   * to zero and retain their original semantics.
+   */
+  readonly privateUsdcBaseUnitsAtStart: string;
   readonly amountBaseUnits: string;
   readonly phase: PrivateFundingPhase;
   readonly generationIndex: string | null;
@@ -142,6 +150,10 @@ function parseRecord(value: string): PrivateFundingRecord | null {
       destination,
       mint: record.mint as string,
       symbol: record.symbol as 'USDC' | 'USDT',
+      // Added after v2 shipped. Missing means the old operation approved only its own note, so zero is
+      // the sole backward-compatible value; reading today's wallet balance here would silently alter a
+      // persisted financial intent.
+      privateUsdcBaseUnitsAtStart: unsigned(record.privateUsdcBaseUnitsAtStart) ?? '0',
       amountBaseUnits: record.amountBaseUnits as string,
       phase: normalizePhase(record.phase),
       generationIndex: nullable(record.generationIndex),
@@ -214,6 +226,7 @@ function validNormalizedRecord(record: PrivateFundingRecord): boolean {
     record.errorCode,
   ];
   const unsignedValues = [
+    record.privateUsdcBaseUnitsAtStart,
     record.noteAmountBaseUnits,
     record.relayerFixedFeeLamports,
     record.feeFundingLamports,

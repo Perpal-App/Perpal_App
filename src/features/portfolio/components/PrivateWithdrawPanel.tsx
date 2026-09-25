@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { PublicKey } from '@solana/web3.js';
 import { getSupportedMints } from '@umbra-privacy/sdk/constants';
@@ -62,6 +62,7 @@ export function PrivateWithdrawPanel({
     readonly baseUnits: bigint;
     readonly destination: string;
   } | null>(null);
+  const reviewWasRunning = useRef(false);
   const configured = useMemo(() => {
     const config = readAppConfig();
     return config.ok
@@ -84,6 +85,18 @@ export function PrivateWithdrawPanel({
     onReviewingChange(review !== null);
   }, [onReviewingChange, review]);
 
+  useEffect(() => {
+    if (privateExit.isRunning) {
+      reviewWasRunning.current = true;
+      return;
+    }
+    if (reviewWasRunning.current && privateExit.record?.phase === 'complete') {
+      setReview(null);
+      setAmount('');
+    }
+    reviewWasRunning.current = false;
+  }, [privateExit.isRunning, privateExit.record?.phase]);
+
   // Derived, not corrected in an effect. A balance can drop to zero while the panel is open, and the
   // selection has to fall back within the same render — otherwise the amount field would keep
   // describing a token that is no longer on the list.
@@ -93,6 +106,11 @@ export function PrivateWithdrawPanel({
   const asset = selected?.asset ?? null;
   const symbol = asset?.symbol ?? 'Token';
   const pending = privateExit.record !== null && privateExit.record.phase !== 'complete';
+  const autoPending = pending && (
+    privateExit.record?.errorCode === null ||
+    privateExit.record?.errorCode === 'relay_pending' ||
+    privateExit.record?.errorCode === 'relay_cancelled'
+  );
   const empty = withdrawable.length === 0;
   const nativeSol = asset?.kind === 'native';
   // The venue keeps its margin in USDC, so only a USDC withdrawal can pull from the trading account
@@ -137,12 +155,11 @@ export function PrivateWithdrawPanel({
   if (review !== null) {
     return (
       <WithdrawReviewStep
-        confirming={privateExit.isRunning}
+        confirming={privateExit.isRunning || autoPending}
         headline={`${amount.trim()} ${review.asset.symbol}`}
         note={privateRouteNote()}
         onBack={() => setReview(null)}
         onConfirm={() => {
-          setReview(null);
           void privateExit.start(review.baseUnits, review.destination, review.asset);
         }}
         rows={privateReviewRows({
@@ -234,19 +251,19 @@ export function PrivateWithdrawPanel({
       {pending ? (
         <View style={styles.resume}>
           <ActionButton
-            disabled={privateExit.isRunning}
-            label={privateExit.isRunning
-              ? 'Withdrawal in progress'
+            disabled={privateExit.isRunning || autoPending}
+            label={privateExit.isRunning || autoPending
+              ? 'Withdrawal confirming'
               : privateExit.error === null
                 ? 'Resume withdrawal'
                 : 'Retry withdrawal'}
-            loading={privateExit.isRunning}
+            loading={privateExit.isRunning || autoPending}
             onPress={() => void privateExit.resume()}
             radius={WITHDRAW_RADIUS}
             style={[withdrawOptionStyle, styles.cta]}
             tone="neutral"
           />
-          {privateExit.canReset ? (
+          {privateExit.canReset && !autoPending ? (
             <ActionButton
               disabled={privateExit.isRunning}
               label="Change amount"

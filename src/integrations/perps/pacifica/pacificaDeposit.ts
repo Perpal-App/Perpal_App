@@ -1,22 +1,11 @@
-import { sha256 } from '@noble/hashes/sha2.js';
-import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { base64 } from '@scure/base';
 import { Buffer } from 'buffer';
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
-  TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
-import {
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  TransactionInstruction,
-} from '@solana/web3.js';
+import { PublicKey, Transaction } from '@solana/web3.js';
 import * as Crypto from 'expo-crypto';
 
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
 import { signedSolanaRpc } from '@/integrations/api/signedSolanaRpc';
+import { createPacificaDepositInstruction } from '@/integrations/perps/pacifica/pacificaDepositInstruction';
 import { readTokenBalance } from '@/integrations/solana/stablecoinSwap';
 import {
   signAndSubmitLegacyTransaction,
@@ -24,7 +13,6 @@ import {
 } from '@/integrations/solana/signedLegacyTransaction';
 
 const PLAN_LIFETIME_MS = 45_000;
-const DEPOSIT_DISCRIMINATOR = sha256(utf8ToBytes('global:deposit')).slice(0, 8);
 
 // Pacifica does not expose this as account metadata. Its public protocol docs state that
 // smaller deposits are not credited, so the client must not submit them and strand funds.
@@ -36,6 +24,8 @@ export type PacificaDepositPlan = {
   readonly feeLamports: bigint;
   readonly idempotencyKey: string;
   readonly owner: string;
+  /** Exact Pacifica cash balance before this deposit, used to prove backend credit. */
+  readonly providerBalanceBeforeBaseUnits: bigint;
   readonly simulation: 'passed' | 'insufficient-token' | 'insufficient-sol';
   readonly solBalanceLamports: bigint;
   readonly tokenBalanceBaseUnits: bigint;
@@ -48,6 +38,7 @@ export async function preparePacificaDeposit(input: {
   readonly mint: string;
   readonly owner: string;
   readonly programId: string;
+  readonly providerBalanceBeforeBaseUnits: bigint;
   readonly rpcUrl: string;
   readonly signer: GatewayRequestSigner;
   readonly signal?: AbortSignal;
@@ -95,7 +86,7 @@ export async function preparePacificaDeposit(input: {
   const transaction = new Transaction({
     feePayer: owner,
     recentBlockhash: blockhash.value.blockhash,
-  }).add(depositInstruction(input, owner, programId));
+  }).add(createPacificaDepositInstruction(input, owner, programId));
   const fee = await signedSolanaRpc<{ readonly value: number | null }>({
     method: 'getFeeForMessage',
     params: [base64.encode(transaction.serializeMessage()), { commitment: 'confirmed' }],
@@ -133,6 +124,7 @@ export async function preparePacificaDeposit(input: {
     feeLamports,
     idempotencyKey: Crypto.randomUUID(),
     owner: input.owner,
+    providerBalanceBeforeBaseUnits: input.providerBalanceBeforeBaseUnits,
     simulation,
     solBalanceLamports,
     tokenBalanceBaseUnits,
@@ -154,9 +146,11 @@ export async function submitPacificaDeposit(input: {
   return signAndSubmitLegacyTransaction({
     idempotencyKey: input.plan.idempotencyKey,
     owner: input.plan.owner,
+    refreshBlockhashBeforeSigning: true,
     rpcUrl: input.rpcUrl,
     signer: input.signer,
     unsignedTransaction: input.plan.unsignedTransaction,
+    verifyTransaction: (transaction) => assertPacificaDepositUnchanged(input.plan, transaction),
     ...(input.onSigned === undefined ? {} : { onSigned: input.onSigned }),
     ...(input.onSubmissionRejected === undefined
       ? {}
@@ -165,38 +159,23 @@ export async function submitPacificaDeposit(input: {
   });
 }
 
-function depositInstruction(
-  input: {
-    readonly amountBaseUnits: bigint;
-    readonly centralState: string;
-    readonly mint: string;
-    readonly vault: string;
-  },
-  owner: PublicKey,
-  programId: PublicKey,
-): TransactionInstruction {
-  const mint = new PublicKey(input.mint);
-  const data = Buffer.alloc(16);
-  data.set(DEPOSIT_DISCRIMINATOR, 0);
-  data.writeBigUInt64LE(input.amountBaseUnits, 8);
-  const [eventAuthority] = PublicKey.findProgramAddressSync(
-    [Buffer.from('__event_authority')],
-    programId,
-  );
-  return new TransactionInstruction({
-    programId,
-    data,
-    keys: [
-      { pubkey: owner, isSigner: true, isWritable: true },
-      { pubkey: getAssociatedTokenAddressSync(mint, owner), isSigner: false, isWritable: true },
-      { pubkey: new PublicKey(input.centralState), isSigner: false, isWritable: true },
-      { pubkey: new PublicKey(input.vault), isSigner: false, isWritable: true },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-      { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-      { pubkey: mint, isSigner: false, isWritable: false },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: eventAuthority, isSigner: false, isWritable: false },
-      { pubkey: programId, isSigner: false, isWritable: false },
-    ],
-  });
+/**
+ * Allows the signer boundary to refresh only the expiring blockhash.
+ *
+ * The Pacifica instruction was constructed and simulated locally from the confirmed amount. Rebuild the
+ * reviewed message with the final hash and compare every byte before signing, so freshness cannot alter
+ * the program, accounts, amount, fee payer, or instruction order.
+ */
+function assertPacificaDepositUnchanged(
+  plan: PacificaDepositPlan,
+  transaction: Transaction,
+): void {
+  const expected = Transaction.from(plan.unsignedTransaction);
+  if (transaction.recentBlockhash === undefined) {
+    throw new Error('The Pacifica deposit is missing a current blockhash.');
+  }
+  expected.recentBlockhash = transaction.recentBlockhash;
+  if (!Buffer.from(expected.serializeMessage()).equals(Buffer.from(transaction.serializeMessage()))) {
+    throw new Error('The Pacifica deposit no longer matches the reviewed amount.');
+  }
 }

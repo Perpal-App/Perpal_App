@@ -76,6 +76,16 @@ function isResponseFor(value: unknown, request: JsonRpcRequest): boolean {
   );
 }
 
+async function isAcceptedWriteResponse(
+  response: Response,
+  request: JsonRpcRequest,
+): Promise<boolean> {
+  const value = (await response.clone().json().catch(() => null)) as unknown;
+  if (!isResponseFor(value, request) || typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.result === 'string' && record.error === undefined;
+}
+
 async function orderedBatchResponse(
   response: Response,
   requests: readonly JsonRpcRequest[],
@@ -174,24 +184,31 @@ export async function dispatchRpc(
       throw new AllProvidersUnavailableError();
     }
 
-    // Only identical, already-signed sendTransaction bytes reach this branch.
-    // Wait for every provider attempt so Worker teardown cannot cancel the
-    // slower broadcast after the first provider responds.
-    const results = await Promise.allSettled(
-      endpoints.map((endpoint) => attempt(router, endpoint, body)),
-    );
-    const winner = results.find(
-      (result): result is PromiseFulfilledResult<{
-        response: Response;
-        provider: ProviderEndpoint;
-      }> => result.status === 'fulfilled',
-    );
+    // Only identical, already-signed sendTransaction bytes reach this branch. Start every healthy
+    // provider together, reject JSON-RPC error responses as winners, and return as soon as one provider
+    // accepts the signature. Waiting for the slowest provider added up to the full upstream timeout after
+    // a fast provider had already accepted the transaction; that did not improve landing, it only delayed
+    // confirmation polling. The accepted provider has its own bounded retry budget.
+    const responses: { response: Response; provider: ProviderEndpoint }[] = [];
+    const attempts = endpoints.map(async (endpoint) => {
+      const result = await attempt(router, endpoint, body);
+      responses.push(result);
+      if (await isAcceptedWriteResponse(result.response, JSON.parse(body) as JsonRpcRequest)) {
+        return result;
+      }
+      throw new Error('Provider returned a JSON-RPC write error.');
+    });
 
-    if (winner === undefined) {
+    try {
+      return { ...(await Promise.any(attempts)), routing: 'broadcast' };
+    } catch {
+      // Every provider either failed transport or returned an RPC error. Preserve the first RPC response
+      // when there is one so the client receives its typed preflight diagnostic; otherwise all providers
+      // were genuinely unreachable.
+      const rejected = responses[0];
+      if (rejected !== undefined) return { ...rejected, routing: 'broadcast' };
       throw new AllProvidersUnavailableError();
     }
-
-    return { ...winner.value, routing: 'broadcast' };
   }
 
   const attemptRequest = (endpoint: ProviderEndpoint) =>

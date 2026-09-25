@@ -22,7 +22,7 @@ import Svg, { Path } from 'react-native-svg';
 import { AppToastHost } from '@/components/feedback/AppToastHost';
 import { PressableScale } from '@/components/ui/PressableScale';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
-import { PrivateFundingPanel } from '@/features/account/private-funding';
+import { DepositFundingPanel } from '@/features/portfolio/components/DepositFundingPanel';
 import { WalletAssetsPanel } from '@/features/portfolio/components/WalletAssetsPanel';
 import { WalletSwapPanel } from '@/features/portfolio/components/WalletSwapPanel';
 import { WalletWithdrawPanel } from '@/features/portfolio/components/WalletWithdrawPanel';
@@ -271,7 +271,7 @@ export function FundsSheet({
                   style={styles.scroll}
                 >
                   {displayedRequest?.mode === 'deposit' ? (
-                    <PrivateFundingPanel
+                    <DepositFundingPanel
                       balances={balances}
                       onBalancesChanged={onBalancesChanged}
                       onPacificaRefresh={onPacificaRefresh}

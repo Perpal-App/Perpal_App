@@ -62,8 +62,8 @@ export function MarketInfoList({
       <Stat label="Maximum leverage" value={`${market.maxLeverage}×`} />
       <Stat label="Tick size" value={`$${market.tickSize}`} />
       <Stat label="Lot size" value={`${market.lotSize} ${market.baseAsset}`} />
-      <Stat label="Minimum order" value={`${market.minOrderSize} ${market.baseAsset}`} />
-      <Stat label="Maximum order" value={`${market.maxOrderSize} ${market.baseAsset}`} />
+      <Stat label="Minimum order" value={`$${market.minOrderSize}`} />
+      <Stat label="Maximum order" value={`$${market.maxOrderSize}`} />
       <Stat
         label="Margin mode"
         value={market.isolatedOnly ? 'Isolated only' : 'Cross or isolated'}

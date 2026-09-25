@@ -5,7 +5,7 @@ import {
   submitPacificaDeposit,
   type PacificaDepositPlan,
 } from '@/integrations/perps/pacifica/pacificaDeposit';
-import { fetchFreshPacificaPortfolio } from '@/integrations/perps/pacifica/pacificaPortfolio';
+import { refreshPacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolioStore';
 import { collateralShortfall, creditedDepositAmount } from '@/integrations/perps/tradeCollateralMath';
 import {
   removePendingTradeAction,
@@ -45,11 +45,12 @@ export async function preparePacificaTradeCollateral(input: {
   readonly usdcMint: string;
   readonly vault: string;
 }): Promise<TradeCollateralStep | null> {
-  const portfolio = await fetchFreshPacificaPortfolio(
-    input.apiOrigin,
-    input.owner,
-    input.signal,
-  );
+  const portfolio = await refreshPacificaPortfolioSnapshot({
+    account: input.owner,
+    apiOrigin: input.apiOrigin,
+    forceNetwork: true,
+    signal: input.signal,
+  });
   const shortfall = collateralShortfall(
     input.requiredBaseUnits,
     usdc(portfolio.availableToSpend),
@@ -83,6 +84,7 @@ export async function preparePacificaTradeCollateral(input: {
       mint: input.usdcMint,
       owner: input.owner,
       programId: input.programId,
+      providerBalanceBeforeBaseUnits: usdc(portfolio.balance),
       rpcUrl: input.rpcUrl,
       signer: input.signer,
       signal: input.signal,
@@ -114,9 +116,6 @@ export async function submitTradeCollateralStep(input: {
       input.step.provider,
     ),
   });
-  if (result.status === 'confirmed') {
-    await removePendingTradeAction(input.owner, input.step.provider);
-  }
   return result;
 }
 
@@ -137,6 +136,8 @@ function pendingRecord(
     kind: 'collateral',
     owner,
     provider: step.provider,
+    providerBalanceBeforeBaseUnits: step.plan.providerBalanceBeforeBaseUnits.toString(),
+    expectedProviderCreditBaseUnits: step.plan.amountBaseUnits.toString(),
     signature,
     signedTransactionBase64,
     updatedAtMs: Date.now(),

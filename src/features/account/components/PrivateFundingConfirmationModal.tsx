@@ -19,6 +19,8 @@ export type PrivateFundingConfirmation = {
   readonly estimatedNetworkFeeLamports: bigint;
   readonly feeReserveLamports: bigint;
   readonly hasSubmittedTransaction: boolean;
+  /** Private-wallet USDC explicitly included in the approved aggregate Pacifica deposit. */
+  readonly privateUsdcBaseUnitsAtStart: bigint;
   readonly mode: 'start' | 'resume';
   readonly requiredSolLamports: bigint;
   readonly symbol: 'USDC' | 'USDT';
@@ -50,8 +52,17 @@ export function PrivateFundingConfirmationModal({
     estimateUmbraCreateFee(confirmation.amountBaseUnits),
     confirmation.decimals,
   ));
+  const creditedCollateralBaseUnits = creditedUmbraAmount(confirmation.amountBaseUnits);
   const creditedCollateral = formatAmount(amountFromBaseUnits(
-    creditedUmbraAmount(confirmation.amountBaseUnits),
+    creditedCollateralBaseUnits,
+    confirmation.decimals,
+  ));
+  const privateUsdc = formatAmount(amountFromBaseUnits(
+    confirmation.privateUsdcBaseUnitsAtStart,
+    confirmation.decimals,
+  ));
+  const pacificaCredit = formatAmount(amountFromBaseUnits(
+    confirmation.privateUsdcBaseUnitsAtStart + creditedCollateralBaseUnits,
     confirmation.decimals,
   ));
   const reserveFee = formatAmount(amountFromBaseUnits(
@@ -98,9 +109,19 @@ export function PrivateFundingConfirmationModal({
           />
           {confirmation.destination === 'pacifica' ? (
             <>
+              {confirmation.privateUsdcBaseUnitsAtStart > 0n ? (
+                <ConfirmationRow
+                  label="Existing USDC included"
+                  value={`${privateUsdc} ${confirmation.symbol}`}
+                />
+              ) : null}
               <ConfirmationRow
-                label="Estimated Pacifica credit"
+                label="Umbra credit"
                 value={`${creditedCollateral} ${confirmation.symbol}`}
+              />
+              <ConfirmationRow
+                label="Pacifica deposit"
+                value={`${pacificaCredit} ${confirmation.symbol}`}
               />
               <ConfirmationRow label="Minimum Pacifica credit" value="10 USDC" />
             </>

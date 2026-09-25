@@ -90,7 +90,7 @@ export function PacificaFundingRequirementRows(props: {
         value={usdcText(props.requirement.minimumBaseUnits)}
       />
       <StatusRow
-        label="Available"
+        label="Ready to deposit"
         selectable
         singleLine
         value={usdcText(props.requirement.usdcAvailableBaseUnits)}
@@ -144,6 +144,8 @@ export function PacificaPreparedOrder(props: {
 
 export function PacificaRiskRows(props: {
   readonly collateral: string;
+  /** True when private USDC is below Pacifica's deposit minimum. */
+  readonly fundingBlocked: boolean;
   readonly fundingOnly: boolean;
   readonly minimumOrderSize: string;
   readonly portfolio: PacificaPortfolioSnapshot;
@@ -165,10 +167,12 @@ export function PacificaRiskRows(props: {
             : '--'}
         />
       )}
-      <TicketRow
-        label={props.fundingOnly ? 'Deposit' : 'Margin'}
-        value={props.reduceOnly ? decimalUsd(props.position?.margin) : decimalUsd(props.collateral)}
-      />
+      {props.fundingBlocked ? null : (
+        <TicketRow
+          label={props.fundingOnly ? 'Deposit' : 'Margin'}
+          value={props.reduceOnly ? decimalUsd(props.position?.margin) : decimalUsd(props.collateral)}
+        />
+      )}
       {props.fundingOnly ? null : (
         <TicketRow label="Min. notional" value={decimalUsd(props.minimumOrderSize)} />
       )}
@@ -177,7 +181,9 @@ export function PacificaRiskRows(props: {
         screenReaderLabel="Available in Pacifica"
         value={decimalUsd(props.portfolio.availableToSpend)}
       />
-      <TicketRow label="Private USDC" value={privateUsdcText(props.privateBalances)} />
+      {props.fundingBlocked ? null : (
+        <TicketRow label="Funding balance" value={privateUsdcText(props.privateBalances)} />
+      )}
     </View>
   );
 }
