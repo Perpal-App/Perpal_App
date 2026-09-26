@@ -135,6 +135,19 @@ export const typography = {
     letterSpacing: 0,
   },
   /**
+   * The digits on the order ticket's keypad.
+   *
+   * Medium rather than the bold `title`: twelve keys set in a display weight turn the bottom third of
+   * the sheet into the loudest thing on it, when the figure they are writing is what should be. Large
+   * enough that a key reads as a key at arm's length, one-handed.
+   */
+  keypad: {
+    fontFamily: fonts.medium,
+    fontSize: 24,
+    lineHeight: 36,
+    letterSpacing: 0,
+  },
+  /**
    * All-caps column headers and metric labels. Caps have no descenders, so this
    * is the one role that can lead slightly under 1.5x without cropping.
    */

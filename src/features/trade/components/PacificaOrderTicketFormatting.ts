@@ -1,7 +1,11 @@
 import {
   amountFromBaseUnits,
   formatAmountWithCommas,
+  formatDetailedUsd,
+  formatSignedBpsPercent,
   parseAmount,
+  truncateAmount,
+  type Amount,
 } from '@/domain/money/amount';
 import type { TradingStablecoinBalances } from '@/features/trade/hooks/useTradingStablecoinBalances';
 import type {
@@ -25,18 +29,8 @@ export function availableTradingFundsBaseUnits(
   }
 }
 
-export function privateUsdcText(balances: TradingStablecoinBalances | null): string {
-  if (balances === null) return '--';
-  return usdcText(balances.usdcBaseUnits);
-}
-
 export function usdcText(value: bigint): string {
   return `${formatAmountWithCommas(amountFromBaseUnits(value, 6))} USDC`;
-}
-
-export function decimalUsd(value: string | undefined): string {
-  if (value === undefined || value.trim().length === 0) return '--';
-  try { return `$${formatAmountWithCommas(parseAmount(value, 6))}`; } catch { return '--'; }
 }
 
 export function priceText(value: string): string {
@@ -78,6 +72,59 @@ export function orderConfirmation(plan: PacificaOrderPlan, baseAsset: string) {
 
 export function usdFromBaseUnits(value: bigint): string {
   return `$${formatAmountWithCommas(amountFromBaseUnits(value, 6))}`;
+}
+
+/**
+ * A USDC balance as dollars and cents — `$2,534.41` — truncated rather than rounded, so a balance on
+ * display is never a fraction of a cent more than what is there.
+ */
+export function usdCentsText(value: bigint): string {
+  return formatDetailedUsd(truncateAmount(amountFromBaseUnits(value, 6), 2));
+}
+
+/**
+ * What `collateral × leverage` comes to, before the venue's lot rounding.
+ *
+ * The same product the plan starts from — `preparePacificaOrder` sizes an opening order off exactly
+ * this — which is why it is marked approximate rather than exact: the plan then rounds the size down
+ * to the market's lot, so the notional that is signed can come in slightly under this and never over.
+ * The exact figure is on the prepared order.
+ */
+export function positionSizeEstimate(collateral: string, leverage: number): string {
+  if (!Number.isInteger(leverage) || leverage < 1) return '--';
+  try {
+    const base = parseAmount(collateral, 6).baseUnits;
+    return base <= 0n ? '--' : `≈ ${usdCentsText(base * BigInt(leverage))}`;
+  } catch {
+    return '--';
+  }
+}
+
+/**
+ * How far a trigger price sits from the mark, as a signed percentage: `+4.20%`.
+ *
+ * Integer basis points, truncated toward zero — a hint beside a price being typed, not a figure
+ * anything is priced from. `null` for anything that does not parse, so a half-typed value shows nothing
+ * rather than a nonsense percentage.
+ */
+export function markDistanceText(value: string, mark: Amount): string | null {
+  if (mark.baseUnits <= 0n || value.trim().length === 0) return null;
+  try {
+    const price = parseAmount(value, mark.decimals).baseUnits;
+    if (price <= 0n) return null;
+    return formatSignedBpsPercent(Number(((price - mark.baseUnits) * 10_000n) / mark.baseUnits));
+  } catch {
+    return null;
+  }
+}
+
+/** The auto-close row's second line: the prices it will act on, or `null` when there are none. */
+export function autoCloseSummary(takeProfit: string, stopLoss: string): string | null {
+  const parts = [
+    takeProfit.trim().length === 0 ? null : `TP $${priceText(takeProfit.trim())}`,
+    stopLoss.trim().length === 0 ? null : `SL $${priceText(stopLoss.trim())}`,
+  ].filter((part): part is string => part !== null);
+  return parts.length === 0 ? null : parts.join(' · ');
 }
 
 /**

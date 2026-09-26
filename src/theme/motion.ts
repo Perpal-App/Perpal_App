@@ -143,6 +143,34 @@ export const motion = {
     mass: 0.85,
   },
   /**
+   * The order ticket's keypad, and the figure it writes.
+   *
+   * The press halo arrives almost at once and leaves slowly: arriving is the acknowledgement, so it has
+   * to land inside the touch, while the fade out is only there so the key does not blink. `haloFrom` is
+   * the scale it grows out of.
+   *
+   * A digit rises `digitTravel` into its slot on `spring` and fades out on `digitExitMs` when deleted —
+   * short, because a deleted digit is gone the moment the key is released and should look it.
+   */
+  keypad: {
+    pressInMs: 70,
+    releaseMs: 280,
+    haloFrom: 0.72,
+    digitTravel: 14,
+    digitExitMs: 140,
+  },
+  /**
+   * The refusal shake, for input that cannot be accepted — a seventh decimal, a second point.
+   *
+   * The passcode field's gesture: a few quick, shrinking swings either side of rest. Small enough to
+   * read as "no" rather than as an error dialog, and it carries no colour change, so the figure stays
+   * legible while it moves.
+   */
+  reject: {
+    travel: 7,
+    stepMs: 48,
+  },
+  /**
    * Bottom sheet presenting and dismissing.
    *
    * A spring rather than a duration curve, which is what makes it read as iOS rather than as a

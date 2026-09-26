@@ -1,5 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -52,6 +61,24 @@ const SCRIM_OPACITY = 0.72;
 const GRABBER = { width: 44, height: 4 } as const;
 const CLOSE_SIZE = 36;
 const CLOSE_GLYPH = 18;
+
+/**
+ * What the sheet lends its content: a way back to the top of its own scroll.
+ *
+ * For content that changes what it is showing without changing where it is mounted — the order
+ * ticket covering its form with a leverage or auto-close page. That page draws from the top of the
+ * body, and a reader who had scrolled down to the row that opened it would otherwise land on the
+ * middle of the new page with its header above the fold. The scroll view is the sheet's, so the sheet
+ * is what offers to move it; nothing outside gets a ref to it.
+ */
+type SheetScroll = { readonly scrollToTop: () => void };
+
+const SheetScrollContext = createContext<SheetScroll | null>(null);
+
+/** The enclosing sheet's scroll, or `null` outside one, so content can be mounted anywhere. */
+export function useSheetScroll(): SheetScroll | null {
+  return useContext(SheetScrollContext);
+}
 
 /**
  * Where the sheet opens, as a translation from filling the host.
@@ -110,6 +137,7 @@ function restOffset(host: number, ratio: number): number {
 export function DraggableSheet({
   children,
   closeLabel,
+  fillBody = false,
   onClose,
   restRatio = DEFAULT_REST_RATIO,
   title,
@@ -118,6 +146,15 @@ export function DraggableSheet({
   readonly children: ReactNode;
   /** Spoken label for the close control and the backdrop, e.g. `Close order ticket`. */
   readonly closeLabel: string;
+  /**
+   * Stretches the body to the sheet's full height, so content can pin its last controls to the bottom
+   * with flex — a keypad and its action, sitting at the thumb whatever the phone's height.
+   *
+   * Only meaningful with `restRatio: 1`, where the sheet's box and its visible area are the same
+   * rectangle. At a smaller ratio the bottom of the box is below the screen's edge, and so would be
+   * whatever this pinned there.
+   */
+  readonly fillBody?: boolean;
   readonly onClose: () => void;
   /** Share of the available height the sheet covers before it is dragged up. */
   readonly restRatio?: number;
@@ -149,6 +186,12 @@ export function DraggableSheet({
    * underneath it. A shared value rather than a ref so the gesture can write it from the UI thread.
    */
   const expanded = useSharedValue(false);
+  const scrollRef = useRef<ScrollView>(null);
+  // Jumps rather than glides under reduce motion, which is the same rule every other movement here
+  // follows: the position still changes, the travel between positions does not play.
+  const scroll = useMemo<SheetScroll>(() => ({
+    scrollToTop: () => scrollRef.current?.scrollTo({ animated: !reduceMotion, y: 0 }),
+  }), [reduceMotion]);
 
   useEffect(() => {
     if (visible) {
@@ -359,13 +402,14 @@ export function DraggableSheet({
                 {/* Last to give way, and the only box that may. The header keeps its full size so the
                     grabber and the close control are never squeezed out of reach by the keyboard. */}
                 <ScrollView
-                  contentContainerStyle={styles.content}
+                  contentContainerStyle={[styles.content, fillBody && styles.contentFill]}
                   contentInsetAdjustmentBehavior="never"
                   keyboardShouldPersistTaps="handled"
+                  ref={scrollRef}
                   showsVerticalScrollIndicator={false}
-                  style={styles.scroll}
+                  style={[styles.scroll, fillBody && styles.scrollFill]}
                 >
-                  {children}
+                  <SheetScrollContext.Provider value={scroll}>{children}</SheetScrollContext.Provider>
                 </ScrollView>
               </View>
             </Animated.View>
@@ -404,6 +448,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   scroll: { flexShrink: 1 },
+  // Grows as well as shrinks, so the scroll view is the whole of the sheet under the header rather than
+  // only as tall as what it holds.
+  scrollFill: { flexGrow: 1 },
   // The pan's target: full width and both rows, so a finger anywhere in the head of the sheet drags it
   // and the 4pt bar is the affordance rather than the target.
   header: { paddingBottom: spacing.xxs },
@@ -436,4 +483,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
   content: { paddingHorizontal: layout.screenPadding, paddingBottom: spacing.xxl },
+  // At least the viewport's height, so content shorter than the screen can push its footer to the
+  // bottom and content taller than it still scrolls. A tighter base, because what sits there is an
+  // action meant for the thumb, and the safe area below it already clears the home indicator.
+  contentFill: { flexGrow: 1, paddingBottom: spacing.md },
 });

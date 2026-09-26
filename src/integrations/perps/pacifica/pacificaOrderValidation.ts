@@ -104,6 +104,20 @@ export function orderPrices(input: {
   };
 }
 
+/**
+ * Which side of the mark a take-profit or stop-loss has to sit on.
+ *
+ * The single statement of the rule. `validateTriggerPrice` enforces it, and the order ticket's
+ * auto-close panel states it before anything is typed — so the hint a reader is shown can never
+ * disagree with the check their order will actually face.
+ */
+export function triggerSideOfMark(
+  kind: 'take-profit' | 'stop-loss',
+  side: PacificaOrderSide,
+): 'above' | 'below' {
+  return (kind === 'take-profit' ? side === 'long' : side === 'short') ? 'above' : 'below';
+}
+
 export function validateTriggerPrice(
   value: string,
   label: string,
@@ -114,7 +128,7 @@ export function validateTriggerPrice(
   decimals: number,
 ): string {
   const price = requestedPrice(value, label, tickSize, decimals);
-  const above = kind === 'take-profit' ? side === 'long' : side === 'short';
+  const above = triggerSideOfMark(kind, side) === 'above';
   if ((above && price <= mark) || (!above && price >= mark)) {
     throw new PacificaOrderValidationError(`${label} must be ${above ? 'above' : 'below'} the current mark.`);
   }

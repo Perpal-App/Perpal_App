@@ -70,9 +70,10 @@ export type PacificaOrderPlaced = {
 /**
  * Everything the reader typed, as one value.
  *
- * The ticket holds these as eleven separate `useState` calls and hands them over on each render. They
- * are grouped here rather than there because this hook is the only thing that reads all of them at
- * once, and a single named shape is what lets `prepare` stay a readable list of validations.
+ * Wider than today's ticket, which only builds opening market orders: `marketOrderDraft` in
+ * `useOrderTicketDraft` fixes the action, the order type and the limit and trigger prices, and fills in
+ * the rest from what the reader set. The shape stays general because the order builder behind it is,
+ * and a single named shape is what lets `prepare` stay a readable list of validations.
  */
 export type PacificaOrderDraft = {
   readonly action: PacificaOrderAction;

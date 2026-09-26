@@ -7,7 +7,7 @@ import { DraggableSheet } from '@/components/ui/DraggableSheet';
 import { ProgressiveBlur } from '@/components/ui/ProgressiveBlur';
 import { readAppConfig } from '@/config/appConfig';
 import { usePageMoving } from '@/navigation/tabs/minimizeState';
-import { PacificaOrderTicket } from '@/features/trade/components/PacificaOrderTicket';
+import { PacificaOrderTicket } from '@/features/trade/components/orderTicket/PacificaOrderTicket';
 import type { PacificaOrderSide } from '@/integrations/perps/pacifica/pacificaOrder';
 import type {
   PacificaMarket,
@@ -57,10 +57,10 @@ export const ORDER_BAR_CLEARANCE = BLUR_RUN_UP + BAR_HEIGHT + BAR_BASE_PAD;
  * `maxHeight: '88%'`, and no keyboard avoidance at all — which on a form of five numeric fields meant
  * the keyboard covered the thing being typed into. It now uses the shared `DraggableSheet`.
  *
- * `side` seeds the ticket and nothing more. Each open mounts a fresh ticket, so the side chosen here is
- * the side it starts on, and the ticket's own Buy/Sell control remains the way to change it without
- * losing a part-filled form. That control discards any prepared plan when it is used, which is the
- * invariant that matters: a plan priced for one side must never be signable on the other.
+ * `side` is chosen here and fixed for the ticket's life. The ticket used to repeat the choice as its own
+ * Buy/Sell pair, which asked the reader a question they had just answered; now the side is the button
+ * they pressed, and changing it means closing the ticket and pressing the other one. Each open mounts a
+ * fresh ticket, so a plan priced for one side can never be signable on the other.
  */
 export function OrderActionBar({
   market,
@@ -153,10 +153,9 @@ export function OrderActionBar({
       </View>
 
       {/* `restRatio={1}`: the ticket opens at the full height of the dock rather than at the sheet's
-          half-screen default. It is a form of ten-odd controls that ends in the figures a reader is
-          meant to check before signing, and at half height the action and every row under it began
-          below the fold — reachable only by dragging, because the card's box was taller than the part
-          of it on screen and so the body's own scroll could not reach them either.
+          half-screen default. Its keypad and action live at the bottom, and at half height they began
+          below the fold — reachable only by dragging, because the card's box was taller than the part of
+          it on screen and so the body's own scroll could not reach them either.
 
           Still one flat number taken from the host alone, which is the part that has to stay true. What
           made this sheet stick was a resting height derived from the *content*: the ticket's height
@@ -165,13 +164,16 @@ export function OrderActionBar({
           the same value the drag's expanded target already springs to, so the sheet gains no position
           it did not already have.
 
+          `fillBody` lets the ticket pin its keypad and action to the bottom of the sheet, under the thumb,
+          which only makes sense because the sheet opens at full height.
+
           The title is the instrument alone. It used to carry the side as well, which contradicted the
           body whenever the account had nothing credited: a sheet headed `Buy / Long` over a deposit
-          form. Naming the side here also duplicated the ticket's own Buy/Sell control, which is the
-          thing that actually governs it — and that control is hidden in exactly the state where the
-          title was wrong. The body says which of the two forms it is; this says which market. */}
+          form. The side is carried by the ticket's own action instead — `Review long` — which is right
+          in the one state the title would be wrong in, because the deposit form has its own action. */}
       <DraggableSheet
         closeLabel="Close order ticket"
+        fillBody
         onClose={() => setSide(null)}
         restRatio={1}
         title={`${market.baseAsset}-USD`}
@@ -181,11 +183,11 @@ export function OrderActionBar({
           <PacificaOrderTicket
             apiOrigin={config.value.perps.pacificaApiOrigin}
             centralState={config.value.perps.pacificaCentralState}
-            initialSide={side}
             market={market}
             onRequestFunding={requestFunding}
             programId={config.value.perps.pacificaProgramId}
             rpcUrl={config.value.api.rpcUrl}
+            side={side}
             snapshot={snapshot}
             usdcMint={config.value.perps.usdcMint}
             vault={config.value.perps.pacificaVault}

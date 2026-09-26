@@ -99,6 +99,22 @@ export function formatAmount(amount: Amount): string {
   return negative ? `-${body}` : body;
 }
 
+/**
+ * Drops every digit past `places`, toward zero, keeping the amount's scale.
+ *
+ * For a figure that must never overstate: a balance on display, or the share of one a preset commits.
+ * Rounding half-up there could show a cent that is not in the account; truncating can only ever show
+ * less than is there.
+ */
+export function truncateAmount(amount: Amount, places: number): Amount {
+  if (!Number.isInteger(places) || places < 0) {
+    throw new AmountError('Decimal places must be a non-negative integer.');
+  }
+  if (places >= amount.decimals) return amount;
+  const factor = 10n ** BigInt(amount.decimals - places);
+  return { baseUnits: (amount.baseUnits / factor) * factor, decimals: amount.decimals };
+}
+
 export function formatAmountWithCommas(amount: Amount): string {
   const [whole = '0', fraction] = formatAmount(amount).split('.');
   const negative = whole.startsWith('-');
