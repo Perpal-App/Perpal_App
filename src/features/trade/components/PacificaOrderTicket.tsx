@@ -17,6 +17,7 @@ import {
 } from '@/features/trade/components/OrderTicketControls';
 import { PrivateTradingTicketState } from '@/features/trade/components/PrivateTradingTicketState';
 import { TradeCollateralStepView } from '@/features/trade/components/TradeCollateralStepView';
+import { PacificaOrderPlacedCard } from '@/features/trade/components/PacificaOrderPlacedCard';
 import { availableTradingFundsBaseUnits } from '@/features/trade/components/PacificaOrderTicketFormatting';
 import { pacificaOrderTicketStyles as styles } from '@/features/trade/components/PacificaOrderTicketStyles';
 import { PacificaOrderTypeFields } from '@/features/trade/components/PacificaOrderTypeFields';
@@ -140,7 +141,7 @@ export function PacificaOrderTicket(props: {
       vault: props.vault,
     },
   });
-  const { phase, plan, preparation } = flow;
+  const { phase, placed, plan, preparation } = flow;
   const reset = flow.reset;
 
   useEffect(() => {
@@ -385,6 +386,16 @@ export function PacificaOrderTicket(props: {
         position={position}
         privateBalances={privateBalances.balances}
         reduceOnly={reduceOnly}
+      />
+
+      {/* Last child, and absolute, so it covers the column above without taking a slot in it. Rendering
+          it as a sibling of the form rather than as another branch of the action ladder is what lets the
+          form stay exactly as it was underneath: the reader lands back on the same inputs, scrolled to
+          the same place, with nothing reflowed by the card's arrival or its departure. */}
+      <PacificaOrderPlacedCard
+        baseAsset={props.market.baseAsset}
+        onDismissed={flow.dismissPlaced}
+        placed={placed}
       />
     </View>
   );

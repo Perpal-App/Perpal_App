@@ -23,6 +23,7 @@ import {
   type PacificaOrderAction,
   type PacificaOrderPlan,
   type PacificaOrderSide,
+  type PacificaOrderSubmission,
   type PacificaOrderType,
 } from '@/integrations/perps/pacifica/pacificaOrder';
 import { waitForPacificaDepositCredit } from '@/integrations/perps/pacifica/pacificaDepositSettlement';
@@ -47,6 +48,24 @@ export type PacificaOrderPhase =
   | 'prepared'
   | 'submitting'
   | 'indexing';
+
+/**
+ * An order the venue has taken, kept only long enough to tell the reader about it.
+ *
+ * Deliberately not a `phase`. The phases describe work in progress, and this describes work that is
+ * finished — the machine is back at `idle` the moment it is set, so the ticket is free to price another
+ * order while the confirmation is still on screen. Folding it into the union would have meant a state
+ * the form had to treat as busy when it is not.
+ *
+ * It carries the plan by value because the plan it describes is gone: `submit` clears `plan` on the way
+ * through, which is correct — a plan is a priced, signable intent and holding a stale one alive is how a
+ * second signature ends up bound to the first one's quote. This is a receipt, not a plan.
+ */
+export type PacificaOrderPlaced = {
+  readonly orderId: number;
+  readonly orderStatus: PacificaOrderSubmission['orderStatus'];
+  readonly plan: PacificaOrderPlan;
+};
 
 /**
  * Everything the reader typed, as one value.
@@ -112,6 +131,7 @@ export function usePacificaOrderFlow(input: {
   const [plan, setPlan] = useState<PacificaOrderPlan | null>(null);
   const [preparation, setPreparation] = useState<TradeCollateralStep | null>(null);
   const [fundingRequirement, setFundingRequirement] = useState<TradeFundingRequirement | null>(null);
+  const [placed, setPlaced] = useState<PacificaOrderPlaced | null>(null);
   const controller = useRef<AbortController | null>(null);
 
   const reset = () => {
@@ -119,6 +139,10 @@ export function usePacificaOrderFlow(input: {
     setPlan(null);
     setPreparation(null);
     setFundingRequirement(null);
+    // A receipt belongs to the market and identity it was signed under. The ticket calls this on every
+    // draft edit and on a market or wallet change, and a confirmation for the instrument the reader just
+    // navigated away from would be describing an order they can no longer see.
+    setPlaced(null);
     setPhase('idle');
   };
 
@@ -341,6 +365,13 @@ export function usePacificaOrderFlow(input: {
       });
       setPlan(null);
       setPhase('idle');
+      // Only for a status that is actually good news. A rejection and a cancellation both come back
+      // through this branch rather than as a thrown error — the request succeeded, the order did not —
+      // and a green tick over either would be the screen telling the reader something untrue. Those two
+      // are already reported honestly by the notification below, which reads `rejected` as an error.
+      if (result.orderStatus !== 'rejected' && result.orderStatus !== 'cancelled') {
+        setPlaced({ orderId: result.orderId, orderStatus: result.orderStatus, plan: confirmed });
+      }
       input.portfolioState.refresh();
       publishInAppNotification({
         correlations: [{ namespace: 'pacifica-order', value: confirmed.clientOrderId }],
@@ -381,8 +412,11 @@ export function usePacificaOrderFlow(input: {
   return {
     abortPending,
     confirm,
+    /** Clears the receipt. Called when the confirmation has finished leaving, not when it starts. */
+    dismissPlaced: () => setPlaced(null),
     fundingRequirement,
     phase,
+    placed,
     plan,
     prepare,
     preparation,

@@ -76,6 +76,38 @@ export function orderConfirmation(plan: PacificaOrderPlan, baseAsset: string) {
   };
 }
 
+export function usdFromBaseUnits(value: bigint): string {
+  return `$${formatAmountWithCommas(amountFromBaseUnits(value, 6))}`;
+}
+
+/**
+ * The two lines of the post-trade confirmation.
+ *
+ * `placed` and `filled` are not interchangeable and the status decides which is true. A fresh market
+ * order normally comes back `accepted` — Pacifica has the request and its final state is still
+ * reconciling — so "placed" is the honest word for it, and only a status that really is a fill says
+ * filled. Getting this wrong would be the screen claiming an execution the venue has not reported.
+ *
+ * The size is `plan.amount` exactly as signed, not a rounded version of it: the figure the reader is
+ * shown after the fact has to be the figure that went to the venue.
+ */
+export function orderPlacedCopy(
+  plan: PacificaOrderPlan,
+  baseAsset: string,
+  status: PacificaOrderSubmission['orderStatus'],
+): { readonly detail: string; readonly headline: string } {
+  const filled = status === 'filled' || status === 'partially_filled';
+  const verb = plan.action === 'close'
+    ? `Close ${plan.side}`
+    : plan.side === 'long' ? 'Buy' : 'Sell';
+  return {
+    detail: `${verb} ${plan.amount} ${baseAsset} for ${usdFromBaseUnits(plan.notionalBaseUnits)}`,
+    headline: `Your ${orderTypeText(plan.orderType).toLowerCase()} order has been ${
+      filled ? 'filled' : 'placed'
+    }`,
+  };
+}
+
 export function accountHealthText(value: bigint): string {
   const whole = value / 100n;
   const fraction = (value % 100n).toString().padStart(2, '0');

@@ -32,7 +32,10 @@ export const pacificaOrderTicketStyles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
-  success: { ...typography.bodyCompact, color: colors.positive },
+  // No `success` entry. There was one, `bodyCompact` in `positive`, with no consumer anywhere — a
+  // leftover from when a placed order was meant to be a line of green text in the form. It is a card of
+  // its own now (`PacificaOrderPlacedCard`), which owns its ink, so the dead token is gone rather than
+  // sitting here looking like the thing that styles the confirmation.
   error: { ...typography.bodyCompact, color: colors.negative },
   validationError: { ...typography.caption, color: colors.negative },
 });
