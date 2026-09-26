@@ -14,15 +14,16 @@ import Animated, {
 
 import { layoutMorph } from '@/components/motion/layoutMorph';
 import { entryGlyphs } from '@/features/trade/components/orderTicket/keypadEntry';
-import { colors, motion, typography } from '@/theme/tokens';
+import { colors, interfaceType, motion } from '@/theme/tokens';
 
 /**
- * The two sizes the figure is set in. Each glyph carries the role's full line height, so the row is one
- * line tall whatever it holds — an empty figure and a long one occupy the same height.
+ * The two sizes the figure is set in, both with tabular figures, so every digit is the same width and one
+ * being typed or deleted never nudges the others. Each glyph carries the role's full line height, so the
+ * row is one line tall whatever it holds — an empty figure and a long one occupy the same height.
  */
 const FACES = {
-  hero: typography.display,
-  field: typography.heading,
+  hero: interfaceType.amount,
+  field: interfaceType.amountField,
 } as const;
 
 /**

@@ -7,7 +7,7 @@ import { entryText } from '@/features/trade/components/orderTicket/keypadEntry';
 import { KeypadAmount } from '@/features/trade/components/orderTicket/KeypadAmount';
 import { TicketPanel } from '@/features/trade/components/orderTicket/TicketPanel';
 import { showAppToast } from '@/storage/appToast';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
 const INFO_GLYPH = 14;
 /** Brings the 14pt glyph's touch target up to the 44pt minimum without moving anything around it. */
@@ -70,7 +70,7 @@ export function CollateralCard({
     >
       <TicketPanel style={styles.card}>
         <View style={styles.head}>
-          <Text style={styles.eyebrow}>{label.toUpperCase()}</Text>
+          <Text style={styles.eyebrow}>{label}</Text>
           <PressableScale
             accessibilityHint="Explains this amount"
             accessibilityLabel={`About ${label.toLowerCase()}`}
@@ -115,14 +115,14 @@ export function CollateralCard({
 const styles = StyleSheet.create({
   card: { gap: spacing.xxs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
-  eyebrow: { ...typography.eyebrow, letterSpacing: 0.5, color: colors.textMuted },
+  eyebrow: { ...interfaceType.overline, color: colors.textMuted },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   token: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: spacing.xs },
-  tokenLabel: { ...typography.label, color: colors.textPrimary },
+  tokenLabel: { ...interfaceType.control, color: colors.textPrimary },
   // The amount in the token on the left and the balance on the right, both on the caption line: the
   // figure above is the one being read, and these are what it is measured against.
   foot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  caption: { ...typography.caption, color: colors.textMuted },
+  caption: { ...interfaceType.figureCaption, color: colors.textMuted },
   // The side that gives way on a narrow screen: the entered amount on the left is the one being checked.
   available: { flexShrink: 1, textAlign: 'right' },
   balance: { color: colors.textSecondary },

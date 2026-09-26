@@ -14,9 +14,9 @@ import {
 } from '@/features/trade/components/orderTicket/autoClosePnl';
 import { entryText } from '@/features/trade/components/orderTicket/keypadEntry';
 import { KeypadAmount } from '@/features/trade/components/orderTicket/KeypadAmount';
-import { PnlIndicator } from '@/features/trade/components/orderTicket/PnlIndicator';
+import { PNL_BADGE_HEIGHT, PnlBadge } from '@/features/trade/components/orderTicket/PnlBadge';
 import { TICKET_TONES } from '@/features/trade/components/orderTicket/ticketTone';
-import { colors, motion, radii, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, motion, radii, spacing } from '@/theme/tokens';
 
 /**
  * How strongly the field being typed into is marked in its own colour. The same restraint as the chips: a
@@ -27,16 +27,16 @@ const WASH_OPACITY = 0.08;
 const RIM_OPACITY = 0.7;
 
 /**
- * One auto-close price, half the width of the card: the figure, and what it would come to under it.
+ * One auto-close price, half the width of the card: its name and the figure, and nothing under them.
  *
  * Each price owns a colour, take profit green and stop loss red, on its label and on its rim while it is
  * the one the keypad is typing into. Moving between the two cross-fades the marking from one field to the
  * other rather than switching it.
  *
- * Under the figure is the estimated profit or loss at that price and nothing else: no instructions, no
- * percentages. Its caret and colour carry the check a hint used to, so a take profit that would lose money
- * reads as a loss while it is being typed. The line is always laid out and only fades in once there is a
- * price, so the first digit never moves the field, the card, or the keypad under them.
+ * What the price would come to floats on the field's top edge at the right, as a signed badge: `+$91.50`,
+ * `−$3.07`. Seated across the edge rather than inside, so it can never crowd the label on a narrow phone,
+ * and floating rather than laid out, so its arriving and leaving moves nothing. Its sign and colour carry
+ * the check a hint used to: a take profit that would lose money reads as a loss while it is being typed.
  *
  * When the card is left with the price wrong, the order builder's reason appears under the field and the rim
  * turns to the loss colour, so the problem is never carried by colour alone.
@@ -71,21 +71,14 @@ export function TriggerPriceField({
   const invalid = error !== null;
   const hasPrice = entry.length > 0;
   const marked = useSharedValue(active ? 1 : 0);
-  const priced = useSharedValue(hasPrice ? 1 : 0);
 
   useEffect(() => {
     const target = active || invalid ? 1 : 0;
     marked.set(reduceMotion ? target : withTiming(target, { duration: motion.rowSwap.fadeMs }));
   }, [active, invalid, marked, reduceMotion]);
 
-  useEffect(() => {
-    const target = hasPrice ? 1 : 0;
-    priced.set(reduceMotion ? target : withTiming(target, { duration: motion.rowSwap.fadeMs }));
-  }, [hasPrice, priced, reduceMotion]);
-
   const washStyle = useAnimatedStyle(() => ({ opacity: marked.value * WASH_OPACITY }));
   const rimStyle = useAnimatedStyle(() => ({ opacity: marked.value * (invalid ? 1 : RIM_OPACITY) }));
-  const outcomeStyle = useAnimatedStyle(() => ({ opacity: priced.value }));
 
   const value = hasPrice ? `$${entryText(entry)}` : 'not set';
   const figure = pnl === null ? null : pnlFigure(pnl);
@@ -107,16 +100,15 @@ export function TriggerPriceField({
           style={[styles.layer, styles.rim, { borderColor: invalid ? colors.negative : ink }, rimStyle]}
         />
         <Text numberOfLines={1} style={[styles.eyebrow, { color: ink }]}>{label}</Text>
-        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          {/* A row, because the figure's box flexes along its parent's main axis to take the width. */}
-          <View style={styles.row}>
-            <KeypadAmount accessibilityLabel={value} entry={entry} rejectSignal={rejectSignal} size="field" />
-          </View>
-          <Animated.View style={outcomeStyle}>
-            <PnlIndicator figure={figure} />
-          </Animated.View>
+        {/* A row, because the figure's box flexes along its parent's main axis to take the width. */}
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.row}>
+          <KeypadAmount accessibilityLabel={value} entry={entry} rejectSignal={rejectSignal} size="field" />
         </View>
       </Pressable>
+      {/* After the field, so it draws over the field's edge, and outside it, because the field clips. */}
+      <View pointerEvents="none" style={styles.badgeSlot}>
+        <PnlBadge figure={hasPrice ? figure : null} />
+      </View>
       {invalid ? (
         <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.error}>{error}</Text>
       ) : null}
@@ -132,10 +124,7 @@ function spokenEstimate(figure: PnlFigure | null): string {
 const styles = StyleSheet.create({
   column: { flex: 1, minWidth: 0, gap: spacing.xxs },
   // Recessed into the card: the sheet's own surface, a shade under the card's ramp. Clipped, so the wash and
-  // the rim laid over it take its corners.
-  //
-  // No gap between the three lines. Each already leads at 1.5x, and that leading puts about 12pt between
-  // one line's baseline and the next line's cap height, which matches the padding at the top and bottom.
+  // the rim laid over it take its corners. Two lines and the padding round them, nothing reserved below.
   field: {
     overflow: 'hidden',
     paddingHorizontal: spacing.sm,
@@ -148,7 +137,16 @@ const styles = StyleSheet.create({
   },
   layer: { position: 'absolute', inset: 0, borderRadius: radii.sm },
   rim: { borderWidth: 1 },
-  eyebrow: { ...typography.eyebrow, letterSpacing: 0.5 },
+  eyebrow: interfaceType.overline,
   row: { flexDirection: 'row' },
-  error: { ...typography.caption, color: colors.negative },
+  // Centred on the field's top edge, clear of its rounded corner, and never wider than the field: a long
+  // figure shrinks to fit the span instead of running past it.
+  badgeSlot: {
+    position: 'absolute',
+    top: -PNL_BADGE_HEIGHT / 2,
+    left: spacing.sm,
+    right: spacing.sm,
+    alignItems: 'flex-end',
+  },
+  error: { ...interfaceType.caption, color: colors.negative },
 });

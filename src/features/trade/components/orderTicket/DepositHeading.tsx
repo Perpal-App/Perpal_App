@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
 /**
  * What the deposit form is, and why it is there.
@@ -21,6 +21,6 @@ export function DepositHeading() {
 
 const styles = StyleSheet.create({
   heading: { gap: spacing.xxs },
-  title: { ...typography.heading, color: colors.textPrimary },
-  note: { ...typography.caption, color: colors.textMuted },
+  title: { ...interfaceType.title, color: colors.textPrimary },
+  note: { ...interfaceType.caption, color: colors.textMuted },
 });

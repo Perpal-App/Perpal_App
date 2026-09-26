@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { ActionButton } from '@/components/ui/ActionButton';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
 /**
  * The ticket before the account has answered: placeholders while it loads, a retry if the read failed.
@@ -36,5 +36,5 @@ export function TicketBalanceState({
 
 const styles = StyleSheet.create({
   state: { minHeight: 180, justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
-  error: { ...typography.bodyCompact, color: colors.negative },
+  error: { ...interfaceType.body, color: colors.negative },
 });

@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { Button } from '@/components/ui/Button';
 import type { TradingSessionStatus } from '@/wallet/trading/TradingSessionProvider';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
 /** The ticket while the private trading wallet is not ready to sign: preparing, or needing attention. */
 export function PrivateTradingTicketState(props: {
@@ -43,6 +43,6 @@ function isPreparing(status: TradingSessionStatus): boolean {
 
 const styles = StyleSheet.create({
   state: { gap: spacing.sm, paddingVertical: spacing.xs },
-  title: { ...typography.heading, color: colors.textPrimary },
-  message: { ...typography.bodyCompact, color: colors.textSecondary },
+  title: { ...interfaceType.title, color: colors.textPrimary },
+  message: { ...interfaceType.body, color: colors.textSecondary },
 });

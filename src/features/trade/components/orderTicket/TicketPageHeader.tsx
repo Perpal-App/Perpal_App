@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, radii, typography } from '@/theme/tokens';
+import { colors, interfaceType, radii } from '@/theme/tokens';
 
 const BACK_SIZE = 36;
 const BACK_GLYPH = 18;
@@ -64,5 +64,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
   backDisabled: { opacity: 0.4 },
-  title: { ...typography.label, flex: 1, minWidth: 0, color: colors.textPrimary, textAlign: 'center' },
+  title: { ...interfaceType.headline, flex: 1, minWidth: 0, color: colors.textPrimary, textAlign: 'center' },
 });

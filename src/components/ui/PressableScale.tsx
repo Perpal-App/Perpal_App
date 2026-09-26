@@ -38,6 +38,13 @@ type PressableScaleProps = Omit<
   pressBeforeAction?: boolean;
   pressPeakDuration?: number;
   /**
+   * How far past rest the control springs back on release, as a share of the squash. The shape inverts on
+   * the way, taller and narrower where the squash was shorter and wider, which is the wobble that reads as
+   * gooey. Feedback only: `onPress` runs on release as usual, and nothing waits for the wobble to finish.
+   * 0 settles straight back to rest.
+   */
+  pressRebound?: number;
+  /**
    * Spring the press and its release run on. Defaults to the app's `motion.spring`, which is damped
    * enough to arrive without overshoot. Pass a slacker one — `motion.pressGooey` — where the control
    * should settle back through a bounce instead of stopping dead.
@@ -76,6 +83,16 @@ export const GOOEY_PRESS_EFFECT = {
   pressedTranslateY: 2,
 } as const;
 
+/**
+ * The gooey press for an action that opens something over the control: the same squash, then a spring back
+ * past rest. The action runs on release, not after the wobble, so what it opens starts opening at once.
+ */
+export const GOOEY_ACTION_EFFECT = {
+  ...GOOEY_PRESS_EFFECT,
+  pressBeforeAction: false,
+  pressRebound: 0.45,
+} as const;
+
 /** UI-thread press feedback shared by buttons and icon controls. */
 export function PressableScale({
   children,
@@ -88,6 +105,7 @@ export function PressableScale({
   pressedTranslateY = 0,
   pressBeforeAction = false,
   pressPeakDuration = 90,
+  pressRebound = 0,
   pressSpring = motion.spring,
   fadeIn = false,
   fadeDuration = motion.fade.duration,
@@ -99,6 +117,8 @@ export function PressableScale({
   const reduceMotion = useReducedMotion();
   const scale = useSharedValue(1);
   const pendingPress = useRef<GestureResponderEvent | null>(null);
+  /** A release's rebound is playing, which a late `onPressOut` must not flatten back to rest. */
+  const rebounding = useRef(false);
 
   const fades = fadeIn && !reduceMotion;
   // One value drives both the fade and the slide so they cannot drift apart.
@@ -127,13 +147,14 @@ export function PressableScale({
   }, [pressSpring, scale]);
 
   const handlePressIn = () => {
+    rebounding.current = false;
     if (!disabled && !reduceMotion && pendingPress.current === null) {
       scale.set(withSpring(pressedScale, pressSpring));
     }
   };
 
   const handlePressOut = () => {
-    if (pendingPress.current === null) settle();
+    if (pendingPress.current === null && !rebounding.current) settle();
   };
 
   const firePendingPress = useCallback(() => {
@@ -167,6 +188,23 @@ export function PressableScale({
         return;
       }
 
+      if (pressRebound > 0 && !reduceMotion) {
+        // Up past rest from wherever the squash has got to, then the gooey spring settles it. Started
+        // before the handler for the same reason as `settle` below, and the handler is not held for it.
+        rebounding.current = true;
+        scale.set(
+          withSequence(
+            withTiming(1 + (1 - pressedScale) * pressRebound, {
+              duration: motion.pressRebound.crestMs,
+              easing: Easing.out(Easing.quad),
+            }),
+            withSpring(1, pressSpring),
+          ),
+        );
+        onPress(event);
+        return;
+      }
+
       // Release the pressed state before running the handler: navigation can
       // freeze or unmount this screen before `onPressOut` is delivered, which
       // would otherwise leave the control stuck at its pressed scale.
@@ -179,6 +217,7 @@ export function PressableScale({
       pressBeforeAction,
       pressedScale,
       pressPeakDuration,
+      pressRebound,
       pressSpring,
       reduceMotion,
       scale,
@@ -188,14 +227,16 @@ export function PressableScale({
 
   const animatedStyle = useAnimatedStyle(() => {
     const scaleRange = 1 - pressedScale;
+    // A control that rebounds carries its shape past rest, inverted, instead of having the overshoot cut off.
+    const floor = pressRebound > 0 ? -1 : 0;
     const pressProgress = scaleRange === 0
       ? 0
-      : Math.max(0, Math.min(1, (1 - scale.value) / scaleRange));
+      : Math.max(floor, Math.min(1, (1 - scale.value) / scaleRange));
     const scaleX = 1 + ((pressedScaleX ?? pressedScale) - 1) * pressProgress;
     const scaleY = 1 + ((pressedScaleY ?? pressedScale) - 1) * pressProgress;
 
     return {
-      opacity: enter.value * (1 - (1 - pressedOpacity) * pressProgress),
+      opacity: enter.value * Math.min(1, 1 - (1 - pressedOpacity) * pressProgress),
       transform: [
         {
           translateY:

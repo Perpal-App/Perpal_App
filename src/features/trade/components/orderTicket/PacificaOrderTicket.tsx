@@ -1,11 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { LayoutAnimationConfig } from 'react-native-reanimated';
+import Animated, { FadeIn, LayoutAnimationConfig, useReducedMotion } from 'react-native-reanimated';
 
 import { AutoCloseIcon } from '@/assets/svg/AutoCloseIcon';
 import { Collapsible } from '@/components/motion/Collapsible';
 import { MorphView } from '@/components/motion/MorphView';
+import { usePushTransition } from '@/components/motion/usePushTransition';
 import { useRetainedValue } from '@/components/motion/useRetainedValue';
 import { useSheetScroll } from '@/components/ui/DraggableSheet';
 import { formatAmountWithCommas } from '@/domain/money/amount';
@@ -60,7 +61,7 @@ import type {
   PacificaMarginMode,
   PacificaOrderSide,
 } from '@/integrations/perps/pacifica/pacificaOrder';
-import { spacing } from '@/theme/tokens';
+import { motion, spacing } from '@/theme/tokens';
 
 /**
  * The order ticket: how much, at what leverage, with what exits — for a side already chosen.
@@ -103,6 +104,7 @@ export function PacificaOrderTicket(props: {
   const ticket = useOrderTicketDraft(props.market.maxLeverage);
   const { clearAfterOrder, draft, restart, setPreset } = ticket;
   const sheetScroll = useSheetScroll();
+  const reduceMotion = useReducedMotion();
   const marginMode: PacificaMarginMode = props.market.isolatedOnly ? 'isolated' : 'cross';
 
   const flow = usePacificaOrderFlow({
@@ -143,13 +145,22 @@ export function PacificaOrderTicket(props: {
 
   // The review is open from the moment it is asked for until the flow has nothing left to show. Memoised,
   // because the retained copy below is compared by identity.
+  //
+  // While the quote is priced it carries which exits the order has, so the review holds their rows from the
+  // start and does not grow when the quote lands.
+  const pendingTakeProfit = entryAmount(draft.takeProfit).length > 0;
+  const pendingStopLoss = entryAmount(draft.stopLoss).length > 0;
   const review = useMemo<ReviewContent | null>(() => {
-    if (phase === 'preparing') return { kind: 'loading' };
+    if (phase === 'preparing') {
+      return { autoClose: { stopLoss: pendingStopLoss, takeProfit: pendingTakeProfit }, kind: 'loading' };
+    }
     if (plan !== null) return { kind: 'order', plan };
     if (preparation !== null) return { kind: 'collateral', step: preparation };
     return null;
-  }, [phase, plan, preparation]);
+  }, [pendingStopLoss, pendingTakeProfit, phase, plan, preparation]);
   const shownReview = useRetainedValue(review);
+  // Pushed over the form and popped back off it, rather than faded in on top of it.
+  const push = usePushTransition(review !== null);
 
   if (session.status !== 'ready' || session.address === null || session.signer === null) {
     return (
@@ -216,14 +227,22 @@ export function PacificaOrderTicket(props: {
     // Two boxes, so the form can leave the accessibility tree without taking what covers it along. The
     // outer one has no layout of its own; the form is its only in-flow child, so a layer at `inset: 0` of it
     // is exactly the form's size.
-    <View style={styles.root}>
+    //
+    // The form fades up as a whole when it arrives, so taking over from the balance placeholder, which can
+    // still be showing while the sheet rises, is a fade rather than a swap.
+    <Animated.View
+      {...(reduceMotion ? null : { entering: FadeIn.duration(motion.rowSwap.fadeMs) })}
+      style={styles.root}
+    >
       {/* Nothing plays on the first paint: the ticket arrives inside a sheet that is itself arriving, and
           sections fading in behind that would read as the form loading in pieces. */}
       <LayoutAnimationConfig skipEntering skipExiting>
-        <View
+        {/* Takes no touches while covered, including the strip a page sliding in has not reached yet. */}
+        <Animated.View
           accessibilityElementsHidden={covered}
           importantForAccessibility={covered ? 'no-hide-descendants' : 'auto'}
-          style={styles.form}
+          pointerEvents={covered ? 'none' : 'auto'}
+          style={[styles.form, push.behindStyle]}
         >
           <MorphView style={[styles.top, editor === 'leverage' && styles.grow]}>
             {deposit ? <DepositHeading /> : null}
@@ -340,10 +359,10 @@ export function PacificaOrderTicket(props: {
               )}
             </MorphView>
           </MorphView>
-        </View>
+        </Animated.View>
       </LayoutAnimationConfig>
 
-      <TicketPage visible={review !== null}>
+      <TicketPage transition={push}>
         {shownReview === null ? null : (
           <ReviewPage
             baseAsset={props.market.baseAsset}
@@ -368,7 +387,7 @@ export function PacificaOrderTicket(props: {
         }}
         placed={placed}
       />
-    </View>
+    </Animated.View>
   );
 }
 

@@ -6,7 +6,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { orderPlacedCopy } from '@/features/trade/components/PacificaOrderTicketFormatting';
 import { PlacedCheckmark } from '@/features/trade/components/orderTicket/PlacedCheckmark';
 import type { PacificaOrderPlaced } from '@/features/trade/hooks/usePacificaOrderFlow';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, radii, spacing } from '@/theme/tokens';
 
 /**
  * How long the confirmation stays before it leaves on its own.
@@ -100,8 +100,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   body: { alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm },
-  headline: { ...typography.heading, color: colors.textPrimary, textAlign: 'center' },
-  detail: { ...typography.bodyCompact, color: colors.textSecondary, textAlign: 'center' },
+  headline: { ...interfaceType.title, color: colors.textPrimary, textAlign: 'center' },
+  detail: { ...interfaceType.body, color: colors.textSecondary, textAlign: 'center' },
   // Quiet by construction: the order is already at the venue, so this is an acknowledgement, not an
   // action, and it does not take the accent a live control would.
   // Pill-shaped, like every other action at the foot of the ticket.
@@ -116,5 +116,5 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     backgroundColor: colors.surfaceElevated,
   },
-  closeLabel: { ...typography.label, color: colors.textPrimary },
+  closeLabel: { ...interfaceType.control, color: colors.textPrimary },
 });

@@ -114,6 +114,15 @@ export function pnlFigure(pnl: bigint): PnlFigure {
   };
 }
 
+/**
+ * An estimate with its sign: `+$91.50`, `−$3.07`, `$0.00`. The loss sign is a true minus rather than a
+ * hyphen, so it is the width of the plus and sits on the figures' centre line; a flat figure has neither.
+ */
+export function signedDollars(figure: PnlFigure): string {
+  if (figure.direction === 'flat') return figure.dollars;
+  return `${figure.direction === 'gain' ? '+' : '\u2212'}${figure.dollars}`;
+}
+
 /** An estimate in words, for a screen reader: `estimated profit $91.50`. */
 export function spokenPnl(figure: PnlFigure): string {
   if (figure.direction === 'flat') return `estimated ${figure.dollars}`;

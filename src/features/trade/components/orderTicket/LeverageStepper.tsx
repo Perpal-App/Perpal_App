@@ -13,7 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, gradients, motion, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, interfaceType, motion, radii, spacing } from '@/theme/tokens';
 
 const STEP_SIZE = 48;
 const STEP_GLYPH = 20;
@@ -140,6 +140,6 @@ const styles = StyleSheet.create({
   // `flex: 1` holds the steppers at the edges whatever width the number takes, so `9×` to `10×` never
   // moves the controls either side of it.
   figure: { flex: 1, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 2 },
-  figureValue: { ...typography.display, color: colors.textPrimary },
-  figureUnit: { ...typography.title, color: colors.textMuted },
+  figureValue: { ...interfaceType.amountLarge, color: colors.textPrimary },
+  figureUnit: { ...interfaceType.amountUnit, color: colors.textMuted },
 });

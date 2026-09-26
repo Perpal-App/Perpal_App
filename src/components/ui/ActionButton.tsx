@@ -1,7 +1,7 @@
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
 import { IOSLoader } from '@/components/feedback/IOSLoader';
-import { PressableScale } from '@/components/ui/PressableScale';
+import { GOOEY_ACTION_EFFECT, PressableScale } from '@/components/ui/PressableScale';
 import { RaisedMaterial } from '@/components/ui/RaisedMaterial';
 import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
 
@@ -84,7 +84,9 @@ export function ActionButton({
   accessibilityHint,
   disabled = false,
   glow = false,
+  gooey = false,
   label,
+  labelStyle,
   loading = false,
   onPress,
   radius,
@@ -111,7 +113,17 @@ export function ActionButton({
    * black, which is the contact shadow this replaced.
    */
   readonly glow?: boolean;
+  /**
+   * The gooey press: the button squashes, then springs back past rest into a wobble on release. `onPress`
+   * still runs on release, so what the button opens starts opening at once while the wobble plays.
+   */
+  readonly gooey?: boolean;
   readonly label: string;
+  /**
+   * The label's face and size, for a surface set in its own type scale — the order ticket's interface
+   * type. The tone still decides the colour.
+   */
+  readonly labelStyle?: StyleProp<TextStyle>;
   /** Swaps the label for a spinner and blocks the press, for an action already in flight. */
   readonly loading?: boolean;
   readonly onPress: () => void;
@@ -154,9 +166,10 @@ export function ActionButton({
         : { busy: loading, checked: selected, disabled: unavailable }}
       disabled={unavailable}
       onPress={onPress}
-      // Shallower than the app's default press. These sit in pairs, and at 4% the gap between two
-      // buttons visibly opens when either one is held.
-      pressedScale={0.98}
+      // Otherwise shallower than the app's default press. These sit in pairs, and at 4% the gap between
+      // two buttons visibly opens when either one is held. The gooey squash widens rather than shrinks,
+      // so it closes that gap a little instead.
+      {...(gooey ? GOOEY_ACTION_EFFECT : { pressedScale: 0.98 })}
       style={[
         styles.button,
         large && styles.buttonLarge,
@@ -209,7 +222,7 @@ export function ActionButton({
           <Text
             maxFontSizeMultiplier={MAX_TEXT_SCALE}
             numberOfLines={1}
-            style={[large ? styles.labelLarge : styles.label, { color: material.label }]}
+            style={[large ? styles.labelLarge : styles.label, labelStyle, { color: material.label }]}
           >
             {label}
           </Text>

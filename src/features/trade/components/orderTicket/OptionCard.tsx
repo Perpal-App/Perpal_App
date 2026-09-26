@@ -11,7 +11,7 @@ import Animated, {
 
 import { MorphView } from '@/components/motion/MorphView';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, gradients, motion, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, interfaceType, motion, radii, spacing } from '@/theme/tokens';
 
 /** What the card hands its glyph, so every option's mark is drawn at one size and in one ink. */
 export type OptionGlyph = { readonly color: string; readonly size: number };
@@ -181,9 +181,9 @@ const styles = StyleSheet.create({
   },
   // `flex: 1` so the copy owns the leftover width and the value sits hard against the chevron.
   copy: { flex: 1, minWidth: 0, gap: 1 },
-  title: { ...typography.rowLabel, color: colors.textPrimary },
-  subtitle: { ...typography.caption, color: colors.textMuted },
-  value: { ...typography.label, flexShrink: 0, color: colors.textPrimary },
+  title: { ...interfaceType.rowTitle, color: colors.textPrimary },
+  subtitle: { ...interfaceType.caption, color: colors.textMuted },
+  value: { ...interfaceType.figure, flexShrink: 0, color: colors.textPrimary },
   drawnValue: { flexShrink: 0 },
   body: { gap: spacing.md, paddingHorizontal: spacing.md, paddingBottom: spacing.md },
   bodyFill: { flexGrow: 1, justifyContent: 'center' },

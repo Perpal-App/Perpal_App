@@ -8,7 +8,7 @@ import { TicketChips, type ChipOption } from '@/features/trade/components/orderT
 import { TicketFigure } from '@/features/trade/components/orderTicket/TicketFigure';
 import type { TicketTone } from '@/features/trade/components/orderTicket/ticketTone';
 import type { PacificaMarginMode } from '@/integrations/perps/pacifica/pacificaOrder';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
 /** Round figures below the market's ceiling, offered as one-tap picks alongside the ceiling itself. */
 const ROUND_PICKS = [2, 5, 10] as const;
@@ -73,5 +73,5 @@ function leveragePicks(max: number): readonly ChipOption[] {
 const styles = StyleSheet.create({
   editor: { gap: spacing.md },
   figures: { gap: spacing.xxs },
-  note: { ...typography.caption, color: colors.textMuted },
+  note: { ...interfaceType.caption, color: colors.textMuted },
 });

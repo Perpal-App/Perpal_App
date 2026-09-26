@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { useRetainedValue } from '@/components/motion/useRetainedValue';
 import { ActionButton } from '@/components/ui/ActionButton';
 import { DraggableSheet } from '@/components/ui/DraggableSheet';
 import { ProgressiveBlur } from '@/components/ui/ProgressiveBlur';
@@ -73,6 +74,9 @@ export function OrderActionBar({
   const router = useRouter();
   const moving = usePageMoving();
   const [side, setSide] = useState<PacificaOrderSide | null>(null);
+  // The side the ticket was opened for, kept after it is closed so the ticket is still in the sheet while
+  // the sheet slides away. Dropping it with `side` emptied the sheet on the first frame of every close.
+  const shownSide = useRetainedValue(side);
   // Set on first render, so it is the moment the bar appeared rather than the moment the screen
   // mounted. See `ARM_DELAY_MS`.
   const armedAt = useRef(Date.now() + ARM_DELAY_MS);
@@ -132,6 +136,7 @@ export function OrderActionBar({
           accessibilityHint="Opens the order ticket on this side"
           disabled={!tradable}
           glow
+          gooey
           label="Buy / Long"
           onPress={() => open('long')}
           radius={radii.md}
@@ -143,6 +148,7 @@ export function OrderActionBar({
           accessibilityHint="Opens the order ticket on this side"
           disabled={!tradable}
           glow
+          gooey
           label="Sell / Short"
           onPress={() => open('short')}
           radius={radii.md}
@@ -179,15 +185,18 @@ export function OrderActionBar({
         title={`${market.baseAsset}-USD`}
         visible={side !== null && tradable}
       >
-        {side !== null && snapshot !== null && config.ok ? (
+        {/* Keyed by side, so opening the other side is always a fresh ticket — never this one with its
+            side swapped under a plan priced for the first. The sheet unmounts it once it has gone. */}
+        {shownSide !== null && snapshot !== null && config.ok ? (
           <PacificaOrderTicket
+            key={shownSide}
             apiOrigin={config.value.perps.pacificaApiOrigin}
             centralState={config.value.perps.pacificaCentralState}
             market={market}
             onRequestFunding={requestFunding}
             programId={config.value.perps.pacificaProgramId}
             rpcUrl={config.value.api.rpcUrl}
-            side={side}
+            side={shownSide}
             snapshot={snapshot}
             usdcMint={config.value.perps.usdcMint}
             vault={config.value.perps.pacificaVault}

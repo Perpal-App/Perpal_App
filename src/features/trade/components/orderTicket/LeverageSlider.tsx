@@ -11,7 +11,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { TICKET_TONES, type TicketTone } from '@/features/trade/components/orderTicket/ticketTone';
-import { colors, motion, radii, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, motion, radii, spacing } from '@/theme/tokens';
 
 const THUMB = 24;
 const RAIL_HEIGHT = 4;
@@ -200,5 +200,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
   bounds: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: spacing.xxs },
-  bound: { ...typography.caption, color: colors.textMuted },
+  bound: { ...interfaceType.figureCaption, color: colors.textMuted },
 });

@@ -143,6 +143,7 @@ export const radii = {
  * path; both resolve to the same objects.
  */
 export { fonts, typography, type FontFace } from './fonts';
+export { interfaceType } from './interfaceType';
 
 /**
  * Full-screen onboarding gradients.

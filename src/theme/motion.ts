@@ -27,6 +27,13 @@ export const motion = {
     stiffness: 280,
     mass: 0.5,
   },
+  /**
+   * The rebound after a gooey press: how long the control takes to spring back past rest to its crest,
+   * before the gooey spring settles it. Feedback only — the action has already run on release.
+   */
+  pressRebound: {
+    crestMs: 140,
+  },
   /** Cross-fade reveal: opacity only, no delay and no movement. */
   fade: {
     duration: 420,
@@ -201,6 +208,33 @@ export const motion = {
   sheetDismiss: {
     duration: 240,
     dampingRatio: 1,
+  },
+  /**
+   * The order ticket's sheet sliding up into place and back down off the screen.
+   *
+   * A plain slide on the curve iOS gives its own sheets: quick off the mark, then a long, soft deceleration,
+   * with no overshoot, so the frame it lands on is the frame it stops. Timed rather than sprung, so it ends
+   * exactly when it says and nothing waits on a spring's tail, either before the sheet can be used or, on
+   * the way out, before it is gone. Leaving is quicker than arriving.
+   */
+  sheetSlide: {
+    arriveMs: 340,
+    leaveMs: 260,
+    curve: [0.32, 0.72, 0, 1],
+  },
+  /**
+   * A page pushed over another inside a sheet, and popped back off it: the order review over the ticket.
+   *
+   * A navigation push rather than a fade. The incoming page is opaque and slides in from the trailing edge
+   * while the page it covers is carried `parallax` of the way the other way and dims out, so two pages'
+   * contents are never drawn over each other — which is what a cross-fade between them did.
+   *
+   * A spring, so Back taken mid-push turns the page around from where it is, with its velocity, instead of
+   * waiting for it to land. Critically damped: it lands once and does not bounce.
+   */
+  push: {
+    spring: { duration: 360, dampingRatio: 1 },
+    parallax: 0.3,
   },
   /**
    * How a row arrives when a filter swaps the set under it.

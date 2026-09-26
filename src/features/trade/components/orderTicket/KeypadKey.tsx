@@ -9,7 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import type { KeypadKey as Key } from '@/features/trade/components/orderTicket/keypadEntry';
-import { colors, motion, typography } from '@/theme/tokens';
+import { colors, interfaceType, motion } from '@/theme/tokens';
 
 /**
  * The press disc. Fixed rather than following the row, which can be anything from its 48pt floor to its
@@ -100,5 +100,5 @@ const styles = StyleSheet.create({
     borderRadius: HALO / 2,
     backgroundColor: colors.border,
   },
-  digit: { ...typography.keypad, color: colors.textPrimary },
+  digit: { ...interfaceType.keypad, color: colors.textPrimary },
 });

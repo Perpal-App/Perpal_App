@@ -10,7 +10,7 @@ import {
   tradeCollateralStepCanSubmit,
   type TradeCollateralStep,
 } from '@/integrations/perps/tradeCollateral';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
 /**
  * A collateral step on its review: the transfer that has to land in Pacifica before the order can be
@@ -45,7 +45,7 @@ export function CollateralStepSummary({
 
 const styles = StyleSheet.create({
   summary: { gap: spacing.sm },
-  lead: { ...typography.caption, color: colors.textMuted },
+  lead: { ...interfaceType.caption, color: colors.textMuted },
   panel: { gap: spacing.xxs, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
-  blocked: { ...typography.bodyCompact, color: colors.textSecondary },
+  blocked: { ...interfaceType.body, color: colors.textSecondary },
 });

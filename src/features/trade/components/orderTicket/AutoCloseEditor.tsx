@@ -15,7 +15,7 @@ import {
   triggerSideOfMark,
   type PacificaOrderSide,
 } from '@/integrations/perps/pacifica/pacificaOrderValidation';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
 /** Take profit in the gain colour and stop loss in the loss colour, whatever side the ticket is on. */
 const FIELDS: readonly {
@@ -24,8 +24,8 @@ const FIELDS: readonly {
   readonly spoken: string;
   readonly tone: 'negative' | 'positive';
 }[] = [
-  { kind: 'take-profit', label: 'TAKE PROFIT', spoken: 'Take profit price', tone: 'positive' },
-  { kind: 'stop-loss', label: 'STOP LOSS', spoken: 'Stop loss price', tone: 'negative' },
+  { kind: 'take-profit', label: 'Take profit', spoken: 'Take profit price', tone: 'positive' },
+  { kind: 'stop-loss', label: 'Stop loss', spoken: 'Stop loss price', tone: 'negative' },
 ];
 
 /**
@@ -108,9 +108,11 @@ const styles = StyleSheet.create({
   // Tighter than the card's own rhythm: the fields carry their estimate under the price, and this keeps the
   // open card short enough that the keypad and Done stay in view on a 6.1-inch phone.
   editor: { gap: spacing.xs },
-  // Top-aligned, so an error under one field grows its own column without dragging the other down.
-  fields: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs },
+  // Top-aligned, so an error under one field grows its own column without dragging the other down. The top
+  // padding is the room the estimate badges ride up into, across each field's top edge, so they stay clear
+  // of the card's header.
+  fields: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs, paddingTop: spacing.xs },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  note: { ...typography.caption, flexShrink: 1, color: colors.textMuted },
-  clear: { ...typography.label, color: colors.accentSoft },
+  note: { ...interfaceType.caption, flexShrink: 1, color: colors.textMuted },
+  clear: { ...interfaceType.control, color: colors.accentSoft },
 });

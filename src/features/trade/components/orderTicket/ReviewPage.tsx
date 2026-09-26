@@ -1,9 +1,13 @@
 import { StyleSheet, Text, View } from 'react-native';
 
+import { MorphView } from '@/components/motion/MorphView';
 import { StatusRowSkeleton } from '@/components/ui/StatusRow';
 import { confirmCollateralStep } from '@/features/trade/components/orderTicket/collateralStepCopy';
 import { CollateralStepSummary } from '@/features/trade/components/orderTicket/CollateralStepSummary';
-import { PreparedOrderSummary } from '@/features/trade/components/orderTicket/PreparedOrderSummary';
+import {
+  PreparedOrderSummary,
+  type PendingAutoClose,
+} from '@/features/trade/components/orderTicket/PreparedOrderSummary';
 import { TicketActionButton } from '@/features/trade/components/orderTicket/TicketActionButton';
 import { TicketPageLayout } from '@/features/trade/components/orderTicket/TicketPageLayout';
 import { TicketPanel } from '@/features/trade/components/orderTicket/TicketPanel';
@@ -13,15 +17,20 @@ import {
   tradeCollateralStepCanSubmit,
   type TradeCollateralStep,
 } from '@/integrations/perps/tradeCollateral';
-import { colors, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
-/** What the review is showing: a quote on its way, the order it produced, or a transfer that must come first. */
+/**
+ * What the review is showing: a quote on its way, the order it produced, or a transfer that must come first.
+ *
+ * A quote on its way says which auto-close rows the order will carry, so its placeholders are the order's
+ * own shape.
+ */
 export type ReviewContent =
-  | { readonly kind: 'loading' }
+  | { readonly autoClose: PendingAutoClose; readonly kind: 'loading' }
   | { readonly kind: 'order'; readonly plan: PacificaOrderPlan }
   | { readonly kind: 'collateral'; readonly step: TradeCollateralStep };
 
-/** Widths for the loading rows, varied so a column of placeholders does not read as a grid. */
+/** Widths for the deposit's loading rows, varied so a column of placeholders does not read as a grid. */
 const SKELETON_ROWS = [
   ['28%', '34%'],
   ['22%', '40%'],
@@ -33,9 +42,10 @@ const SKELETON_ROWS = [
 /**
  * The review: the one place a trade or a deposit is read in full before anything is signed.
  *
- * It opens the moment review is asked for, with placeholder rows while the quote is built, rather than
- * leaving the reader looking at a spinner on a button. Every figure comes off the prepared object, never
- * off the form, so what is read here is what is signed.
+ * It opens the moment review is asked for, rather than leaving the reader looking at a spinner on a button.
+ * A trade's review has its final rows from the start, with placeholders for the figures while the quote is
+ * built, so when the quote lands the figures fade up in place and the page does not change shape. Every
+ * figure comes off the prepared object, never off the form, so what is read here is what is signed.
  *
  * A quote is short-lived. When it expires the action becomes `Refresh quote` — a fresh quote at the
  * current mark, reviewed again — instead of a confirmation certain to be refused. Signing still checks
@@ -79,21 +89,30 @@ export function ReviewPage({
               This quote expired. Refresh it to price the {deposit ? 'deposit' : 'order'} again.
             </Text>
           ) : null}
-          <ReviewAction
-            content={content}
-            deposit={deposit}
-            expired={expired}
-            onConfirmOrder={onConfirmOrder}
-            onConfirmStep={onConfirmStep}
-            onRefresh={onRefresh}
-            submitting={submitting}
-          />
+          {/* Keyed by what it offers, so a change of action fades the new one up in place rather than
+              switching its colour and label under the finger. */}
+          <MorphView fadeIn key={`${content.kind}-${expired ? 'expired' : 'live'}`}>
+            <ReviewAction
+              content={content}
+              deposit={deposit}
+              expired={expired}
+              onConfirmOrder={onConfirmOrder}
+              onConfirmStep={onConfirmStep}
+              onRefresh={onRefresh}
+              submitting={submitting}
+            />
+          </MorphView>
         </>
       )}
       onBack={onBack}
       title={title(content, deposit)}
     >
-      {content.kind === 'loading' ? (
+      {content.kind === 'collateral' ? (
+        // A different page from the one that was loading, so it fades in rather than appearing.
+        <MorphView fadeIn>
+          <CollateralStepSummary deposit={deposit} step={content.step} />
+        </MorphView>
+      ) : deposit && content.kind === 'loading' ? (
         <View accessibilityLabel="Preparing quote" accessible>
           <TicketPanel style={styles.loading}>
             {SKELETON_ROWS.map(([label, value], index) => (
@@ -101,10 +120,12 @@ export function ReviewPage({
             ))}
           </TicketPanel>
         </View>
-      ) : content.kind === 'order' ? (
-        <PreparedOrderSummary baseAsset={baseAsset} plan={content.plan} />
       ) : (
-        <CollateralStepSummary deposit={deposit} step={content.step} />
+        <PreparedOrderSummary
+          baseAsset={baseAsset}
+          pending={content.kind === 'loading' ? content.autoClose : null}
+          plan={content.kind === 'order' ? content.plan : null}
+        />
       )}
     </TicketPageLayout>
   );
@@ -158,5 +179,5 @@ const noop = () => undefined;
 
 const styles = StyleSheet.create({
   loading: { gap: spacing.sm, paddingVertical: spacing.md, paddingHorizontal: spacing.md },
-  expired: { ...typography.caption, color: colors.textSecondary, textAlign: 'center' },
+  expired: { ...interfaceType.caption, color: colors.textSecondary, textAlign: 'center' },
 });

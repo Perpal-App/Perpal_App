@@ -12,7 +12,7 @@ import Animated, {
 
 import { PressableScale } from '@/components/ui/PressableScale';
 import { TICKET_TONES, type TicketTone } from '@/features/trade/components/orderTicket/ticketTone';
-import { colors, gradients, motion, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, interfaceType, motion, radii, spacing } from '@/theme/tokens';
 
 const CHIP_HEIGHT = 36;
 const GAP = spacing.xs;
@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
   // sit on their own chip.
   labels: { position: 'absolute', inset: 0, flexDirection: 'row', gap: GAP },
   cell: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
-  label: { ...typography.caption, color: colors.textPrimary, textAlign: 'center' },
+  label: { ...interfaceType.chip, color: colors.textPrimary, textAlign: 'center' },
   // Exactly over the plain copy: same face, same box.
   tint: { position: 'absolute', top: 0, left: 0, right: 0 },
 });
