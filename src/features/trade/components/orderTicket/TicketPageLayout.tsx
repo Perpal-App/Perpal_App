@@ -5,11 +5,12 @@ import { TicketPageHeader } from '@/features/trade/components/orderTicket/Ticket
 import { spacing } from '@/theme/tokens';
 
 /**
- * A ticket page's arrangement: the header and body from the top, the footer from the bottom.
+ * A ticket page's arrangement — today, the review's: the header and body at their own height, the footer
+ * taking the rest.
  *
- * The footer is where each page keeps its action, and it sits at the bottom edge for the same reason the
- * form's keypad does — it is reached for with a thumb. `space-between` rather than a spacer view, so when
- * the page is taller than the screen the two groups simply stack and the sheet scrolls.
+ * The footer is where the page keeps its action, at the bottom edge for the same reason the form's is — it
+ * is reached for with a thumb. It grows and sits its content at the end, rather than being pushed down by
+ * `space-between`, so anything in it that can use spare height is free to take it.
  */
 export function TicketPageLayout({
   accessory,
@@ -43,7 +44,7 @@ export function TicketPageLayout({
 }
 
 const styles = StyleSheet.create({
-  layout: { flex: 1, justifyContent: 'space-between', gap: spacing.lg },
+  layout: { flex: 1, gap: spacing.lg },
   top: { gap: spacing.md },
-  bottom: { gap: spacing.sm },
+  bottom: { flexGrow: 1, justifyContent: 'flex-end', gap: spacing.sm },
 });

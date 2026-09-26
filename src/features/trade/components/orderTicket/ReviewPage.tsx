@@ -1,10 +1,10 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { ActionButton } from '@/components/ui/ActionButton';
 import { StatusRowSkeleton } from '@/components/ui/StatusRow';
 import { confirmCollateralStep } from '@/features/trade/components/orderTicket/collateralStepCopy';
 import { CollateralStepSummary } from '@/features/trade/components/orderTicket/CollateralStepSummary';
 import { PreparedOrderSummary } from '@/features/trade/components/orderTicket/PreparedOrderSummary';
+import { TicketActionButton } from '@/features/trade/components/orderTicket/TicketActionButton';
 import { TicketPageLayout } from '@/features/trade/components/orderTicket/TicketPageLayout';
 import { TicketPanel } from '@/features/trade/components/orderTicket/TicketPanel';
 import { useQuoteExpiry } from '@/features/trade/hooks/useQuoteExpiry';
@@ -121,30 +121,28 @@ function ReviewAction(props: {
 }) {
   const { content } = props;
   if (content.kind === 'loading') {
-    return <ActionButton disabled label="Preparing quote" loading onPress={noop} size="large" tone="neutral" />;
+    return <TicketActionButton disabled label="Preparing quote" loading onPress={noop} tone="neutral" />;
   }
   if (props.expired) {
-    return <ActionButton label="Refresh quote" onPress={props.onRefresh} size="large" tone="neutral" />;
+    return <TicketActionButton label="Refresh quote" onPress={props.onRefresh} tone="neutral" />;
   }
   if (content.kind === 'order') {
     return (
-      <ActionButton
+      <TicketActionButton
         label={`Confirm ${content.plan.side}`}
         loading={props.submitting}
         onPress={props.onConfirmOrder}
-        size="large"
         tone={content.plan.side === 'long' ? 'positive' : 'negative'}
       />
     );
   }
   const { step } = content;
   return (
-    <ActionButton
+    <TicketActionButton
       disabled={!tradeCollateralStepCanSubmit(step)}
       label={props.deposit ? 'Confirm deposit' : 'Move collateral'}
       loading={props.submitting}
       onPress={() => confirmCollateralStep(step, props.onConfirmStep)}
-      size="large"
       tone="accent"
     />
   );

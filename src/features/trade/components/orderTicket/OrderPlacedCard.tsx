@@ -104,6 +104,7 @@ const styles = StyleSheet.create({
   detail: { ...typography.bodyCompact, color: colors.textSecondary, textAlign: 'center' },
   // Quiet by construction: the order is already at the venue, so this is an acknowledgement, not an
   // action, and it does not take the accent a live control would.
+  // Pill-shaped, like every other action at the foot of the ticket.
   close: {
     minHeight: 44,
     minWidth: 132,
@@ -112,7 +113,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     borderWidth: 1,
     borderColor: colors.borderStrong,
-    borderRadius: radii.sm,
+    borderRadius: radii.pill,
     backgroundColor: colors.surfaceElevated,
   },
   closeLabel: { ...typography.label, color: colors.textPrimary },

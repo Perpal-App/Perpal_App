@@ -12,11 +12,11 @@ import type { KeypadKey as Key } from '@/features/trade/components/orderTicket/k
 import { colors, motion, typography } from '@/theme/tokens';
 
 /**
- * Row height, and the touch target: the whole cell answers, not just the glyph. The app's 48pt minimum,
- * and no more — four rows of it are most of the ticket's height budget.
+ * The press disc. Fixed rather than following the row, which can be anything from its 48pt floor to its
+ * ceiling: a disc that grew with the row would read as a different key on every phone. On the shortest
+ * rows it reaches a hair past the key's edge, which is fine for something only drawn under a finger.
  */
-const KEY_HEIGHT = 48;
-const HALO = 44;
+const HALO = 54;
 const DELETE_GLYPH = 24;
 /** Holding delete clears the figure. Long enough that a slow single tap never reaches it. */
 const CLEAR_DELAY_MS = 450;
@@ -88,9 +88,11 @@ export function KeypadKey({
 }
 
 const styles = StyleSheet.create({
-  key: { flex: 1, height: KEY_HEIGHT, alignItems: 'center', justifyContent: 'center' },
+  // Its width from the column and its height from the row, so the whole cell is the touch target at any
+  // size the keypad has been given. The height is `AmountKeypad`'s decision, not the key's.
+  key: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   // A fixed square for the glyph and its disc, so the disc is a circle centred on the glyph whatever
-  // width the column gives the key.
+  // size the cell comes out.
   face: { width: HALO, height: HALO, alignItems: 'center', justifyContent: 'center' },
   halo: {
     position: 'absolute',

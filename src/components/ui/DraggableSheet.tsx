@@ -66,9 +66,9 @@ const CLOSE_GLYPH = 18;
  * What the sheet lends its content: a way back to the top of its own scroll.
  *
  * For content that changes what it is showing without changing where it is mounted — the order
- * ticket covering its form with a leverage or auto-close page. That page draws from the top of the
- * body, and a reader who had scrolled down to the row that opened it would otherwise land on the
- * middle of the new page with its header above the fold. The scroll view is the sheet's, so the sheet
+ * ticket covering its form with its review. That review draws from the top of the body, and a reader
+ * who had scrolled down to the action that opened it would otherwise land on the middle of the
+ * review with its header above the fold. The scroll view is the sheet's, so the sheet
  * is what offers to move it; nothing outside gets a ref to it.
  */
 type SheetScroll = { readonly scrollToTop: () => void };

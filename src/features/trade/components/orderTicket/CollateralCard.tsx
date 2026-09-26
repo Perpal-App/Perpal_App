@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { UsdcMark } from '@/assets/svg/UsdcMark';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -38,6 +38,7 @@ export function CollateralCard({
   available,
   entry,
   label,
+  onPress,
   over,
   rejectSignal,
 }: {
@@ -45,53 +46,69 @@ export function CollateralCard({
   readonly available: string;
   readonly entry: string;
   readonly label: keyof typeof EXPLANATIONS;
+  /**
+   * Makes the whole card a way back to the amount, for while an option has the keypad. Always wrapped, and
+   * only enabled when given, so the card is never remounted — and its figure never replayed — as options
+   * open and close around it.
+   */
+  readonly onPress?: (() => void) | undefined;
   /** The entry is more than is available. */
   readonly over: boolean;
   readonly rejectSignal: number;
 }) {
   const amount = entry.length === 0 ? '0' : entryText(entry);
+  const pressable = onPress !== undefined;
 
   return (
-    <TicketPanel style={styles.card}>
-      <View style={styles.head}>
-        <Text style={styles.eyebrow}>{label.toUpperCase()}</Text>
-        <PressableScale
-          accessibilityHint="Explains this amount"
-          accessibilityLabel={`About ${label.toLowerCase()}`}
-          accessibilityRole="button"
-          hitSlop={INFO_HIT_SLOP}
-          onPress={() => showAppToast({ message: EXPLANATIONS[label], outcome: 'info' })}
-        >
-          <Ionicons color={colors.textMuted} name="information-circle" size={INFO_GLYPH} />
-        </PressableScale>
-      </View>
-
-      <View style={styles.amountRow}>
-        <KeypadAmount
-          accessibilityLabel={`${label} amount, ${entry.length === 0 ? 'none entered' : `$${amount}`}`}
-          entry={entry}
-          rejectSignal={rejectSignal}
-          size="hero"
-        />
-        {/* Decorative: the amount line under it already says the token in words. */}
-        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.token}>
-          <UsdcMark size={TOKEN_MARK} />
-          <Text style={styles.tokenLabel}>USDC</Text>
+    <Pressable
+      accessibilityHint={pressable ? 'Returns the keypad to this amount' : undefined}
+      accessibilityLabel={pressable ? `Edit ${label.toLowerCase()}, $${amount}` : undefined}
+      accessibilityRole={pressable ? 'button' : undefined}
+      accessible={pressable}
+      disabled={!pressable}
+      onPress={onPress}
+    >
+      <TicketPanel style={styles.card}>
+        <View style={styles.head}>
+          <Text style={styles.eyebrow}>{label.toUpperCase()}</Text>
+          <PressableScale
+            accessibilityHint="Explains this amount"
+            accessibilityLabel={`About ${label.toLowerCase()}`}
+            accessibilityRole="button"
+            hitSlop={INFO_HIT_SLOP}
+            onPress={() => showAppToast({ message: EXPLANATIONS[label], outcome: 'info' })}
+          >
+            <Ionicons color={colors.textMuted} name="information-circle" size={INFO_GLYPH} />
+          </PressableScale>
         </View>
-      </View>
 
-      <View style={styles.foot}>
-        <Text numberOfLines={1} style={styles.caption}>{`${amount} USDC`}</Text>
-        <Text
-          accessibilityLabel={`Available balance ${available}`}
-          numberOfLines={1}
-          style={[styles.caption, styles.available]}
-        >
-          {'Available balance: '}
-          <Text style={[styles.balance, over && styles.balanceOver]}>{available}</Text>
-        </Text>
-      </View>
-    </TicketPanel>
+        <View style={styles.amountRow}>
+          <KeypadAmount
+            accessibilityLabel={`${label} amount, ${entry.length === 0 ? 'none entered' : `$${amount}`}`}
+            entry={entry}
+            rejectSignal={rejectSignal}
+            size="hero"
+          />
+          {/* Decorative: the amount line under it already says the token in words. */}
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.token}>
+            <UsdcMark size={TOKEN_MARK} />
+            <Text style={styles.tokenLabel}>USDC</Text>
+          </View>
+        </View>
+
+        <View style={styles.foot}>
+          <Text numberOfLines={1} style={styles.caption}>{`${amount} USDC`}</Text>
+          <Text
+            accessibilityLabel={`Available balance ${available}`}
+            numberOfLines={1}
+            style={[styles.caption, styles.available]}
+          >
+            {'Available balance: '}
+            <Text style={[styles.balance, over && styles.balanceOver]}>{available}</Text>
+          </Text>
+        </View>
+      </TicketPanel>
+    </Pressable>
   );
 }
 

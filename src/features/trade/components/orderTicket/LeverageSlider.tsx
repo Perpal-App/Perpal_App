@@ -10,6 +10,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 
+import { TICKET_TONES, type TicketTone } from '@/features/trade/components/orderTicket/ticketTone';
 import { colors, motion, radii, spacing, typography } from '@/theme/tokens';
 
 const THUMB = 24;
@@ -37,18 +38,23 @@ const TAP_MAX_DURATION = 600;
  * without the thumb stuttering from one to the next.
  *
  * Only transform runs per frame, on the UI thread. The JS side hears about a step at most once per step.
+ *
+ * The filled track and the thumb's rim take the ticket's tone, like every other selection on it.
  */
 export function LeverageSlider({
   max,
   min,
   onChange,
+  tone,
   value,
 }: {
   readonly max: number;
   readonly min: number;
   readonly onChange: (next: number) => void;
+  readonly tone: TicketTone;
   readonly value: number;
 }) {
+  const ink = TICKET_TONES[tone];
   const reduceMotion = useReducedMotion();
   const span = Math.max(max - min, 1);
   const travel = useSharedValue(0);
@@ -153,9 +159,9 @@ export function LeverageSlider({
         >
           <View onLayout={(event) => travel.set(event.nativeEvent.layout.width)} style={styles.track}>
             <View style={styles.railBase}>
-              <Animated.View style={[styles.railFill, fillStyle]} />
+              <Animated.View style={[styles.railFill, { backgroundColor: ink.rim }, fillStyle]} />
             </View>
-            <Animated.View style={[styles.thumb, thumbStyle]} />
+            <Animated.View style={[styles.thumb, { borderColor: ink.ink }, thumbStyle]} />
           </View>
         </View>
       </GestureDetector>
@@ -182,7 +188,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: colors.borderStrong,
   },
-  railFill: { position: 'absolute', inset: 0, backgroundColor: colors.accent },
+  // Colours come from the tone, per render; these are the shapes.
+  railFill: { position: 'absolute', inset: 0 },
   thumb: {
     position: 'absolute',
     left: 0,
@@ -190,7 +197,6 @@ const styles = StyleSheet.create({
     height: THUMB,
     borderRadius: radii.pill,
     borderWidth: 2,
-    borderColor: colors.accentSoft,
     backgroundColor: colors.surfaceElevated,
   },
   bounds: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: spacing.xxs },

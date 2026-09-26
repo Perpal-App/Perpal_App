@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
-import { ActionButton } from '@/components/ui/ActionButton';
+import { TicketActionButton } from '@/features/trade/components/orderTicket/TicketActionButton';
+import type { TicketTone } from '@/features/trade/components/orderTicket/ticketTone';
 import type { PacificaOrderPhase } from '@/features/trade/hooks/usePacificaOrderFlow';
 import type { PacificaOrderSide } from '@/integrations/perps/pacifica/pacificaOrder';
 import { spacing } from '@/theme/tokens';
@@ -27,6 +28,7 @@ export function TicketPrimaryAction({
   phase,
   recoveryPending,
   side,
+  tone,
 }: {
   /** Why review is unavailable, as the button's label, or `null` when it is available. */
   readonly block: string | null;
@@ -38,15 +40,16 @@ export function TicketPrimaryAction({
   /** A deposit from an earlier session is still landing. */
   readonly recoveryPending: boolean;
   readonly side: PacificaOrderSide;
+  /** The ticket's colour, shared with the presets so a chosen share and the action agree. */
+  readonly tone: TicketTone;
 }) {
   if (deposit && recoveryPending) {
     return (
-      <ActionButton
+      <TicketActionButton
         disabled
         label={phase === 'indexing' ? 'Pacifica crediting funds' : 'Deposit confirming'}
         loading
         onPress={noop}
-        size="large"
         tone="neutral"
       />
     );
@@ -57,13 +60,12 @@ export function TicketPrimaryAction({
     // `Add funds` sizes to its own label and is the only thing here that can be pressed.
     return (
       <View style={styles.pair}>
-        <ActionButton disabled label="Insufficient funds" onPress={noop} size="large" style={styles.grow} tone="negative" />
+        <TicketActionButton disabled label="Insufficient funds" onPress={noop} style={styles.grow} tone="negative" />
         {onRequestFunding === undefined ? null : (
-          <ActionButton
+          <TicketActionButton
             accessibilityHint="Opens the private funding flow"
             label="Add funds"
             onPress={onRequestFunding}
-            size="large"
             tone="accent"
           />
         )}
@@ -72,13 +74,12 @@ export function TicketPrimaryAction({
   }
 
   return (
-    <ActionButton
+    <TicketActionButton
       disabled={block !== null}
       label={block ?? (deposit ? 'Review deposit' : `Review ${side}`)}
       loading={phase === 'preparing'}
       onPress={onReview}
-      size="large"
-      tone={deposit ? 'accent' : side === 'long' ? 'positive' : 'negative'}
+      tone={tone}
     />
   );
 }

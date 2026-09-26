@@ -2,10 +2,8 @@ import {
   amountFromBaseUnits,
   formatAmountWithCommas,
   formatDetailedUsd,
-  formatSignedBpsPercent,
   parseAmount,
   truncateAmount,
-  type Amount,
 } from '@/domain/money/amount';
 import type { TradingStablecoinBalances } from '@/features/trade/hooks/useTradingStablecoinBalances';
 import type {
@@ -97,24 +95,6 @@ export function positionSizeEstimate(collateral: string, leverage: number): stri
     return base <= 0n ? '--' : `≈ ${usdCentsText(base * BigInt(leverage))}`;
   } catch {
     return '--';
-  }
-}
-
-/**
- * How far a trigger price sits from the mark, as a signed percentage: `+4.20%`.
- *
- * Integer basis points, truncated toward zero — a hint beside a price being typed, not a figure
- * anything is priced from. `null` for anything that does not parse, so a half-typed value shows nothing
- * rather than a nonsense percentage.
- */
-export function markDistanceText(value: string, mark: Amount): string | null {
-  if (mark.baseUnits <= 0n || value.trim().length === 0) return null;
-  try {
-    const price = parseAmount(value, mark.decimals).baseUnits;
-    if (price <= 0n) return null;
-    return formatSignedBpsPercent(Number(((price - mark.baseUnits) * 10_000n) / mark.baseUnits));
-  } catch {
-    return null;
   }
 }
 

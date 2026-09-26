@@ -14,10 +14,10 @@ const DEFAULT_LEVERAGE = 5;
 /**
  * What the reader has set on the ticket, and nothing the ticket derives from it.
  *
- * `entry` is the keypad's raw text — it can end in a point while it is being typed — and `preset` is
- * which percentage wrote it, if one did, so that chip can show as chosen until the figure is edited by
- * hand. Auto close is on exactly when either price is set: there is no separate switch to disagree with
- * the prices.
+ * `entry`, `takeProfit` and `stopLoss` are keypad text — any of them can end in a point while it is being
+ * typed — and `preset` is which percentage wrote the entry, if one did, so that chip can show as chosen
+ * until the figure is edited by hand. Auto close is on exactly when either price is set: there is no
+ * separate switch to disagree with the prices.
  */
 export type OrderTicketDraft = {
   readonly entry: string;
@@ -43,9 +43,8 @@ function initialDraft(maxLeverage: number): OrderTicketDraft {
  * The ticket's draft, and the only ways to change it.
  *
  * Every action is a functional update, so none of them closes over a stale draft, and the set is built
- * once, so a component handed one never re-renders because it was rebuilt. None of them drops a
- * prepared plan: that is the flow's `reset`, and the ticket calls it beside each edit because only the
- * ticket holds both.
+ * once, so a component handed one never re-renders because it was rebuilt. None of them drops a prepared
+ * plan: that is the flow's `reset`, and the ticket calls it beside each edit because only it holds both.
  */
 export function useOrderTicketDraft(maxLeverage: number) {
   const [draft, setDraft] = useState(() => initialDraft(maxLeverage));
@@ -64,13 +63,16 @@ export function useOrderTicketDraft(maxLeverage: number) {
     setEntry: (entry: string) => setDraft((current) => ({ ...current, entry, preset: null })),
     setLeverage: (leverage: number) => setDraft((current) => ({ ...current, leverage })),
     setPreset: (preset: number, entry: string) => setDraft((current) => ({ ...current, entry, preset })),
+    /** One auto-close price, typed a key at a time, without touching the other. */
+    setTriggerPrice: (field: keyof AutoClosePrices, value: string) =>
+      setDraft((current) => ({ ...current, [field]: value })),
   }), []);
 
   return { draft, ...actions };
 }
 
 export function autoCloseOn(draft: AutoClosePrices): boolean {
-  return draft.takeProfit.length > 0 || draft.stopLoss.length > 0;
+  return entryAmount(draft.takeProfit).length > 0 || entryAmount(draft.stopLoss).length > 0;
 }
 
 /**
@@ -89,7 +91,8 @@ export function presetEntry(availableBaseUnits: bigint, percent: number): string
  * The draft as the order flow reads it: always an opening market order.
  *
  * The ticket offers nothing else, so the order type, the limit and trigger prices, and the action are
- * fixed here in one place rather than threaded through as state no control can change.
+ * fixed here in one place rather than threaded through as state no control can change. Keypad text is
+ * cleaned of a trailing point on the way out, since no parser downstream accepts one.
  */
 export function marketOrderDraft(
   draft: OrderTicketDraft,
@@ -104,8 +107,8 @@ export function marketOrderDraft(
     marginMode,
     orderType: 'market',
     side,
-    stopLoss: draft.stopLoss,
-    takeProfit: draft.takeProfit,
+    stopLoss: entryAmount(draft.stopLoss),
+    takeProfit: entryAmount(draft.takeProfit),
     tpSlEnabled: autoCloseOn(draft),
     triggerPrice: '',
   };

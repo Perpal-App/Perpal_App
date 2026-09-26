@@ -15,6 +15,11 @@ import { entryAmount } from '@/features/trade/components/orderTicket/keypadEntry
  * build can only be smaller than this, and a figure under the minimum here is certainly under it there.
  */
 export function reviewBlock(input: {
+  /**
+   * Both auto-close prices pass the order builder's check against the current mark. The mark keeps moving,
+   * so a price set a minute ago can stop passing — and review would refuse it — without anything typed.
+   */
+  readonly autoCloseValid: boolean;
   readonly availableBaseUnits: bigint | null;
   readonly entry: string;
   /** The floor the entry is measured against: a deposit's own size, or the position it opens. */
@@ -34,10 +39,10 @@ export function reviewBlock(input: {
       ? `Minimum deposit ${usdFromBaseUnits(minimum.baseUnits)}`
       : null;
   }
-  if (minimum.baseUnits === null) return null;
-  return committed * BigInt(minimum.leverage) < minimum.baseUnits
-    ? `Minimum position ${usdFromBaseUnits(minimum.baseUnits)}`
-    : null;
+  if (minimum.baseUnits !== null && committed * BigInt(minimum.leverage) < minimum.baseUnits) {
+    return `Minimum position ${usdFromBaseUnits(minimum.baseUnits)}`;
+  }
+  return input.autoCloseValid ? null : 'Check auto close';
 }
 
 /** The keypad entry in USDC base units, or `null` when it is empty or not a valid amount. */
