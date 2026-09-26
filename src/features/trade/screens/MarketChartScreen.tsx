@@ -11,8 +11,10 @@ import { ChartToolIcon } from '@/features/trade/components/ChartToolIcon';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { useChartOrientation } from '@/features/trade/hooks/useChartOrientation';
+import { useChartPositions } from '@/features/trade/hooks/useChartPositions';
 import { usePacificaMarkets } from '@/features/trade/hooks/usePacificaMarkets';
 import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
+import { usePacificaPositionClose } from '@/features/trade/hooks/usePacificaPositionClose';
 import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
 import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
@@ -40,6 +42,20 @@ export function MarketChartScreen() {
     market?.venueRef ?? '',
     timeframe,
   );
+  const snapshot = market === undefined
+    ? null
+    : venue.snapshots.find((candidate) => candidate.venueRef === market.venueRef) ?? null;
+  // The expanded chart draws the same position lines, closed through this screen's own closer.
+  const closer = usePacificaPositionClose({
+    apiOrigin: perps?.pacificaApiOrigin ?? '',
+    assetOrigin: perps?.pacificaAssetOrigin ?? '',
+  });
+  const chartPositions = useChartPositions({
+    apiOrigin: perps?.pacificaApiOrigin ?? '',
+    closer,
+    market: market ?? null,
+    snapshot,
+  });
 
   if (market === undefined || !config.ok) {
     return (
@@ -53,7 +69,6 @@ export function MarketChartScreen() {
     );
   }
 
-  const snapshot = venue.snapshots.find((candidate) => candidate.venueRef === market.venueRef) ?? null;
   const price = snapshot !== null && !snapshot.priceStale ? snapshot.price : null;
   const openInterest = snapshot?.openInterest ?? null;
 
@@ -133,7 +148,9 @@ export function MarketChartScreen() {
         <TradingViewMarketChart
           candles={history.candles}
           fill
+          onClosePosition={chartPositions.requestClose}
           onTimeframeChange={setTimeframe}
+          positions={chartPositions.lines}
           status={history.status}
           symbol={`${market.baseAsset}/USD`}
           timeframe={timeframe}

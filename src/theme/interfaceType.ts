@@ -1,5 +1,7 @@
 import { Platform, type TextStyle } from 'react-native';
 
+import { fonts } from './fonts';
+
 /**
  * The interface type scale: the platform's own face — San Francisco on iOS, Roboto on Android — for the
  * surfaces where figures are the point. Today that is the order ticket and everything in its sheet.
@@ -42,6 +44,10 @@ export const interfaceType = {
   caption: { fontFamily: FACE, fontSize: 13, lineHeight: 18, fontWeight: '400' },
   /** What a card or a section holds, in sentence case: `Collateral`, `Take profit`, `Order`. */
   overline: { fontFamily: FACE, fontSize: 13, lineHeight: 18, fontWeight: '500' },
+  /** A compact card's name: a position's instrument. */
+  cardTitle: { fontFamily: FACE, fontSize: 15, lineHeight: 20, fontWeight: '600' },
+  /** A figure's name in a dense grid, over its value. */
+  fieldLabel: { fontFamily: FACE, fontSize: 11, lineHeight: 14, fontWeight: '500' },
   /** A word that can be pressed inside the sheet: `Clear`, `Done`, a token's ticker beside its mark. */
   control: { fontFamily: FACE, fontSize: 15, lineHeight: 20, fontWeight: '600' },
   /** The label on the ticket's primary action. */
@@ -58,12 +64,15 @@ export const interfaceType = {
     letterSpacing: -1.1,
     fontVariant: TABULAR,
   },
-  /** The multiple being chosen on the leverage editor. */
+  /**
+   * The multiple being chosen on the leverage editor. Bold: at this size the semibold read thin, and the
+   * figure is the one thing on the editor the eye has to find mid-drag.
+   */
   amountLarge: {
     fontFamily: FACE,
     fontSize: 40,
     lineHeight: 48,
-    fontWeight: '600',
+    fontWeight: '700',
     letterSpacing: -1,
     fontVariant: TABULAR,
   },
@@ -86,6 +95,25 @@ export const interfaceType = {
   figureCaption: { fontFamily: FACE, fontSize: 13, lineHeight: 18, fontWeight: '400', fontVariant: TABULAR },
   /** An estimate on its badge: `+$91.50`. */
   badge: { fontFamily: FACE, fontSize: 12, lineHeight: 16, fontWeight: '600', fontVariant: TABULAR },
+  /** The lead figure of a compact card: a position's unrealized profit or loss. */
+  figureLead: { fontFamily: FACE, fontSize: 17, lineHeight: 22, fontWeight: '600', fontVariant: TABULAR },
+  /** A value in a dense grid of figures, three to a row. */
+  figureCompact: { fontFamily: FACE, fontSize: 13, lineHeight: 17, fontWeight: '600', fontVariant: TABULAR },
+  /**
+   * A figure in the rounded face, heavy: a position's profit or loss on its badge. San Francisco Rounded on
+   * iOS, where the system carries it. Android has no rounded system face, so it takes Poppins Bold — the
+   * app's bundled geometric family, whose round forms are the nearest match — chosen by its face name and
+   * never with a weight, and led at Poppins' 1.5x so Android does not crop it.
+   */
+  figureRounded: Platform.select<TextStyle>({
+    ios: { fontFamily: 'ui-rounded', fontSize: 15, lineHeight: 20, fontWeight: '700', fontVariant: TABULAR },
+    default: { fontFamily: fonts.bold, fontSize: 15, lineHeight: 22 },
+  }),
+  /** The same face a step down, for the rate beside the figure. */
+  figureRoundedSmall: Platform.select<TextStyle>({
+    ios: { fontFamily: 'ui-rounded', fontSize: 12, lineHeight: 16, fontWeight: '700', fontVariant: TABULAR },
+    default: { fontFamily: fonts.semiBold, fontSize: 12, lineHeight: 18 },
+  }),
   /** A preset share on its chip: `25%`, `Max`. */
   chip: { fontFamily: FACE, fontSize: 14, lineHeight: 18, fontWeight: '500', fontVariant: TABULAR },
   /**

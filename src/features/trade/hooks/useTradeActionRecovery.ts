@@ -12,6 +12,8 @@ export function useTradeActionRecovery(input: {
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The owner a reconcile last completed for. A new identity is unchecked until its own completes. */
+  const [checkedOwner, setCheckedOwner] = useState<string | null>(null);
 
   const reconcile = useCallback(async (signal?: AbortSignal) => {
     if (input.owner === null || input.signer === null) return 'none' as const;
@@ -25,6 +27,7 @@ export function useTradeActionRecovery(input: {
         ...(signal === undefined ? {} : { signal }),
       });
       setPending(status === 'pending' || status === 'indexing');
+      setCheckedOwner(input.owner);
       return status;
     } catch (cause) {
       if (!signal?.aborted) {
@@ -61,5 +64,15 @@ export function useTradeActionRecovery(input: {
     };
   }, [pending, reconcile]);
 
-  return { error, pending, reconcile, setPending };
+  return {
+    /**
+     * A reconcile has completed for the current owner, with or without a record to act on. Until it has,
+     * nothing is known about a transaction a previous session may have left in flight.
+     */
+    checked: input.owner !== null && checkedOwner === input.owner,
+    error,
+    pending,
+    reconcile,
+    setPending,
+  };
 }

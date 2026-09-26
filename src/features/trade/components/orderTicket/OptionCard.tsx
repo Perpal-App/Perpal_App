@@ -45,8 +45,9 @@ export const OPTION_TEXT_SCALE = 1.3;
  * the editor is uncovered by the card opening rather than fading in on top of a card that has already
  * jumped to size. Everything starts on the frame of the tap.
  *
- * `fill` lets an open card take whatever height the ticket has spare, with its body centred in it, so an
- * editor that needs no keypad occupies the keypad's room rather than leaving it empty.
+ * An open card is exactly as tall as its editor. It used to be able to fill whatever height the ticket had
+ * spare, with the editor centred in it, and that spare height read as empty bands above and below the
+ * editor; the room now stays below the cards, above the ticket's action.
  *
  * The value on the right is what the option currently comes to. A string is set as the header's figure,
  * like leverage's `5×`; anything else is drawn as given, fading in and out as it comes and goes, and is
@@ -56,7 +57,6 @@ export function OptionCard({
   accessibilityHint,
   children,
   expanded,
-  fill = false,
   icon,
   onToggle,
   subtitle,
@@ -68,7 +68,6 @@ export function OptionCard({
   /** The editor, rendered only while the card is open. */
   readonly children: ReactNode;
   readonly expanded: boolean;
-  readonly fill?: boolean;
   /**
    * Draws the option's mark. The card decides the size and the ink and the caller decides the glyph, so an
    * icon-font glyph and a bundled SVG sit side by side identically.
@@ -98,7 +97,7 @@ export function OptionCard({
   const spokenValue = textValue ?? (drawnValue === null ? undefined : valueLabel);
 
   return (
-    <MorphView style={[styles.card, fill && expanded && styles.fill]}>
+    <MorphView style={styles.card}>
       {/* Laid out at the card's final size and clipped to its springing frame. When the card shrinks, the
           strip it has not reached yet shows the card's own colour, which is the ramp's deepest stop. */}
       <LinearGradient
@@ -153,7 +152,7 @@ export function OptionCard({
       {/* Mounted and unmounted rather than folded: the body is clipped by the card's own frame, so however it
           arrives or leaves, it can only ever be seen inside the card that is opening or closing around it. */}
       {expanded ? (
-        <MorphView fadeIn fadeOut style={[styles.body, fill && styles.bodyFill]}>{children}</MorphView>
+        <MorphView fadeIn fadeOut style={styles.body}>{children}</MorphView>
       ) : null}
     </MorphView>
   );
@@ -170,7 +169,6 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     backgroundColor: gradients.surfaceRaise.colors[1],
   },
-  fill: { flexGrow: 1 },
   header: {
     minHeight: 64,
     flexDirection: 'row',
@@ -186,5 +184,4 @@ const styles = StyleSheet.create({
   value: { ...interfaceType.figure, flexShrink: 0, color: colors.textPrimary },
   drawnValue: { flexShrink: 0 },
   body: { gap: spacing.md, paddingHorizontal: spacing.md, paddingBottom: spacing.md },
-  bodyFill: { flexGrow: 1, justifyContent: 'center' },
 });

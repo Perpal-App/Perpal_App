@@ -13,6 +13,8 @@ export type PacificaPosition = {
   readonly marginMode: 'isolated' | 'cross';
   readonly liquidationPrice: string | null;
   readonly unrealizedPnl: string | null;
+  /** When the venue says the position was opened, in epoch milliseconds, or `null` where it does not say. */
+  readonly openedAtMs: number | null;
 };
 
 export type PacificaOpenOrder = {
@@ -166,8 +168,19 @@ function parsePositions(value: unknown): readonly PacificaPosition[] {
       marginMode: boolean(position.isolated, 'margin mode') ? 'isolated' : 'cross',
       liquidationPrice: nullableDecimal(position.liquidation_price, 'liquidation price'),
       unrealizedPnl: nullableDecimal(position.unrealized_pnl ?? position.pnl, 'unrealized PnL'),
+      openedAtMs: lenientTimestamp(position.created_at),
     };
   });
+}
+
+/**
+ * A display-only time. Unlike the account's own timestamp, a missing or malformed one is `null` rather than
+ * a failed read: no figure on the portfolio depends on it, and it should not be able to blank the screen.
+ */
+function lenientTimestamp(value: unknown): number | null {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (typeof parsed !== 'number' || !Number.isSafeInteger(parsed) || parsed <= 0) return null;
+  return parsed < 10_000_000_000 ? parsed * 1_000 : parsed;
 }
 
 function parseOrders(value: unknown): readonly PacificaOpenOrder[] {

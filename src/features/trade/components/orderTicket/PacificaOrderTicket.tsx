@@ -143,21 +143,14 @@ export function PacificaOrderTicket(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- market or identity change only
   }, [props.market.maxLeverage, props.market.venueRef, session.address, session.status]);
 
-  // The review is open from the moment it is asked for until the flow has nothing left to show. Memoised,
+  // The review opens with something to confirm, never with placeholders: usually at once, priced on the
+  // device, and otherwise when the full preparation lands, with the form's action showing the wait. Memoised,
   // because the retained copy below is compared by identity.
-  //
-  // While the quote is priced it carries which exits the order has, so the review holds their rows from the
-  // start and does not grow when the quote lands.
-  const pendingTakeProfit = entryAmount(draft.takeProfit).length > 0;
-  const pendingStopLoss = entryAmount(draft.stopLoss).length > 0;
   const review = useMemo<ReviewContent | null>(() => {
-    if (phase === 'preparing') {
-      return { autoClose: { stopLoss: pendingStopLoss, takeProfit: pendingTakeProfit }, kind: 'loading' };
-    }
     if (plan !== null) return { kind: 'order', plan };
     if (preparation !== null) return { kind: 'collateral', step: preparation };
     return null;
-  }, [pendingStopLoss, pendingTakeProfit, phase, plan, preparation]);
+  }, [plan, preparation]);
   const shownReview = useRetainedValue(review);
   // Pushed over the form and popped back off it, rather than faded in on top of it.
   const push = usePushTransition(review !== null);
@@ -262,7 +255,6 @@ export function PacificaOrderTicket(props: {
                 <OptionCard
                   accessibilityHint="Opens leverage"
                   expanded={editor === 'leverage'}
-                  fill
                   icon={(glyph) => <Ionicons {...glyph} name="speedometer-outline" />}
                   onToggle={() => editing.toggle('leverage')}
                   subtitle={`${marginMode === 'cross' ? 'Cross' : 'Isolated'} margin · up to ${props.market.maxLeverage}×`}
@@ -372,6 +364,7 @@ export function PacificaOrderTicket(props: {
             onConfirmOrder={flow.confirm}
             onConfirmStep={() => void flow.submitPreparation()}
             onRefresh={() => void flow.prepare()}
+            refreshing={phase === 'preparing'}
             submitting={phase === 'submitting'}
           />
         )}
@@ -394,7 +387,8 @@ export function PacificaOrderTicket(props: {
 const styles = StyleSheet.create({
   root: { flexGrow: 1 },
   // The options at their own height and everything left over to the keypad's group — or, with leverage
-  // open, to the leverage card, which then needs the room more than a keypad it does not use.
+  // open and the keypad folded away, to the space under the cards, above the action. The open card stays
+  // exactly as tall as its editor rather than stretching into that space.
   //
   // Spare height goes to whatever is typing or being edited, never to an empty band between groups. With
   // the keypad at its floor the whole ticket still just fits the body a 6.1-inch iPhone gives the sheet; on

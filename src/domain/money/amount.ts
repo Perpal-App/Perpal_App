@@ -115,6 +115,28 @@ export function truncateAmount(amount: Amount, places: number): Amount {
   return { baseUnits: (amount.baseUnits / factor) * factor, decimals: amount.decimals };
 }
 
+/**
+ * An amount at exactly `places` decimals, grouped: a price at its market's tick. Digits past `places` are
+ * dropped toward zero, never rounded up, and trailing zeros are kept, so a column of prices lines up.
+ */
+export function formatFixedWithCommas(amount: Amount, places: number): string {
+  if (!Number.isInteger(places) || places < 0) {
+    throw new AmountError('Decimal places must be a non-negative integer.');
+  }
+  const negative = amount.baseUnits < 0n;
+  const magnitude = negative ? -amount.baseUnits : amount.baseUnits;
+  const scaled = places >= amount.decimals
+    ? magnitude * 10n ** BigInt(places - amount.decimals)
+    : magnitude / 10n ** BigInt(amount.decimals - places);
+  const digits = scaled.toString().padStart(places + 1, '0');
+  const whole = places === 0 ? digits : digits.slice(0, -places);
+  const fraction = places === 0 ? '' : digits.slice(-places);
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+  const body = fraction.length === 0 ? grouped : `${grouped}.${fraction}`;
+
+  return negative && scaled !== 0n ? `-${body}` : body;
+}
+
 export function formatAmountWithCommas(amount: Amount): string {
   const [whole = '0', fraction] = formatAmount(amount).split('.');
   const negative = whole.startsWith('-');
@@ -191,6 +213,18 @@ export function formatDetailedUsd(amount: Amount): string {
   const body = formatRoundedMagnitude(magnitude, amount.decimals, 2, false);
 
   return `${negative ? '-' : ''}$${body}`;
+}
+
+/**
+ * Dollars and cents with the direction on the front, and a true minus rather than a hyphen below zero:
+ * `+$0.42`, `−$1.07`. A figure that rounds to nothing carries no sign: `$0.00`. For a profit or loss,
+ * where the direction is the point of the number.
+ */
+export function formatSignedDetailedUsd(amount: Amount): string {
+  const negative = amount.baseUnits < 0n;
+  const magnitude = formatDetailedUsd(negative ? { ...amount, baseUnits: -amount.baseUnits } : amount);
+  if (magnitude === '$0.00') return magnitude;
+  return `${negative ? '\u2212' : '+'}${magnitude}`;
 }
 
 function formatRoundedMagnitude(

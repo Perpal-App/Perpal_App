@@ -11,7 +11,9 @@ import { PacificaFundingPanel } from '@/features/trade/components/PacificaFundin
 import { PacificaLiquidationsPanel } from '@/features/trade/components/PacificaLiquidationsPanel';
 import { PacificaTradeAccountPanel } from '@/features/trade/components/PacificaTradeAccountPanel';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
+import { useChartPositions } from '@/features/trade/hooks/useChartPositions';
 import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
+import { usePacificaPositionClose } from '@/features/trade/hooks/usePacificaPositionClose';
 import type { PacificaMarket, PacificaMarketSnapshot } from '@/integrations/perps/pacifica/pacificaMarketData';
 import type { MarketTimeframe } from '@/integrations/perps/pacifica/pacificaHistory';
 import { spacing } from '@/theme/tokens';
@@ -52,8 +54,10 @@ const PANELS: readonly UnderlineTabOption<MarketPanel>[] = [
  * content, so they stay reachable at any scroll position — see `MarketDetailScreen`'s footer.
  *
  * What did not move: the order lifecycle. The buttons only choose a side and open the ticket. Every
- * order still passes through the same prepare, the same projected-risk panel, the same explicit confirm
- * dialog and the same re-verification immediately before signing.
+ * order still passes through the same prepare, the same review page with its projected risk as the
+ * explicit confirmation, and the same re-verification immediately before signing. Closing a position
+ * from the account panel below, or from the × on its line in the chart, prices a reduce-only market order
+ * the same way, and signs it only if the plan closes exactly the side and size that were shown.
  */
 export function PacificaTradingWorkspace(props: {
   readonly config: AppConfig;
@@ -64,23 +68,39 @@ export function PacificaTradingWorkspace(props: {
   const [panel, setPanel] = useState<MarketPanel>('orderbook');
   const [timeframe, setTimeframe] = useState<MarketTimeframe>('15m');
   const apiOrigin = props.config.perps.pacificaApiOrigin;
+  const assetOrigin = props.config.perps.pacificaAssetOrigin;
   const wsOrigin = props.config.perps.pacificaWsOrigin;
   // Enabled unconditionally, where this used to wait for the chart's tab to be opened. The chart is the
   // first thing on the screen now, so its candles are first-screen data rather than a prefetch.
   const history = usePacificaMarketHistory(apiOrigin, props.market.venueRef, timeframe, true);
+  // One closer for the screen: the chart's × and the cards below close through the same guard.
+  const closer = usePacificaPositionClose({ apiOrigin, assetOrigin });
+  const chartPositions = useChartPositions({
+    apiOrigin,
+    closer,
+    market: props.market,
+    snapshot: props.snapshot,
+  });
 
   return (
     <View style={styles.workspace}>
       <TradingViewMarketChart
         candles={history.candles}
+        onClosePosition={chartPositions.requestClose}
         onExpand={props.onExpandChart}
         onTimeframeChange={setTimeframe}
+        positions={chartPositions.lines}
         status={history.status}
         symbol={`${props.market.baseAsset}/USD`}
         timeframe={timeframe}
       />
 
-      <PacificaTradeAccountPanel apiOrigin={apiOrigin} />
+      <PacificaTradeAccountPanel
+        apiOrigin={apiOrigin}
+        assetOrigin={assetOrigin}
+        closer={closer}
+        wsOrigin={wsOrigin}
+      />
 
       <UnderlineTabs onSelect={setPanel} options={PANELS} selectedId={panel} />
       <MarketPanelView

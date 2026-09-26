@@ -40,34 +40,6 @@ export function orderTypeText(value: PacificaOrderPlan['orderType']): string {
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
-export function orderConfirmation(plan: PacificaOrderPlan, baseAsset: string) {
-  const risk = plan.risk;
-  return {
-    title: `${plan.action === 'open' ? 'Open' : 'Close'} ${plan.side} ${baseAsset}?`,
-    message: [
-      `Order type ${plan.orderType.replace('-', ' ')}`,
-      `Size ${plan.amount} ${baseAsset}`,
-      `Mark $${priceText(plan.markPrice)}`,
-      plan.triggerPrice === null ? null : `Trigger $${priceText(plan.triggerPrice)}`,
-      plan.orderPrice === null ? null : `Limit $${priceText(plan.orderPrice)}`,
-      `Notional ${usdcText(plan.notionalBaseUnits)}`,
-      `Estimated fee ${usdcText(plan.estimatedFeeBaseUnits)}`,
-      `Leverage ${plan.leverage}× · ${plan.marginMode}`,
-      risk === null ? null : `Initial margin ${usdcText(risk.initialMarginBaseUnits)}`,
-      risk === null ? null : `Margin after ${usdcText(risk.projectedMarginUsedBaseUnits)}`,
-      risk === null ? null : `Available after ${usdcText(risk.projectedAvailableBaseUnits)}`,
-      risk === null ? null : `Maintenance buffer ${usdcText(risk.maintenanceHeadroomBaseUnits)}`,
-      risk === null ? null : `Account health ${accountHealthText(risk.accountHealthBps)}`,
-      risk === null ? null : `Projected liquidation ${risk.liquidationPrice === null
-        ? 'none above $0'
-        : `$${priceText(risk.liquidationPrice)}`}`,
-      `Slippage limit ${plan.slippagePercent}%`,
-      plan.takeProfit === null ? null : `Take profit $${priceText(plan.takeProfit.stopPrice)}`,
-      plan.stopLoss === null ? null : `Stop loss $${priceText(plan.stopLoss.stopPrice)}`,
-    ].filter(Boolean).join('\n'),
-  };
-}
-
 export function usdFromBaseUnits(value: bigint): string {
   return `$${formatAmountWithCommas(amountFromBaseUnits(value, 6))}`;
 }

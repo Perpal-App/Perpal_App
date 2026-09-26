@@ -1,25 +1,15 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withSequence,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
 
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, gradients, interfaceType, motion, radii, spacing } from '@/theme/tokens';
+import { RollingNumber } from '@/features/trade/components/orderTicket/RollingNumber';
+import { colors, gradients, interfaceType, radii, spacing } from '@/theme/tokens';
 
 const STEP_SIZE = 48;
 const STEP_GLYPH = 20;
-/** The figure's acknowledgement of a change: a few percent up and back, never a bounce. */
-const VALUE_POP = 0.06;
-const VALUE_POP_MS = 70;
 /** The figure scales with the reader's text size, but not so far it crowds the steppers out. */
 const FIGURE_TEXT_SCALE = 1.2;
 
@@ -56,38 +46,33 @@ export function LeverageStepper({
 }
 
 /**
- * The figure, with a small pop whenever it changes.
+ * The figure, rolling its changed digits up for a higher multiple and down for a lower one.
  *
- * The pop is the acknowledgement that a step landed — the number itself changing is easy to miss mid-drag,
- * when the eye is on the thumb. Scale only, on the UI thread, and not on the first frame, so the page
- * arrives still. Under reduce motion the number simply changes.
+ * The direction is settled in the same render as the value, as state adjusted during render, so the digits
+ * that arrive with a change always roll the way it went, however fast changes come.
  */
 function LeverageFigure({ value }: { readonly value: number }) {
-  const reduceMotion = useReducedMotion();
-  const pop = useSharedValue(0);
-  const settled = useRef(false);
-
-  useEffect(() => {
-    if (!settled.current) {
-      settled.current = true;
-      return;
-    }
-    if (reduceMotion) return;
-    pop.set(withSequence(withTiming(1, { duration: VALUE_POP_MS }), withSpring(0, motion.spring)));
-  }, [pop, reduceMotion, value]);
-
-  const popStyle = useAnimatedStyle(() => ({ transform: [{ scale: 1 + pop.value * VALUE_POP }] }));
+  const [shown, setShown] = useState<{ readonly direction: 1 | -1; readonly value: number }>({
+    direction: 1,
+    value,
+  });
+  if (shown.value !== value) setShown({ direction: value > shown.value ? 1 : -1, value });
 
   return (
-    <Animated.View
+    <View
       accessibilityLabel={`${value}× leverage`}
       accessibilityLiveRegion="polite"
       accessible
-      style={[styles.figure, popStyle]}
+      style={styles.figure}
     >
-      <Text maxFontSizeMultiplier={FIGURE_TEXT_SCALE} style={styles.figureValue}>{value}</Text>
+      <RollingNumber
+        direction={shown.direction}
+        maxFontSizeMultiplier={FIGURE_TEXT_SCALE}
+        style={styles.figureValue}
+        value={value}
+      />
       <Text maxFontSizeMultiplier={FIGURE_TEXT_SCALE} style={styles.figureUnit}>×</Text>
-    </Animated.View>
+    </View>
   );
 }
 

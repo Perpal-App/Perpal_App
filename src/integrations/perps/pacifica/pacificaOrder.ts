@@ -75,10 +75,9 @@ export type PacificaOrderPlan = {
   readonly traceId: string;
 };
 
-export async function preparePacificaOrder(input: {
-  readonly account: string;
+/** Everything an order plan is priced from, apart from the account's current margin setting. */
+export type PacificaOrderPlanInput = {
   readonly action: PacificaOrderAction;
-  readonly apiOrigin: string;
   readonly collateralBaseUnits: bigint;
   readonly leverage: number;
   readonly marginMode: PacificaMarginMode;
@@ -88,11 +87,42 @@ export async function preparePacificaOrder(input: {
   readonly portfolio: PacificaPortfolioSnapshot;
   readonly side: PacificaOrderSide;
   readonly snapshot: PacificaMarketSnapshot;
-  readonly signal?: AbortSignal | undefined;
   readonly stopLossPrice?: string;
   readonly takeProfitPrice?: string;
   readonly triggerPrice: string | undefined;
+};
+
+/** Reads the account's current margin setting for the market, then prices the plan against it. */
+export async function preparePacificaOrder(input: PacificaOrderPlanInput & {
+  readonly account: string;
+  readonly apiOrigin: string;
+  readonly signal?: AbortSignal | undefined;
 }): Promise<PacificaOrderPlan> {
+  const reviewedSetting = input.action === 'open'
+    ? await fetchPacificaMarketSetting({
+        account: input.account,
+        apiOrigin: input.apiOrigin,
+        maxLeverage: input.market.maxLeverage,
+        signal: input.signal,
+        symbol: input.market.venueRef,
+      })
+    : null;
+  return buildPacificaOrderPlan({ ...input, reviewedSetting });
+}
+
+/**
+ * An order plan priced on the device, with no network: the size, notional, fee and projected risk from the
+ * portfolio and mark it is given, checked against the margin setting it is given.
+ *
+ * Pure arithmetic over its inputs, so it is exactly as current as they are — a caller supplying cached reads
+ * owns their freshness. Nothing here is trusted at signing: `submitPacificaOrder` re-checks the plan's
+ * expiry, the live price against its slippage limit, and the account's margin setting against
+ * `reviewedSetting`, and refuses the order if any has moved.
+ */
+export function buildPacificaOrderPlan(input: PacificaOrderPlanInput & {
+  /** The account's margin setting for the market, as read. Required to open. */
+  readonly reviewedSetting: PacificaMarketSetting | null;
+}): PacificaOrderPlan {
   if (input.snapshot.priceStale || input.snapshot.venueRef !== input.market.venueRef) {
     throw new Error('Pacifica price is stale. Refresh before preparing the order.');
   }
@@ -185,15 +215,10 @@ export async function preparePacificaOrder(input: {
   const estimatedFeeBaseUnits = (
     notionalBaseUnits * feeRate + 99_999_999n
   ) / 100_000_000n;
-  const reviewedSetting = input.action === 'open'
-    ? await fetchPacificaMarketSetting({
-        account: input.account,
-        apiOrigin: input.apiOrigin,
-        maxLeverage: input.market.maxLeverage,
-        signal: input.signal,
-        symbol: input.market.venueRef,
-      })
-    : null;
+  const reviewedSetting = input.action === 'open' ? input.reviewedSetting : null;
+  if (input.action === 'open' && reviewedSetting === null) {
+    throw new Error('Pacifica margin settings are unavailable. Refresh before preparing the order.');
+  }
   if (reviewedSetting !== null) {
     validateSettingChange({
       leverage,

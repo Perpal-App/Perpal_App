@@ -3,17 +3,15 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
-import type {
-  PacificaOpenOrder,
-  PacificaPosition,
-} from '@/integrations/perps/pacifica/pacificaPortfolio';
+import type { PacificaOpenOrder } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import { colors, fonts, gradients, radii, spacing, typography } from '@/theme/tokens';
 
 /**
- * A position or an order, on the same raised material as the action buttons.
+ * An open order, on the same raised material as the action buttons. Positions have their own card,
+ * `PositionCard`, valued at live prices.
  *
  * The card is the app's `surfaceRaise` ramp with a hairline rim — a lit top edge over a deeper base,
- * which is the treatment reserved for chrome that frames data. A position is exactly that: a small
+ * which is the treatment reserved for chrome that frames data. An order is exactly that: a small
  * number of discrete objects, each one a thing you can act on. It is deliberately not used for the
  * activity feed below, where a gradient repeated down forty rows stops reading as a surface and
  * starts reading as stripes.
@@ -33,43 +31,6 @@ function Card({ children }: { readonly children: ReactNode }) {
     >
       {children}
     </LinearGradient>
-  );
-}
-
-export function PositionCard({ position }: { readonly position: PacificaPosition }) {
-  const long = position.side === 'long';
-
-  return (
-    <Card>
-      <View style={styles.header}>
-        <Text accessibilityRole="header" numberOfLines={1} style={styles.symbol}>
-          {position.symbol}
-        </Text>
-        {/* The margin mode rides the header rather than taking a figure cell of its own. It is a
-            parameter of the position, not a number to scan against the others. */}
-        <Text numberOfLines={1} style={styles.mode}>Pacifica · {position.marginMode}</Text>
-        <Text style={long ? styles.long : styles.short}>{long ? 'Long' : 'Short'}</Text>
-      </View>
-
-      <View style={styles.figures}>
-        <Figure label="SIZE" value={position.amount} />
-        <Figure label="ENTRY" value={usd(position.entryPrice)} />
-        <Figure
-          label="LIQ."
-          tone="negative"
-          value={position.liquidationPrice === null
-            ? UNAVAILABLE
-            : usd(position.liquidationPrice)}
-        />
-        <Figure label="MARGIN" value={usd(position.margin)} />
-        <Figure label="FUNDING" value={usd(position.funding)} />
-        <Figure
-          label="PNL"
-          tone={decimalTone(position.unrealizedPnl)}
-          value={position.unrealizedPnl === null ? UNAVAILABLE : signedUsd(position.unrealizedPnl)}
-        />
-      </View>
-    </Card>
   );
 }
 
@@ -148,17 +109,6 @@ function usd(value: string): string {
   const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
   const body = fraction === undefined ? grouped : `${grouped}.${fraction}`;
   return negative ? `-$${body}` : `$${body}`;
-}
-
-function signedUsd(value: string): string {
-  if (/^-?0+(?:\.0+)?$/u.test(value)) return '$0';
-  const negative = value.startsWith('-');
-  return `${negative ? '-' : '+'}${usd(negative ? value.slice(1) : value)}`;
-}
-
-function decimalTone(value: string | null): 'negative' | 'plain' | 'positive' {
-  if (value === null || /^-?0+(?:\.0+)?$/u.test(value)) return 'plain';
-  return value.startsWith('-') ? 'negative' : 'positive';
 }
 
 const styles = StyleSheet.create({

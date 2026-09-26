@@ -69,6 +69,49 @@ export async function fetchPacificaMarketSetting(input: {
   readonly signal?: AbortSignal | undefined;
   readonly symbol: string;
 }): Promise<PacificaMarketSetting> {
+  const entries = await fetchMarginSettingEntries(input);
+  const match = entries.find((candidate) => (
+    isObject(candidate) && candidate.symbol === input.symbol
+  ));
+  if (match === undefined) {
+    return { leverage: input.maxLeverage, marginMode: 'cross' };
+  }
+  // Strict for the market an order is being priced on: a setting that cannot be read stops the order.
+  const setting = parseMarginSetting(match);
+  if (setting.leverage > input.maxLeverage) {
+    throw new Error('Pacifica returned leverage above the market maximum.');
+  }
+  return setting;
+}
+
+/**
+ * Every market the account has a readable margin setting for, by symbol, for display. A market that is
+ * absent runs at the venue's default — its maximum leverage, on cross margin — and an entry that cannot be
+ * read is left out rather than failing the others. Orders never use this: they read their own market's
+ * setting strictly, with `fetchPacificaMarketSetting`.
+ */
+export async function fetchPacificaMarginSettings(input: {
+  readonly account: string;
+  readonly apiOrigin: string;
+  readonly signal?: AbortSignal | undefined;
+}): Promise<ReadonlyMap<string, PacificaMarketSetting>> {
+  const bySymbol = new Map<string, PacificaMarketSetting>();
+  for (const candidate of await fetchMarginSettingEntries(input)) {
+    if (!isObject(candidate) || typeof candidate.symbol !== 'string') continue;
+    try {
+      bySymbol.set(candidate.symbol, parseMarginSetting(candidate));
+    } catch {
+      // Unreadable for this market only; the rest still stand.
+    }
+  }
+  return bySymbol;
+}
+
+async function fetchMarginSettingEntries(input: {
+  readonly account: string;
+  readonly apiOrigin: string;
+  readonly signal?: AbortSignal | undefined;
+}): Promise<readonly unknown[]> {
   const raw = await pacificaGet<unknown>({
     apiOrigin: input.apiOrigin,
     path: '/account/settings',
@@ -79,17 +122,12 @@ export async function fetchPacificaMarketSetting(input: {
   if (!Array.isArray(settings.margin_settings)) {
     throw new Error('Pacifica returned invalid account margin settings.');
   }
-  const match = settings.margin_settings.find((candidate) => (
-    isObject(candidate) && candidate.symbol === input.symbol
-  ));
-  if (match === undefined) {
-    return { leverage: input.maxLeverage, marginMode: 'cross' };
-  }
-  const value = object(match, 'market margin setting');
+  return settings.margin_settings;
+}
+
+function parseMarginSetting(entry: unknown): PacificaMarketSetting {
+  const value = object(entry, 'market margin setting');
   const leverage = positiveInteger(value.leverage, 'market leverage');
-  if (leverage > input.maxLeverage) {
-    throw new Error('Pacifica returned leverage above the market maximum.');
-  }
   if (typeof value.isolated !== 'boolean') {
     throw new Error('Pacifica returned invalid market margin mode.');
   }

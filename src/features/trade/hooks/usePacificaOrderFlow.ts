@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert } from 'react-native';
 
 import { AmountError, parseAmount } from '@/domain/money/amount';
-import {
-  orderConfirmation,
-  orderSubmissionNotification,
-} from '@/features/trade/components/PacificaOrderTicketFormatting';
+import { orderSubmissionNotification } from '@/features/trade/components/PacificaOrderTicketFormatting';
+import { useInstantOrderPlan } from '@/features/trade/hooks/useInstantOrderPlan';
 import type { usePacificaTicketPortfolio } from '@/features/trade/hooks/usePacificaTicketPortfolio';
 import type { useTradeActionRecovery } from '@/features/trade/hooks/useTradeActionRecovery';
 import { logTradeError } from '@/integrations/observability/tradeError';
@@ -107,9 +104,11 @@ export type PacificaOrderVenue = {
  * typed, and this owns what is done with it. Nothing in here renders, and nothing in the component
  * awaits.
  *
- * `submit` is intentionally not returned. The only path to a signature is `confirm`, which puts the
- * plan in front of the reader and calls `submit` from the dialog's own action — keeping that private
- * means a future caller cannot reach signing without the confirmation, whatever it renders.
+ * `submit` is intentionally not returned. The only path to a signature is `confirm`, the review page's
+ * action — and the review page is the confirmation: it shows the whole plan being signed, the order and
+ * what it does to the account, and nothing is signed until the reader presses its button. There is no
+ * second dialog after it. Keeping `submit` private means a future caller cannot reach signing without
+ * that page, whatever it renders.
  *
  * Two invariants moved across unchanged and both matter:
  *
@@ -134,6 +133,13 @@ export function usePacificaOrderFlow(input: {
   const [fundingRequirement, setFundingRequirement] = useState<TradeFundingRequirement | null>(null);
   const [placed, setPlaced] = useState<PacificaOrderPlaced | null>(null);
   const controller = useRef<AbortController | null>(null);
+  /** An order is being signed or submitted. A ref, so it holds from the first tap, before any render. */
+  const submitting = useRef(false);
+  const instantPlan = useInstantOrderPlan({
+    account: session.address,
+    apiOrigin: input.venue.apiOrigin,
+    market: input.market,
+  });
 
   const reset = () => {
     controller.current?.abort();
@@ -188,12 +194,44 @@ export function usePacificaOrderFlow(input: {
       });
       return;
     }
+
+    // Priced on the device from reads already in hand, when they are current enough: review opens with the
+    // order itself, confirmable at once. Anything more than pricing — a collateral transfer to build, a read
+    // past its bound — falls through to the full path below, which reads everything afresh.
+    if (!input.fundingOnly) {
+      let instant: PacificaOrderPlan | null = null;
+      try {
+        instant = instantPlan.build({
+          draft,
+          portfolio: input.portfolioState.portfolio,
+          recoveryClear: input.recovery.checked && !input.recovery.pending,
+          snapshot,
+        });
+      } catch (cause) {
+        // The order builder's refusals are the same whichever path asks, so they are shown now rather
+        // than after a round of network calls. Anything else, such as a stale price, is the full path's.
+        if (cause instanceof AmountError || cause instanceof PacificaOrderValidationError) {
+          showAppToast({ outcome: 'error', message: cause.message });
+          return;
+        }
+      }
+      if (instant !== null) {
+        controller.current?.abort();
+        setPreparation(null);
+        setFundingRequirement(null);
+        setPlan(instant);
+        setPhase('prepared');
+        return;
+      }
+    }
+
     const abort = new AbortController();
     controller.current?.abort();
     controller.current = abort;
+    // What is on screen stays until something replaces it: from the form that is nothing, and from an
+    // expired review it is that review, with its refresh in progress, rather than the page closing under
+    // the reader and opening again. An expired plan cannot be confirmed, so keeping it shown is safe.
     setPhase('preparing');
-    setPlan(null);
-    setPreparation(null);
     setFundingRequirement(null);
     try {
       const recoveryStatus = await input.recovery.reconcile(abort.signal);
@@ -219,6 +257,7 @@ export function usePacificaOrderFlow(input: {
           vault: venue.vault,
         });
         if (next !== null) {
+          setPlan(null);
           setPreparation(next);
           setPhase('prepared');
           return;
@@ -253,6 +292,9 @@ export function usePacificaOrderFlow(input: {
         triggerPrice: draft.triggerPrice,
       });
       if (!abort.signal.aborted) {
+        // The setting it has just read, kept so the next review can be priced without reading it again.
+        instantPlan.remember(nextPlan.reviewedSetting);
+        setPreparation(null);
         setPlan(nextPlan);
         setPhase('prepared');
       }
@@ -354,6 +396,10 @@ export function usePacificaOrderFlow(input: {
 
   const submit = async (confirmed: PacificaOrderPlan) => {
     if (session.address === null || session.signer === null) return;
+    // Single flight, held synchronously. The button disables itself once `phase` renders as submitting,
+    // but a second tap can arrive before that render, and with no dialog in between it would reach here.
+    if (submitting.current) return;
+    submitting.current = true;
     const scopeToken = captureInAppNotificationScope();
     setPhase('submitting');
     try {
@@ -374,6 +420,8 @@ export function usePacificaOrderFlow(input: {
         setPlaced({ orderId: result.orderId, orderStatus: result.orderStatus, plan: confirmed });
       }
       input.portfolioState.refresh();
+      // The order may have applied its own leverage or margin mode, so the setting in hand is re-read.
+      instantPlan.refreshSetting();
       publishInAppNotification({
         correlations: [{ namespace: 'pacifica-order', value: confirmed.clientOrderId }],
         ...orderSubmissionNotification(confirmed, input.market.baseAsset, result.orderStatus),
@@ -398,16 +446,15 @@ export function usePacificaOrderFlow(input: {
           : `${input.market.baseAsset} order needs review.`,
         scopeToken,
       });
+    } finally {
+      submitting.current = false;
     }
   };
 
+  /** Signs and submits the plan the review page is showing, once. */
   const confirm = () => {
     if (plan === null) return;
-    const copy = orderConfirmation(plan, input.market.baseAsset);
-    Alert.alert(copy.title, copy.message, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Confirm and sign', onPress: () => void submit(plan) },
-    ]);
+    void submit(plan);
   };
 
   return {

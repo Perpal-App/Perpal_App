@@ -37,7 +37,9 @@ const TAP_MAX_DURATION = 600;
  * fires one selection tick on iOS. That pairing is what makes a stepped slider feel like it has detents
  * without the thumb stuttering from one to the next.
  *
- * Only transform runs per frame, on the UI thread. The JS side hears about a step at most once per step.
+ * Only transform runs per frame, on the UI thread. The JS side hears about a step at most once per step,
+ * and during a drag only through `onScrub`: the value is committed with `onChange` once, when the finger
+ * lifts, so a drag across twenty steps is twenty light previews and one change rather than twenty.
  *
  * The filled track and the thumb's rim take the ticket's tone, like every other selection on it.
  */
@@ -45,12 +47,16 @@ export function LeverageSlider({
   max,
   min,
   onChange,
+  onScrub,
   tone,
   value,
 }: {
   readonly max: number;
   readonly min: number;
+  /** A settled choice: a tap on the rail, an accessibility step, or the step a drag ended on. */
   readonly onChange: (next: number) => void;
+  /** Each step a drag passes through, while it lasts. */
+  readonly onScrub: (next: number) => void;
   readonly tone: TicketTone;
   readonly value: number;
 }) {
@@ -63,12 +69,16 @@ export function LeverageSlider({
   const reported = useSharedValue(value);
   const held = useSharedValue(0);
 
-  const latest = useRef(onChange);
-  useEffect(() => { latest.current = onChange; }, [onChange]);
-  const dispatch = useCallback((next: number) => {
+  const latest = useRef({ onChange, onScrub });
+  useEffect(() => { latest.current = { onChange, onScrub }; }, [onChange, onScrub]);
+  /** A step crossed: a tick, and a preview while dragging or a change otherwise. */
+  const dispatch = useCallback((next: number, scrubbing: boolean) => {
     if (Platform.OS === 'ios') void Haptics.selectionAsync();
-    latest.current(next);
+    if (scrubbing) latest.current.onScrub(next);
+    else latest.current.onChange(next);
   }, []);
+  /** The finger has lifted: the step it ended on is the choice. */
+  const commit = useCallback((next: number) => latest.current.onChange(next), []);
 
   // Follows a value set from outside. Skipped mid-drag, where the value arriving is the one the finger
   // just produced and the thumb is already there.
@@ -90,7 +100,7 @@ export function LeverageSlider({
       const step = Math.min(Math.max(Math.round(fraction * span) + min, min), max);
       if (step !== reported.value) {
         reported.set(step);
-        runOnJS(dispatch)(step);
+        runOnJS(dispatch)(step, dragging.value);
       }
       return step;
     };
@@ -118,6 +128,7 @@ export function LeverageSlider({
         if (!dragging.value) return;
         settle(reported.value);
         dragging.set(false);
+        runOnJS(commit)(reported.value);
       });
 
     const tap = Gesture.Tap()
@@ -129,7 +140,7 @@ export function LeverageSlider({
       });
 
     return Gesture.Race(pan, tap);
-  }, [dispatch, dragging, held, max, min, progress, reduceMotion, reported, span, travel]);
+  }, [commit, dispatch, dragging, held, max, min, progress, reduceMotion, reported, span, travel]);
 
   const fillStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: -(1 - progress.value) * travel.value }],

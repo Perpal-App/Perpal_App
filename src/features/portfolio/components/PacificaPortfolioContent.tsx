@@ -7,11 +7,9 @@ import { readAppConfig } from '@/config/appConfig';
 import type { WalletBalances } from '@/features/account/hooks/useWalletBalances';
 import { FundsSheet, type FundsRequest } from '@/features/portfolio/components/FundsSheet';
 import { GlobalActivityTracker } from '@/features/portfolio/components/GlobalActivityTracker';
+import { OpenPositions } from '@/features/portfolio/components/OpenPositions';
+import { OrderCard } from '@/features/portfolio/components/PortfolioCards';
 import { PortfolioSummaryCard } from '@/features/portfolio/components/PortfolioSummaryCard';
-import {
-  OrderCard,
-  PositionCard,
-} from '@/features/portfolio/components/PortfolioCards';
 import {
   cancelPacificaOrder,
   PacificaCommandPendingError,
@@ -65,7 +63,6 @@ export function PacificaPortfolioContent({
     if (funds === 'deposit') setFundsRequest({ mode: 'deposit' });
   }, [funds]);
 
-  const hasPositions = positions.length > 0;
   const hasOrders = orders.length > 0;
 
   const cancel = (order: PacificaOpenOrder) => Alert.alert(
@@ -156,14 +153,13 @@ export function PacificaPortfolioContent({
         portfolio={snapshot}
       />
 
-      {hasPositions ? (
-        <View style={styles.section}>
-          <Text accessibilityRole="header" style={styles.heading}>Open positions</Text>
-          {positions.map((position) => (
-            <PositionCard key={`pacifica:${position.symbol}:${position.side}`} position={position} />
-          ))}
-        </View>
-      ) : null}
+      <OpenPositions
+        apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
+        assetOrigin={config.ok ? config.value.perps.pacificaAssetOrigin : ''}
+        onClosed={onPacificaRefresh}
+        positions={positions}
+        wsOrigin={config.ok ? config.value.perps.pacificaWsOrigin : ''}
+      />
 
       {hasOrders ? (
         <View style={styles.section}>

@@ -1,8 +1,7 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { UnderlineTabs, type UnderlineTabOption } from '@/components/ui/UnderlineTabs';
-import { StatusRow } from '@/components/ui/StatusRow';
 import { formatAmountWithCommas, parseAmount } from '@/domain/money/amount';
 import type {
   PacificaActivity,
@@ -14,29 +13,19 @@ import {
   subscribePacificaActivitySnapshot,
   type PacificaActivitySnapshot,
 } from '@/integrations/perps/pacifica/pacificaActivityStore';
-import {
-  cancelPacificaOrder,
-  PacificaCommandPendingError,
-} from '@/integrations/perps/pacifica/pacificaOrder';
 import type {
-  PacificaOpenOrder,
   PacificaPortfolioSnapshot,
   PacificaPosition,
 } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import {
-  readPacificaPortfolioSnapshot,
-  refreshPacificaPortfolioSnapshot,
-  subscribePacificaPortfolioSnapshot,
-  type PacificaPortfolioStoreSnapshot,
-} from '@/integrations/perps/pacifica/pacificaPortfolioStore';
-import {
-  captureInAppNotificationScope,
-  publishInAppNotification,
-} from '@/storage/inAppNotifications';
+import { refreshPacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolioStore';
+import { PositionCard } from '@/features/trade/components/PositionCard';
+import { useLivePositions } from '@/features/trade/hooks/useLivePositions';
+import { usePacificaAccountSnapshot } from '@/features/trade/hooks/usePacificaAccountSnapshot';
+import { positionKey, type PositionCloser } from '@/features/trade/hooks/usePacificaPositionClose';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
 
-type AccountTab = 'positions' | 'balance' | 'orders' | 'history';
+type AccountTab = 'positions' | 'history';
 type AccountState = {
   readonly activity: PacificaActivity | null;
   readonly portfolio: PacificaPortfolioSnapshot | null;
@@ -48,110 +37,41 @@ const EMPTY_ACTIVITY: PacificaActivitySnapshot = {
   status: 'loading',
   updatedAtMs: 0,
 };
-const EMPTY_PORTFOLIO: PacificaPortfolioStoreSnapshot = {
-  data: null,
-  status: 'loading',
-  updatedAtMs: 0,
-};
 
 const TABS: readonly UnderlineTabOption<AccountTab>[] = [
   { id: 'positions', label: 'Positions' },
-  { id: 'balance', label: 'Balance' },
-  { id: 'orders', label: 'Open orders' },
   { id: 'history', label: 'History' },
 ];
 
-export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: string }) {
+/**
+ * The account, as the market screen shows it: its open positions and its recent history, nothing more.
+ * Balances and open orders live on the portfolio, where orders are also cancelled.
+ *
+ * No container of its own. The tabs sit on the page, and each position card stands on the page as the
+ * one object it is, rather than as a card inside a panel.
+ */
+export function PacificaTradeAccountPanel({
+  apiOrigin,
+  assetOrigin,
+  closer,
+  wsOrigin,
+}: {
+  readonly apiOrigin: string;
+  /** For the market catalog the positions are shown against. */
+  readonly assetOrigin: string;
+  /** The screen's close control, shared with the chart so one close at a time covers both. */
+  readonly closer: PositionCloser;
+  /** For the live prices the positions are valued at. */
+  readonly wsOrigin: string;
+}) {
   const session = useTradingSession();
   const account = session.status === 'ready' ? session.address : null;
   const accountData = useTradeAccountData(apiOrigin, account);
   const [tab, setTab] = useState<AccountTab>('positions');
-  const [cancelling, setCancelling] = useState<number | null>(null);
   const portfolio = accountData.state.portfolio;
 
-  const cancel = (order: PacificaOpenOrder) => Alert.alert(
-    `Cancel ${order.symbol} order?`,
-    `${order.side === 'bid' ? 'Buy' : 'Sell'} ${order.initialAmount} at $${decimal(order.price)}.`,
-    [
-      { text: 'Keep order', style: 'cancel' },
-      {
-        text: 'Confirm and sign',
-        style: 'destructive',
-        onPress: () => {
-          if (account === null || session.signer === null) return;
-          const scopeToken = captureInAppNotificationScope();
-          setCancelling(order.orderId);
-          void cancelPacificaOrder({
-            account,
-            apiOrigin,
-            clientOrderId: order.clientOrderId,
-            orderId: order.orderId,
-            signer: session.signer,
-            symbol: order.symbol,
-          }).then((result) => {
-            publishInAppNotification({
-              correlations: [{
-                namespace: 'pacifica-order',
-                value: order.clientOrderId ?? String(order.orderId),
-              }],
-              kind: 'trade',
-              outcome: result.status === 'cancelled'
-                ? 'success'
-                : result.status === 'not_cancelled'
-                  ? 'error'
-                  : 'info',
-              scopeToken,
-              status: result.status === 'cancelled'
-                ? 'cancelled'
-                : result.status === 'pending'
-                  ? 'submitted'
-                  : result.status === 'not_cancelled'
-                    ? 'accepted'
-                    : result.orderStatus === 'filled'
-                      ? 'filled'
-                      : 'failed',
-              title: result.status === 'cancelled'
-                ? 'Order cancelled'
-                : result.status === 'pending'
-                  ? 'Cancellation reconciling'
-                  : result.status === 'not_cancelled'
-                    ? 'Cancellation not confirmed'
-                    : 'Order already closed',
-              message: result.status === 'cancelled'
-                ? `${order.symbol} order was cancelled.`
-                : result.status === 'pending'
-                  ? 'Pacifica may have received the cancellation. Do not submit it again.'
-                  : result.status === 'not_cancelled'
-                    ? `${order.symbol} order remains open. Refresh and retry the cancellation.`
-                    : `${order.symbol} order is already ${result.orderStatus?.replace('_', ' ')}.`,
-            });
-            accountData.refresh();
-          }).catch((cause) => {
-            if (__DEV__) console.error('[Perpal Pacifica order cancellation failed]', {
-              error: cause instanceof Error ? cause.message : typeof cause,
-            });
-            publishInAppNotification({
-              correlations: [{
-                namespace: 'pacifica-order',
-                value: order.clientOrderId ?? String(order.orderId),
-              }],
-              kind: 'trade',
-              outcome: cause instanceof PacificaCommandPendingError ? 'info' : 'error',
-              scopeToken,
-              status: cause instanceof PacificaCommandPendingError ? 'submitted' : 'failed',
-              title: cause instanceof PacificaCommandPendingError
-                ? 'Command still reconciling'
-                : 'Cancellation not accepted',
-              message: cause instanceof Error ? cause.message : 'Refresh the order before retrying.',
-            });
-          }).finally(() => setCancelling(null));
-        },
-      },
-    ],
-  );
-
   return (
-    <View style={styles.shell}>
+    <View style={styles.section}>
       <UnderlineTabs onSelect={setTab} options={TABS} selectedId={tab} />
       {account === null ? (
         <Text accessibilityLiveRegion="polite" style={styles.status}>Preparing private trading…</Text>
@@ -169,70 +89,63 @@ export function PacificaTradeAccountPanel({ apiOrigin }: { readonly apiOrigin: s
           {accountData.state.status === 'stale' ? (
             <Text accessibilityRole="alert" style={styles.stale}>Showing the last confirmed account snapshot.</Text>
           ) : null}
-          {tab === 'positions' ? <Positions positions={portfolio.positions} /> : null}
-          {tab === 'balance' ? <Balance portfolio={portfolio} /> : null}
-          {tab === 'orders' ? (
-            <Orders cancelling={cancelling} onCancel={cancel} orders={portfolio.orders} />
-          ) : null}
-          {tab === 'history' ? <TradeHistory activity={accountData.state.activity} /> : null}
+          {tab === 'positions' ? (
+            <Positions
+              apiOrigin={apiOrigin}
+              assetOrigin={assetOrigin}
+              closing={closer.closing}
+              onClose={closer.close}
+              positions={portfolio.positions}
+              wsOrigin={wsOrigin}
+            />
+          ) : (
+            <TradeHistory activity={accountData.state.activity} />
+          )}
         </>
       )}
     </View>
   );
 }
 
-function Positions({ positions }: { readonly positions: readonly PacificaPosition[] }) {
+/**
+ * The account's open positions on the portfolio's own card, in its trade form: each fact in a box of its
+ * own, and only what a decision about the position reads. Valued live here rather than in the panel, so a
+ * price tick redraws the cards and not the tabs around them.
+ */
+function Positions({
+  apiOrigin,
+  assetOrigin,
+  closing,
+  onClose,
+  positions,
+  wsOrigin,
+}: {
+  readonly apiOrigin: string;
+  readonly assetOrigin: string;
+  /** The position a close is under way for, by `positionKey`, which disables every Close until it ends. */
+  readonly closing: string | null;
+  readonly onClose: (position: PacificaPosition) => void;
+  readonly positions: readonly PacificaPosition[];
+  readonly wsOrigin: string;
+}) {
+  const live = useLivePositions({ apiOrigin, assetOrigin, positions, wsOrigin });
   if (positions.length === 0) return <Empty message="No open positions." />;
   return (
     <View style={styles.list}>
-      {positions.map((position) => (
-        <View key={`${position.symbol}:${position.side}`} style={styles.item}>
-          <View style={styles.itemHeader}>
-            <Text style={styles.itemTitle}>{position.symbol}</Text>
-            <Text style={position.side === 'long' ? styles.long : styles.short}>{position.side.toUpperCase()}</Text>
-          </View>
-          <StatusRow label="Size" value={decimal(position.amount)} />
-          <StatusRow label="Entry" value={`$${decimal(position.entryPrice)}`} />
-          <StatusRow label="Margin" value={`$${decimal(position.margin)} · ${position.marginMode}`} />
-          <StatusRow label="Liquidation" value={position.liquidationPrice === null ? '--' : `$${decimal(position.liquidationPrice)}`} />
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function Balance({ portfolio }: { readonly portfolio: PacificaPortfolioSnapshot }) {
-  return (
-    <View style={styles.balance}>
-      <StatusRow label="Account equity" value={`$${decimal(portfolio.accountEquity)}`} />
-      <StatusRow label="Available to trade" value={`$${decimal(portfolio.availableToSpend)}`} />
-      <StatusRow label="Margin in use" value={`$${decimal(portfolio.totalMarginUsed)}`} />
-      <StatusRow label="Available to withdraw" value={`$${decimal(portfolio.availableToWithdraw)}`} />
-    </View>
-  );
-}
-
-function Orders(props: {
-  readonly cancelling: number | null;
-  readonly onCancel: (order: PacificaOpenOrder) => void;
-  readonly orders: readonly PacificaOpenOrder[];
-}) {
-  if (props.orders.length === 0) return <Empty message="No open orders." />;
-  return (
-    <View style={styles.list}>
-      {props.orders.map((order) => (
-        <View key={order.orderId} style={styles.item}>
-          <View style={styles.itemHeader}>
-            <Text style={styles.itemTitle}>{order.symbol}</Text>
-            <Pressable accessibilityRole="button" disabled={props.cancelling !== null} onPress={() => props.onCancel(order)} style={styles.cancel}>
-              <Text style={styles.cancelLabel}>{props.cancelling === order.orderId ? 'Cancelling…' : 'Cancel'}</Text>
-            </Pressable>
-          </View>
-          <StatusRow label="Side" value={order.side === 'bid' ? 'Buy' : 'Sell'} />
-          <StatusRow label="Price" value={`$${decimal(order.price)}`} />
-          <StatusRow label="Filled" value={`${decimal(order.filledAmount)} / ${decimal(order.initialAmount)}`} />
-        </View>
-      ))}
+      {positions.map((position) => {
+        const key = positionKey(position);
+        return (
+          <PositionCard
+            key={key}
+            {...live(position)}
+            closeDisabled={closing !== null}
+            closing={closing === key}
+            facts="trade"
+            onClose={() => onClose(position)}
+            position={position}
+          />
+        );
+      })}
     </View>
   );
 }
@@ -306,13 +219,7 @@ function Empty({ message }: { readonly message: string }) {
 }
 
 function useTradeAccountData(apiOrigin: string, account: string | null) {
-  const subscribePortfolio = useCallback((listener: () => void) => (
-    account === null ? () => undefined : subscribePacificaPortfolioSnapshot(apiOrigin, account, listener)
-  ), [account, apiOrigin]);
-  const readPortfolio = useCallback(() => (
-    account === null ? EMPTY_PORTFOLIO : readPacificaPortfolioSnapshot(apiOrigin, account)
-  ), [account, apiOrigin]);
-  const portfolio = useSyncExternalStore(subscribePortfolio, readPortfolio, readPortfolio);
+  const portfolio = usePacificaAccountSnapshot(apiOrigin, account);
 
   const subscribeActivity = useCallback((listener: () => void) => (
     account === null ? () => undefined : subscribePacificaActivitySnapshot(apiOrigin, account, listener)
@@ -353,7 +260,8 @@ function zero(value: string): boolean {
 }
 
 const styles = StyleSheet.create({
-  shell: { gap: spacing.sm, padding: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
+  // Tabs and content straight on the page: no fill, rim or inset of its own.
+  section: { gap: spacing.sm },
   status: { ...typography.bodyCompact, paddingVertical: spacing.lg, textAlign: 'center', color: colors.textMuted },
   errorRow: { gap: spacing.sm, alignItems: 'center', paddingVertical: spacing.lg },
   error: { ...typography.bodyCompact, textAlign: 'center', color: colors.negative },
@@ -361,14 +269,9 @@ const styles = StyleSheet.create({
   retry: { minHeight: 40, justifyContent: 'center', paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radii.sm },
   retryLabel: { ...typography.label, color: colors.textPrimary },
   list: { gap: spacing.sm },
-  item: { gap: spacing.xs, padding: spacing.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.background },
-  itemHeader: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   itemTitle: { ...typography.label, color: colors.textPrimary },
   long: { ...typography.bodyCompact, color: colors.positive, fontVariant: ['tabular-nums'] },
   short: { ...typography.bodyCompact, color: colors.negative, fontVariant: ['tabular-nums'] },
-  balance: { gap: spacing.sm, paddingVertical: spacing.xs },
-  cancel: { minHeight: 36, justifyContent: 'center', paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.negative, borderRadius: radii.sm },
-  cancelLabel: { ...typography.caption, color: colors.negative },
   historyRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   historyText: { flex: 1, minWidth: 0, gap: spacing.xxs },
   historyValue: { alignItems: 'flex-end', gap: spacing.xxs },

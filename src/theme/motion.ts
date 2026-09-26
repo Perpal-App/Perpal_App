@@ -167,6 +167,17 @@ export const motion = {
     digitExitMs: 140,
   },
   /**
+   * A figure changing digit by digit: the digits that changed roll out and their replacements roll in, up
+   * for a larger number and down for a smaller one, while the digits that stayed hold still. Short enough
+   * that a slider dragged through several steps never leaves a queue of digits behind the thumb.
+   */
+  digitRoll: {
+    inMs: 200,
+    outMs: 140,
+    /** How far a digit travels, as a share of its size. */
+    travelShare: 0.5,
+  },
+  /**
    * The refusal shake, for input that cannot be accepted — a seventh decimal, a second point.
    *
    * The passcode field's gesture: a few quick, shrinking swings either side of rest. Small enough to
