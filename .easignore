@@ -45,6 +45,10 @@ expo-env.d.ts
 /jest.config.js
 /eslint.config.js
 
+# Presentation exports kept beside the app, such as the pitch deck. Native builds need no
+# root-level HTML, and the deck alone was 11 MB of every upload.
+/*.html
+
 # Local artifacts and OS/editor noise.
 *.apk
 *.aab
@@ -55,3 +59,33 @@ yarn-debug.*
 yarn-error.*
 .metro-health-check*
 .DS_Store
+Thumbs.db
+
+# Editor, IDE and agent state.
+/.vscode/
+/.idea/
+/.cursor/
+/.claude/
+/.kiro/
+/.zed/
+/.fleet/
+
+# Scratch, backup and temporary files.
+/tmp/
+/temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+**/__tests__/
+
+# Archives, heap dumps and signing material that can land in the tree by accident.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.hprof
+*.keystore

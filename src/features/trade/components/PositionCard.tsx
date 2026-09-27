@@ -1,5 +1,6 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, type AccessibilityActionEvent } from 'react-native';
 
 import { IOSLoader } from '@/components/feedback/IOSLoader';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -21,6 +22,9 @@ import { colors, gradients, interfaceType, radii, spacing } from '@/theme/tokens
 const UNAVAILABLE = '--';
 const MINUS = '\u2212';
 const LOGO = 20;
+const CHEVRON = 14;
+/** The one action a screen reader is offered on the title: the same open a tap on the card performs. */
+const OPEN_ACTIONS = [{ name: 'activate' }] as const;
 
 type Tone = 'muted' | 'negative' | 'plain' | 'positive';
 
@@ -73,6 +77,7 @@ export function PositionCard({
   leverage,
   market,
   onClose,
+  onOpen,
   position,
   snapshot,
 }: {
@@ -85,6 +90,11 @@ export function PositionCard({
   readonly leverage: number | null;
   readonly market: PositionMarket | null;
   readonly onClose: () => void;
+  /**
+   * Opens the position's market. Given, the whole card is the way there — a tap anywhere on it but its
+   * Close — and a chevron after the title says so. Left out where the card already sits on a market.
+   */
+  readonly onOpen?: () => void;
   readonly position: PacificaPosition;
   /** The live market for this position's instrument, or `null` until the feed has it. */
   readonly snapshot: PacificaMarketSnapshot | null;
@@ -105,7 +115,21 @@ export function PositionCard({
   // Said on the badge only in the trade form, and only once it is known: the badge never guesses.
   const badgeMultiple = facts === 'trade' ? multiple : null;
 
-  return (
+  const setup = `${side}, ${mode} margin${badgeMultiple === null ? '' : `, ${badgeMultiple} times leverage`}`;
+  // With somewhere to go, the title is the card's link for a screen reader: one element naming the position
+  // and where it leads, activated like a button. Touch needs none of this — the card itself takes the tap.
+  const link = onOpen === undefined ? {} : {
+    accessibilityActions: OPEN_ACTIONS,
+    accessibilityHint: `Opens the ${position.symbol} market`,
+    accessibilityLabel: `${position.symbol}, ${setup}`,
+    accessibilityRole: 'link' as const,
+    accessible: true,
+    onAccessibilityAction: (event: AccessibilityActionEvent) => {
+      if (event.nativeEvent.actionName === 'activate') onOpen();
+    },
+  };
+
+  const card = (
     <LinearGradient
       colors={gradients.surfaceRaise.colors}
       end={{ x: 0.5, y: 1 }}
@@ -114,11 +138,11 @@ export function PositionCard({
       style={styles.card}
     >
       <View style={styles.header}>
-        <View style={styles.identity}>
+        <View {...link} style={styles.identity}>
           <MarketLogo size={LOGO} symbol={position.symbol} url={market?.iconUrl ?? ''} />
           <Text accessibilityRole="header" numberOfLines={1} style={styles.symbol}>{position.symbol}</Text>
           <View
-            accessibilityLabel={`${side}, ${mode} margin${badgeMultiple === null ? '' : `, ${badgeMultiple} times leverage`}`}
+            accessibilityLabel={setup}
             accessible
             style={[styles.badge, { backgroundColor: long ? colors.depthBid : colors.depthAsk }]}
           >
@@ -126,6 +150,9 @@ export function PositionCard({
               {`${side} · ${mode}${badgeMultiple === null ? '' : ` · ${badgeMultiple}×`}`}
             </Text>
           </View>
+          {onOpen === undefined ? null : (
+            <Ionicons color={colors.textMuted} name="chevron-forward" size={CHEVRON} style={styles.chevron} />
+          )}
         </View>
         <CloseButton
           closing={closing}
@@ -180,6 +207,18 @@ export function PositionCard({
         ) : null}
       </View>
     </LinearGradient>
+  );
+
+  if (onOpen === undefined) return card;
+
+  // The card gives a little under the finger and opens its market on release. Close keeps its own touch:
+  // the innermost control under a finger takes it, so closing never opens the market too. A sideways
+  // swipe belongs to the row of cards and cancels the tap. Kept out of the accessibility tree, where the
+  // title carries the same action, so every fact and the Close stay readable on their own.
+  return (
+    <PressableScale accessible={false} onPress={onOpen} pressedScale={0.985}>
+      {card}
+    </PressableScale>
   );
 }
 
@@ -298,6 +337,8 @@ const styles = StyleSheet.create({
   symbol: { ...interfaceType.cardTitle, flexShrink: 0, color: colors.textPrimary },
   badge: { flexShrink: 1, minWidth: 0, paddingHorizontal: spacing.xs, paddingVertical: 1, borderRadius: radii.pill },
   badgeLabel: interfaceType.badge,
+  // Tucked against the badge, never pushed away from it: it says the title goes somewhere.
+  chevron: { flexShrink: 0, marginLeft: -2 },
   close: {
     minWidth: 56,
     height: 26,

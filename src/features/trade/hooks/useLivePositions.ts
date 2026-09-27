@@ -33,12 +33,14 @@ type MarketFacts = PositionMarket & { readonly maxLeverage: number };
 export function useLivePositions(input: {
   readonly apiOrigin: string;
   readonly assetOrigin: string;
+  /** Off while the cards are out of sight, so a hidden list does not hold the price feed. Default on. */
+  readonly enabled?: boolean;
   readonly positions: readonly PacificaPosition[];
   readonly wsOrigin: string;
 }): (position: PacificaPosition) => LivePositionFacts {
-  const { apiOrigin, assetOrigin, positions, wsOrigin } = input;
+  const { apiOrigin, assetOrigin, enabled = true, positions, wsOrigin } = input;
   const session = useTradingSession();
-  const live = positions.length > 0 && apiOrigin.length > 0 && wsOrigin.length > 0;
+  const live = enabled && positions.length > 0 && apiOrigin.length > 0 && wsOrigin.length > 0;
   const venue = usePacificaMarkets(apiOrigin, assetOrigin, wsOrigin, live);
   const settings = useMarginSettings({
     account: session.status === 'ready' ? session.address : null,

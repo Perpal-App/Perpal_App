@@ -6,10 +6,7 @@ import {
 } from '@/features/trade/components/ChartToolIcon';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
-/**
- * Footprint of a square icon control, and therefore the width of the drawing rail — a rail is a
- * column of these, so one number sizes both and they cannot drift apart.
- */
+/** Footprint of a square icon control, and the height every chart control shares. */
 export const CHART_ICON_SIZE = 40;
 
 /**

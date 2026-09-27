@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton } from '@/components/ui/ActionButton';
 import type { PacificaOpenOrder } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { colors, fonts, gradients, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, interfaceType, radii, spacing } from '@/theme/tokens';
 
 /**
  * An open order, on the same raised material as the action buttons. Positions have their own card,
@@ -16,9 +16,9 @@ import { colors, fonts, gradients, radii, spacing, typography } from '@/theme/to
  * activity feed below, where a gradient repeated down forty rows stops reading as a surface and
  * starts reading as stripes.
  *
- * Figures sit in the strip the market detail screen uses for a venue's headline numbers: an eyebrow
- * label over a semibold value, evenly spread, wrapping rather than clipping at large text sizes.
- * Six label-and-value rows said the same thing in six times the height.
+ * Figures sit in a strip: a quiet label over a semibold tabular value, evenly spread, wrapping rather
+ * than clipping at large text sizes. Six label-and-value rows said the same thing in six times the
+ * height.
  */
 function Card({ children }: { readonly children: ReactNode }) {
   return (
@@ -54,8 +54,8 @@ export function OrderCard({
       </View>
 
       <View style={styles.figures}>
-        <Figure label="AMOUNT" value={order.initialAmount} />
-        <Figure label="PRICE" value={usd(order.price)} />
+        <Figure label="Amount" value={order.initialAmount} />
+        <Figure label="Price" value={usd(order.price)} />
       </View>
 
       {/* The red material, because cancelling is the destructive path and the app keeps primary and
@@ -63,6 +63,7 @@ export function OrderCard({
       <ActionButton
         accessibilityHint={`Asks to confirm cancelling the ${order.symbol} order`}
         label="Cancel order"
+        labelStyle={interfaceType.control}
         onPress={onCancel}
         tone="negative"
       />
@@ -132,10 +133,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  symbol: { ...typography.label, flexShrink: 1, color: colors.textPrimary },
-  mode: { ...typography.caption, flex: 1, minWidth: 0, color: colors.textMuted },
-  long: { ...typography.label, flexShrink: 0, color: colors.positive },
-  short: { ...typography.label, flexShrink: 0, color: colors.negative },
+  symbol: { ...interfaceType.cardTitle, flexShrink: 1, color: colors.textPrimary },
+  mode: { ...interfaceType.caption, flex: 1, minWidth: 0, color: colors.textMuted },
+  long: { ...interfaceType.control, flexShrink: 0, color: colors.positive },
+  short: { ...interfaceType.control, flexShrink: 0, color: colors.negative },
   // Each cell is only as wide as its own content and the leftover space is shared, so the row reads
   // as evenly spaced without any cell being cut off. `wrap` is the safety valve rather than the
   // layout: at normal text size the five fit one line, and if the reader scales type up they drop to
@@ -147,15 +148,11 @@ const styles = StyleSheet.create({
     columnGap: spacing.sm,
     rowGap: spacing.sm,
   },
-  figure: { minWidth: 0 },
-  figureLabel: { ...typography.eyebrow, letterSpacing: 0.5, color: colors.textMuted },
-  // Caption size so five figures clear one row, but on the semibold face: these are numbers to
-  // scan, and the medium-weight caption reads as body copy.
-  figureValue: {
-    ...typography.caption,
-    fontFamily: fonts.semiBold,
-    color: colors.textPrimary,
-  },
+  figure: { minWidth: 0, gap: 1 },
+  // The position cards' grid pair — a quiet label over a semibold tabular value — so an order and a
+  // position read as the same kind of card.
+  figureLabel: { ...interfaceType.fieldLabel, color: colors.textMuted },
+  figureValue: { ...interfaceType.figureCompact, color: colors.textPrimary },
   negativeValue: { color: colors.negative },
   positiveValue: { color: colors.positive },
   absent: { color: colors.textMuted },

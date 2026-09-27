@@ -22,7 +22,7 @@ import { listWalletTokens } from '@/features/portfolio/components/withdrawalAsse
 import { listTradingCollateralOptions } from '@/integrations/perps/providerCollateral';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
 import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, radii, spacing } from '@/theme/tokens';
 
 /** Maximum number of overlapping RPC-sourced marks that fit a half-width summary tile. */
 const MAX_LOGOS = 4;
@@ -134,10 +134,14 @@ function Tile({
 
       <View style={styles.figure}>
         {value === null && !hidden ? (
-          <SkeletonText align="right" role="title" width={88} />
+          <SkeletonText align="right" metrics={interfaceType.figureLarge} width={84} />
         ) : (
           <ConcealedValue
+            // A four-figure balance is wider than half a card at this size: it gives up some of its size
+            // rather than a digit.
+            adjustsFontSizeToFit
             hidden={hidden}
+            minimumFontScale={0.7}
             numberOfLines={1}
             style={styles.value}
             // Only reachable while concealed — an absent figure shows the skeleton instead — so the
@@ -170,17 +174,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.glassHighlight,
   },
   head: { gap: spacing.xs },
-  label: { ...typography.caption, color: colors.textSecondary },
+  label: { ...interfaceType.overline, color: colors.textSecondary },
   tokens: { minHeight: 24, flexDirection: 'row', alignItems: 'center' },
   logoOverlap: { marginLeft: -6 },
-  // The activity cards' arrangement: the figure lands in the corner diagonally opposite the marks, held
-  // off the right edge by half a step more than the tile's own inset. A bold 26pt figure carries more
-  // mass to its boundary than caption-size text, so matching the label's inset reads tighter on the
-  // right than it does on the left.
+  // The figure lands in the corner diagonally opposite the marks, held off the right edge by half a step
+  // more than the tile's own inset. A bold display figure carries more mass to its boundary than
+  // label-size text, so matching the label's inset reads tighter on the right than on the left.
   figure: { alignItems: 'flex-end', paddingRight: spacing.xs },
-  value: {
-    ...typography.title,
-    color: colors.textPrimary,
-    fontVariant: ['tabular-nums'],
-  },
+  value: { ...interfaceType.figureLarge, color: colors.textPrimary },
 });

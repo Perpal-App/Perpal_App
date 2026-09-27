@@ -1,49 +1,13 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Skeleton, SkeletonText } from '@/components/feedback/Skeleton';
+import { SkeletonText } from '@/components/feedback/Skeleton';
+import type { ActivityItem } from '@/features/portfolio/components/activityItems';
 import {
-  ActivityMark,
   activityAmountColor,
   activityDirection,
-} from '@/features/portfolio/components/ActivityMark';
-import {
-  TokenPairMark,
-  TOKEN_PAIR_HEIGHT,
-  TOKEN_PAIR_WIDTH,
-} from '@/features/portfolio/components/TokenMark';
-import type { ActivityItem } from '@/features/portfolio/components/activityItems';
-import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
-import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
-
-/** Matched to the notification rows' mark, so one leading glyph size runs through the app. */
-const MARK = 26;
-
-/**
- * The slot both a direction glyph and a swap's asset pair sit in.
- *
- * Width is pinned to the single glyph and deliberately not widened for the pair, because the title
- * column has no room to give: `Moved to public wallet` measures within a few points of the space it
- * has, and a wrapped title is the one thing on this row that does make the card taller.
- *
- * Height is the taller of the two. This is the free dimension — the row is sized by its trailing
- * column, an amount over a timestamp, so anything up to that height costs nothing.
- */
-const MARK_SLOT = Math.max(MARK, TOKEN_PAIR_WIDTH);
-const MARK_SLOT_HEIGHT = Math.max(MARK, TOKEN_PAIR_HEIGHT);
-
-/** What the row is actually as tall as, and therefore the budget the mark has to stay inside. */
-const TRAILING_HEIGHT = typography.label.lineHeight + typography.eyebrow.lineHeight;
-
-/**
- * Centres the slot in the height the row already has.
- *
- * It used to centre on the title's single line, which was right for a 26pt mark and impossible for a
- * 34pt one — the arithmetic went negative and would have pulled the mark up into the card's padding.
- * Centring on the trailing column instead keeps both mark sizes inside a box the row was going to be
- * anyway, so neither can change its height.
- */
-const MARK_TOP = (TRAILING_HEIGHT - MARK_SLOT_HEIGHT) / 2;
+} from '@/features/portfolio/components/activityTone';
+import { colors, gradients, interfaceType, radii, spacing } from '@/theme/tokens';
 
 /**
  * How much of the row the amount may claim.
@@ -55,6 +19,7 @@ const MARK_TOP = (TRAILING_HEIGHT - MARK_SLOT_HEIGHT) / 2;
 const AMOUNT_MAX_WIDTH = '54%';
 
 const MAX_TEXT_SCALE = 1.3;
+const MINUS = '\u2212';
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   day: 'numeric',
@@ -64,100 +29,66 @@ const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
 });
 
 /**
- * One event in the history: what happened on the left, what it was worth on the right.
+ * One event in the history, in words and figures alone: what happened and its particulars on the left,
+ * what it was worth and when on the right.
  *
- * Two columns rather than two stacked lines. The old row put the title and the amount on one line
- * with the title on `flex: 1`, which meant the longest amounts — a swap printed both of its legs
- * there — ate the row and ellipsised the title down to "Swapped …". Amounts now own a column of their
- * own, right-ranged and tabular so the decimal points line up down the feed, with the timestamp
- * underneath as the only thing that qualifies them.
+ * No mark. The glyph that opened each row said the event's direction and nothing the words did not, and
+ * a column of them down the feed was what made it read as generated rather than designed. The direction
+ * lives in the amount's colour instead — green for value arriving, red for value leaving — and a failed
+ * event's title turns red as well, so a failure is stated in its words and its tone rather than by a
+ * shape. An event that moved nothing stays white.
  *
- * The supporting line is gone from every wallet movement, because it was ceremony: it restated the
- * wallet, asserted a confirmation implied by the row existing, and repeated the timestamp. Trades
- * keep theirs — size, price and fee are figures, and there is nowhere else for them.
- *
- * The card material is the order buttons' and the notification rows': `surfaceRaise` top to bottom
- * under a 1pt rim. The comment this file used to carry argued that a ramp repeated down forty rows
- * reads as stripes, and it was right about rows sharing one container edge to edge — a sawtooth of
- * light-dark-light-dark with nothing between the repeats. Separated cards break that: each one is
- * bounded by its own rim and by a gap of page darker than the ramp's own base, so it reads as forty
- * surfaces rather than as a striped one.
+ * Two lines on each side, on matched leading, so the amount sits on the title's line and the time on
+ * the particulars' line, and the times run down the feed as one column. Set in the interface face with
+ * the portfolio around it: a semibold name over a regular muted line, a semibold tabular amount over a
+ * regular muted time, and a true minus on every loss so the signs line up with the digits.
  */
-function bothLogos(
-  metadata: TokenMetadataMap,
-  pair: NonNullable<ActivityItem['pair']>,
-): { readonly received: string; readonly spent: string } | null {
-  const spent = metadata.get(pair.spentMint)?.imageUrl;
-  const received = metadata.get(pair.receivedMint)?.imageUrl;
-
-  return spent == null || received == null ? null : { received, spent };
-}
-
-export function ActivityRow({
-  item,
-  metadata,
-}: {
-  readonly item: ActivityItem;
-  readonly metadata: TokenMetadataMap;
-}) {
+export function ActivityRow({ item }: { readonly item: ActivityItem }) {
   const direction = activityDirection(item);
-  // Both or neither. A pair showing one real logo beside an empty gap is worse than the generic
-  // exchange glyph, and `TokenLogo` contributes no width when it has nothing to draw, so a half-
-  // resolved pair would also shift the title. Resolved here rather than inside the mark because
-  // `tokenMetadata` is explicit that a missing image stays missing — the substitute has to be the
-  // action, which this row already owns a glyph for, and never a guess at the asset.
-  const pairLogos = item.pair === undefined ? null : bothLogos(metadata, item.pair);
+  const value = item.value === null ? null : item.value.replace(/^-/u, MINUS);
+  const time = DATE_FORMATTER.format(new Date(item.createdAtMs));
+  const failed = item.outcome === 'error';
 
   return (
     <LinearGradient
+      accessibilityLabel={[item.title, value, item.detail, time].filter((part) => part !== null).join(', ')}
+      accessible
       colors={gradients.surfaceRaise.colors}
       end={{ x: 0.5, y: 1 }}
       locations={gradients.surfaceRaise.locations}
       start={{ x: 0.5, y: 0 }}
       style={styles.row}
     >
-      <View
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        pointerEvents="none"
-        style={styles.mark}
-      >
-        {pairLogos === null ? (
-          <ActivityMark direction={direction} item={item} size={MARK} />
-        ) : (
-          <TokenPairMark receivedUrl={pairLogos.received} spentUrl={pairLogos.spent} />
-        )}
-      </View>
-
       <View style={styles.body}>
-        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={2} style={styles.title}>
+        <Text
+          maxFontSizeMultiplier={MAX_TEXT_SCALE}
+          numberOfLines={2}
+          style={[styles.title, failed && styles.failed]}
+        >
           {item.title}
         </Text>
         {item.detail === null ? null : (
-          <Text
-            maxFontSizeMultiplier={MAX_TEXT_SCALE}
-            numberOfLines={1}
-            selectable
-            style={styles.detail}
-          >
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={2} selectable style={styles.detail}>
             {item.detail}
           </Text>
         )}
       </View>
 
       <View style={styles.trailing}>
-        {item.value === null ? null : (
+        {/* The amount's line is held even when there is no amount, so the time always sits on the
+            second line and the times form one column down the feed. */}
+        {value === null ? <View style={styles.amountLine} /> : (
           <Text
             maxFontSizeMultiplier={MAX_TEXT_SCALE}
             numberOfLines={1}
             selectable
             style={[styles.amount, { color: activityAmountColor(direction) }]}
           >
-            {item.value}
+            {value}
           </Text>
         )}
         <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={1} style={styles.time}>
-          {DATE_FORMATTER.format(new Date(item.createdAtMs))}
+          {time}
         </Text>
       </View>
     </LinearGradient>
@@ -165,15 +96,9 @@ export function ActivityRow({
 }
 
 /**
- * The row's own shape, waiting for data.
- *
- * Built from the row's constants and the row's style rather than approximated, so the card that
- * appears while history loads is the card that lands when it arrives: same material, same corner,
- * same mark slot, and the same trailing block of an amount over a timestamp. It replaced three bare
- * text bars floating on the page, which promised a list of lines and then delivered a list of cards.
- *
- * Sized for a one-line title and no supporting line — the shape most rows take — so a feed that
- * settles mostly stays where it was rather than growing under the reader.
+ * The row's own shape, waiting for data: the same card, a name over its particulars on the left and an
+ * amount over a time on the right, each bar on the leading of the line it stands in for, so the row that
+ * lands is the row that was held.
  */
 export function ActivityRowSkeleton() {
   return (
@@ -184,15 +109,13 @@ export function ActivityRowSkeleton() {
       start={{ x: 0.5, y: 0 }}
       style={styles.row}
     >
-      <View style={styles.mark}>
-        <Skeleton height={MARK} radius={radii.pill} width={MARK} />
-      </View>
       <View style={styles.body}>
-        <SkeletonText role="label" width="76%" />
+        <SkeletonText metrics={interfaceType.cardTitle} width="56%" />
+        <SkeletonText metrics={interfaceType.footnote} width="38%" />
       </View>
       <View style={styles.trailing}>
-        <SkeletonText align="right" role="label" width={102} />
-        <SkeletonText align="right" role="eyebrow" width={74} />
+        <SkeletonText align="right" metrics={interfaceType.figure} width={72} />
+        <SkeletonText align="right" metrics={interfaceType.figureFootnote} width={96} />
       </View>
     </LinearGradient>
   );
@@ -203,41 +126,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     overflow: 'hidden',
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radii.lg,
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
     borderCurve: 'continuous',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-  },
-  // Fixed box, so a swap's overlapped pair and a single direction glyph leave every title in the feed
-  // starting at the same x. Contents centre inside it, which is what lets the shorter pair share the
-  // taller glyph's optical line without a second offset to keep in step.
-  mark: {
-    width: MARK_SLOT,
-    height: MARK_SLOT_HEIGHT,
-    marginTop: MARK_TOP,
-    flexShrink: 0,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
   },
   // `minWidth: 0` is what lets the title wrap rather than forcing the row wider than the card: a flex
   // child's default minimum is its content, so one long unbroken title would push the amount off the
   // edge instead of taking a second line.
-  body: { flex: 1, minWidth: 0 },
-  title: { ...typography.label, color: colors.textPrimary },
-  detail: { ...typography.caption, color: colors.textMuted },
+  body: { flex: 1, minWidth: 0, gap: 2 },
+  title: { ...interfaceType.cardTitle, color: colors.textPrimary },
+  failed: { color: colors.negative },
+  // A step under a caption, so the particulars sit well back from the name and the amount above them.
+  detail: { ...interfaceType.footnote, color: colors.textMuted },
   // Never shrinks: the amount is the reason this column exists. Ranged right so the figures form a
   // column a reader can scan down instead of a ragged edge that follows the titles.
-  trailing: { flexShrink: 0, maxWidth: AMOUNT_MAX_WIDTH, alignItems: 'flex-end' },
-  amount: { ...typography.label, textAlign: 'right', fontVariant: ['tabular-nums'] },
-  // Under the amount rather than on a line of its own across the row. It is what qualifies the
-  // figure, and on its own line it was the least specific value on the row taking the most space.
-  time: {
-    ...typography.eyebrow,
-    letterSpacing: 0,
-    color: colors.textMuted,
-    textAlign: 'right',
-    fontVariant: ['tabular-nums'],
-  },
+  trailing: { flexShrink: 0, maxWidth: AMOUNT_MAX_WIDTH, alignItems: 'flex-end', gap: 2 },
+  amount: { ...interfaceType.figure, textAlign: 'right' },
+  amountLine: { height: interfaceType.figure.lineHeight },
+  time: { ...interfaceType.figureFootnote, color: colors.textMuted, textAlign: 'right' },
 });

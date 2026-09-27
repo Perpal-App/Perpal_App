@@ -46,10 +46,6 @@ const APP_FONTS = [
   { family: 'Poppins-Medium', path: './assets/fonts/poppins/Poppins-Medium.ttf' },
   { family: 'Poppins-SemiBold', path: './assets/fonts/poppins/Poppins-SemiBold.ttf' },
   { family: 'Poppins-Bold', path: './assets/fonts/poppins/Poppins-Bold.ttf' },
-  {
-    family: 'PatrickHand-Regular',
-    path: './assets/fonts/Patrick_Hand/PatrickHand-Regular.ttf',
-  },
 ] as const;
 
 /**

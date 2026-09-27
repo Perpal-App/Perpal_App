@@ -7,21 +7,20 @@
  * output is a TypeScript module holding the document as a string; regenerate it
  * with `npm run generate:chart` after changing anything here or in ./chart.
  *
- * The runtime is split in three so no source outgrows the file-size budget:
- * `chart/runtime.mjs` owns the series, legend and scale gestures,
- * `chart/drawings.mjs` owns the tool layer and its renderers, and
- * `chart/tools.mjs` registers the remaining tools onto it. All three are
- * concatenated into one closure, in that order, so the drawing layer reads the
- * chart handles directly instead of through a bridge and the last file extends
- * the tool tables in place.
+ * The runtime is split so no source outgrows the file-size budget:
+ * `chart/runtime.mjs` owns the series, legend and scale gestures, and
+ * `chart/positions.mjs` draws the account's position lines and their close
+ * controls. They are concatenated into one closure, runtime first, so the
+ * position layer reads the chart handles directly instead of through a bridge,
+ * and the boot lines go last, so the document only says it is ready once every
+ * handler exists.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DRAWING_RUNTIME } from './chart/drawings.mjs';
-import { CHART_RUNTIME } from './chart/runtime.mjs';
-import { EXTRA_TOOLS_RUNTIME } from './chart/tools.mjs';
+import { POSITIONS_RUNTIME } from './chart/positions.mjs';
+import { CHART_BOOT, CHART_RUNTIME } from './chart/runtime.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const libraryPath = join(
@@ -45,9 +44,6 @@ const html = `<!doctype html>
     body { font-family: system-ui, -apple-system, sans-serif; }
     #wrap { position: relative; }
     #chart { position: absolute; inset: 0; }
-    /* Sits over the chart and only takes touches while a tool is armed, so pan,
-       pinch and the axis drags stay with the chart the rest of the time. */
-    #draw { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
     #legend {
       position: absolute; z-index: 4; top: 10px; left: 12px; right: 64px;
       color: #bdb8cc; font-size: 12px; line-height: 18px; pointer-events: none;
@@ -67,7 +63,6 @@ const html = `<!doctype html>
 <body>
   <div id="wrap">
     <div id="chart"></div>
-    <canvas id="draw"></canvas>
     <div id="legend" aria-live="polite"></div>
     <div id="scale">manual scale</div>
   </div>
@@ -75,8 +70,8 @@ const html = `<!doctype html>
   <script>
     (() => {
       ${CHART_RUNTIME}
-      ${DRAWING_RUNTIME}
-      ${EXTRA_TOOLS_RUNTIME}
+      ${POSITIONS_RUNTIME}
+      ${CHART_BOOT}
     })();
   </script>
 </body>

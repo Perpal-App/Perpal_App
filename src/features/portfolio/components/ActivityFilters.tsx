@@ -108,6 +108,7 @@ export function ActivityFilters({
     <View style={styles.controls}>
       <View style={styles.field}>
         <SearchField
+          face="interface"
           flush
           onChangeText={onQueryChange}
           placeholder={SEARCH_PLACEHOLDER}
@@ -141,6 +142,7 @@ export function ActivityFilters({
 
       <AnchoredMenu
         anchor={anchor}
+        face="interface"
         onClose={() => setOpen(false)}
         onSelect={(next) => {
           onFilterChange(next);

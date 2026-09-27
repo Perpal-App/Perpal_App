@@ -124,10 +124,16 @@ export function Skeleton({
  */
 export function SkeletonText({
   align = 'left',
+  metrics,
   role = 'label',
   width,
 }: {
   readonly align?: 'left' | 'right';
+  /**
+   * The size and leading of the line it stands in for, where that line is set in a role outside
+   * `typography` — the interface scale. Takes the place of `role`.
+   */
+  readonly metrics?: { readonly fontSize: number; readonly lineHeight: number };
   readonly role?:
     | 'eyebrow'
     | 'label'
@@ -139,7 +145,7 @@ export function SkeletonText({
     | 'display';
   readonly width: DimensionValue;
 }) {
-  const line = typography[role];
+  const line = metrics ?? typography[role];
 
   return (
     <View

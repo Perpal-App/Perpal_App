@@ -286,4 +286,35 @@ export const motion = {
     offsetRatio: 0.16,
     contentDelay: 300,
   },
+  /**
+   * The segmented control, tuned to feel like UIKit's.
+   *
+   * `slide` carries the thumb from one segment to the next: quick to leave and a long soft arrival, with a
+   * damping ratio just under 1, so it settles with no bounce you can see. `press` is the thumb giving under
+   * a finger — to `squeeze` of its size — stiff enough to answer the touch at once. `pane` is what the
+   * control switches arriving under it: a short fade with `travel` points of slide from the side the thumb
+   * went, so the content and the control read as one movement.
+   */
+  segment: {
+    slide: { duration: 380, dampingRatio: 0.88 },
+    press: { duration: 220, dampingRatio: 1 },
+    squeeze: 0.95,
+    pane: { duration: 260, travel: 18 },
+  },
+  /**
+   * A dialog growing out of the control that asked for it, and going back into it: the morph iOS gives a
+   * menu or an alert rising from a button.
+   *
+   * `open` is a spring with a breath of overshoot, so the card lands as a soft object rather than a sliding
+   * plate. `closeMs` is a short fixed curve rather than a spring: a spring's long tail left the dialog
+   * invisible but still in front of the screen, and a screen that ignores taps for a moment after a dialog
+   * has gone reads as stuck. `fromControl` is the size it grows from when there is a control to grow from,
+   * `fromScale` when there is not.
+   */
+  dialog: {
+    open: { duration: 460, dampingRatio: 0.82 },
+    closeMs: 220,
+    fromControl: 0.1,
+    fromScale: 0.94,
+  },
 } as const;

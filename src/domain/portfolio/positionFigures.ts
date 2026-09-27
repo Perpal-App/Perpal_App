@@ -67,8 +67,8 @@ export function positionFigures(
   let size: bigint;
   let entry: bigint;
   try {
-    size = abs(parseAmount(position.amount, VENUE_DECIMALS).baseUnits);
-    entry = parseAmount(position.entryPrice, VENUE_DECIMALS).baseUnits;
+    size = abs(venueAmount(position.amount).baseUnits);
+    entry = venueAmount(position.entryPrice).baseUnits;
   } catch {
     return null;
   }
@@ -95,10 +95,60 @@ export function positionFigures(
   };
 }
 
+/**
+ * A venue decimal at ten places. The venue does not always stop there: an average entry — a market order
+ * filled across several levels of a thin book — can carry more, and read strictly that one extra place
+ * left the whole position unvalued, and off the chart. The excess is dropped toward zero instead: less
+ * than a ten-billionth of a unit of price, far under anything shown.
+ */
+function venueAmount(text: string): Amount {
+  const match = /^(-?\d*)\.(\d+)$/u.exec(text.trim());
+  const fraction = match?.[2];
+  if (match !== null && fraction !== undefined && fraction.length > VENUE_DECIMALS) {
+    return parseAmount(`${match[1] ?? ''}.${fraction.slice(0, VENUE_DECIMALS)}`, VENUE_DECIMALS);
+  }
+  return parseAmount(text, VENUE_DECIMALS);
+}
+
+/** Several positions valued together. */
+export type PositionTotals = {
+  /** The capital behind them all, or `null` while any one position's is not known. */
+  readonly marginUsed: Amount | null;
+  /** The move as basis points of what the positions cost to open. */
+  readonly pnlBps: number | null;
+  /** The profit or loss as basis points of the capital behind them: return on margin. */
+  readonly roeBps: number | null;
+  readonly unrealizedPnl: Amount;
+};
+
+/**
+ * The positions' own figures added up, for a headline that has to agree with the cards under it to the
+ * cent: the same exact amounts, summed before anything is rounded, and rates taken on the same bases the
+ * cards use. `null` while any position cannot be valued — a total with one of its parts missing is a wrong
+ * number, not a small one. No positions is a real zero.
+ */
+export function totalPositionFigures(figures: readonly (PositionFigures | null)[]): PositionTotals | null {
+  let pnl = 0n;
+  let entry = 0n;
+  let margin: bigint | null = 0n;
+  for (const item of figures) {
+    if (item === null || item.unrealizedPnl === null) return null;
+    pnl += item.unrealizedPnl.baseUnits;
+    entry += item.entryValue.baseUnits;
+    margin = margin === null || item.marginUsed === null ? null : margin + item.marginUsed.baseUnits;
+  }
+  return {
+    marginUsed: margin === null ? null : amountFromBaseUnits(margin, USD_DECIMALS),
+    pnlBps: entry === 0n ? null : Number((pnl * 10_000n) / entry),
+    roeBps: margin === null || margin === 0n ? null : Number((pnl * 10_000n) / margin),
+    unrealizedPnl: amountFromBaseUnits(pnl, USD_DECIMALS),
+  };
+}
+
 function marginUsed(position: PacificaPosition, entryValue: bigint, leverage: number | null): bigint | null {
   if (position.marginMode === 'isolated') {
     try {
-      return parseAmount(position.margin, VENUE_DECIMALS).baseUnits / VENUE_TO_USD;
+      return venueAmount(position.margin).baseUnits / VENUE_TO_USD;
     } catch {
       return null;
     }
@@ -109,7 +159,7 @@ function marginUsed(position: PacificaPosition, entryValue: bigint, leverage: nu
 function liquidationLevel(value: string | null): LiquidationLevel {
   if (value === null) return { kind: 'unknown' };
   try {
-    const price = parseAmount(value, VENUE_DECIMALS);
+    const price = venueAmount(value);
     return price.baseUnits <= 0n ? { kind: 'belowZero', price } : { kind: 'price', price };
   } catch {
     return { kind: 'unknown' };

@@ -6,7 +6,9 @@ import {
   MarketChartOptions,
   type ChartStyle,
 } from '@/features/trade/components/MarketChartOptions';
+import type { DialogOrigin } from '@/components/ui/ConfirmDialog';
 import { MarketChartTimeframes } from '@/features/trade/components/MarketChartTimeframes';
+import { tickPlaces } from '@/features/trade/components/positionText';
 import { TRADING_VIEW_CHART_HTML } from '@/features/trade/generated/tradingViewChartHtml';
 import type { MarketHistoryStatus } from '@/features/trade/hooks/usePacificaMarketHistory';
 import {
@@ -66,21 +68,29 @@ function TradingViewMarketChartComponent({
   positions = NO_POSITIONS,
   status,
   symbol,
+  tickSize,
   timeframe,
 }: {
   readonly candles: readonly MarketCandle[];
   readonly fill?: boolean;
-  /** A position line's × was tapped. The chart has not closed anything; it only asks. */
-  readonly onClosePosition?: (id: string) => void;
+  /**
+   * A position line's × was tapped, with where on screen it is, or `null` if that could not be read. The
+   * chart has not closed anything; it only asks.
+   */
+  readonly onClosePosition?: (id: string, origin: DialogOrigin | null) => void;
   readonly onExpand?: () => void;
   readonly onTimeframeChange: (timeframe: MarketTimeframe) => void;
   /** The account's open positions on this market. */
   readonly positions?: readonly ChartPositionLine[];
   readonly status: MarketHistoryStatus;
   readonly symbol: string;
+  /** The market's price step: the axis, the last price and every entry are printed at it. */
+  readonly tickSize: string;
   readonly timeframe: MarketTimeframe;
 }) {
   const webView = useRef<WebView>(null);
+  /** The canvas's frame, measured when a × is tapped to turn the document's point into a screen one. */
+  const frame = useRef<View>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [chartStyle, setChartStyle] = useState<ChartStyle>('candles');
@@ -98,6 +108,8 @@ function TradingViewMarketChartComponent({
    */
   const shouldFit = useRef(true);
   const timeframeLabel = MARKET_TIMEFRAMES.find((item) => item.id === timeframe)?.label ?? timeframe;
+  const places = tickPlaces(tickSize);
+  const minMove = Number(tickSize);
   const payload = useMemo(() => ({
     type: 'market_data',
     candles: candles.map((candle) => ({
@@ -108,11 +120,13 @@ function TradingViewMarketChartComponent({
       close: candle.close,
     })),
     ema: showEma,
+    // Only a step that reads cleanly; without one the chart keeps the precision it has.
+    priceFormat: places === null || !(minMove > 0) ? null : { minMove, precision: places },
     sma: showSma,
     style: chartStyle,
     symbol,
     timeframe: timeframeLabel,
-  }), [candles, chartStyle, showEma, showSma, symbol, timeframeLabel]);
+  }), [candles, chartStyle, minMove, places, showEma, showSma, symbol, timeframeLabel]);
 
   /**
    * The newest payload the chart has not acknowledged receiving.
@@ -157,7 +171,12 @@ function TradingViewMarketChartComponent({
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {
-      const value = JSON.parse(event.nativeEvent.data) as { id?: unknown; type?: unknown };
+      const value = JSON.parse(event.nativeEvent.data) as {
+        id?: unknown;
+        type?: unknown;
+        x?: unknown;
+        y?: unknown;
+      };
       if (value.type === 'ready') {
         shouldFit.current = true;
         setReady(true);
@@ -168,7 +187,17 @@ function TradingViewMarketChartComponent({
         if (queued !== null) deliver(queued);
         webView.current?.postMessage(latestPositions.current);
       } else if (value.type === 'close_position') {
-        if (typeof value.id === 'string') onClosePosition?.(value.id);
+        const id = value.id;
+        if (typeof id !== 'string' || onClosePosition === undefined) return;
+        const { x, y } = value;
+        const canvas = frame.current;
+        if (typeof x !== 'number' || typeof y !== 'number' || canvas === null) {
+          onClosePosition(id, null);
+          return;
+        }
+        // The document's point is the canvas's own; the frame's place in the window turns it into the
+        // screen point the confirmation grows from.
+        canvas.measureInWindow((left, top) => onClosePosition(id, { x: left + x, y: top + y }));
       } else if (value.type === 'chart_error') {
         setFailed(true);
       }
@@ -212,8 +241,9 @@ function TradingViewMarketChartComponent({
 
       <View
         accessibilityLabel={`Interactive chart for ${symbol}. Drag to pan, pinch sideways to zoom time, pinch vertically to zoom price.${
-          positions.length === 0 ? '' : ' Your open position is drawn at its entry price; close it from Positions.'
+          positions.length === 0 ? '' : ' Your open position is drawn as a line at its entry price.'
         }`}
+        ref={frame}
         style={[styles.chart, fill && styles.chartFill]}
       >
         {mounted ? (

@@ -10,6 +10,11 @@ export const colors = {
   background: '#07060B',
   surface: '#101116',
   surfaceElevated: '#171820',
+  /**
+   * A secondary control's fill on a surface that is already raised — a dialog, a sheet: one step above
+   * `surfaceElevated`, so it reads as a raised object beside a lit one rather than as a hole cut in it.
+   */
+  controlFill: '#262733',
 
   backgroundTinted: '#0C0916',
   surfaceTinted: '#15121D',

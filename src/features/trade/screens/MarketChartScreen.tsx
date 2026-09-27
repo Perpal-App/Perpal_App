@@ -9,6 +9,7 @@ import { readAppConfig } from '@/config/appConfig';
 import { formatCompactTokenPrice, formatCompactUsd } from '@/domain/money/amount';
 import { ChartToolIcon } from '@/features/trade/components/ChartToolIcon';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
+import { PositionCloseDialog } from '@/features/trade/components/PositionCloseDialog';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { useChartOrientation } from '@/features/trade/hooks/useChartOrientation';
 import { useChartPositions } from '@/features/trade/hooks/useChartPositions';
@@ -153,8 +154,10 @@ export function MarketChartScreen() {
           positions={chartPositions.lines}
           status={history.status}
           symbol={`${market.baseAsset}/USD`}
+          tickSize={market.tickSize}
           timeframe={timeframe}
         />
+        <PositionCloseDialog {...chartPositions.dialog} />
         {!isLandscape ? (
           <Text style={styles.rotate}>
             Tap the expand control for landscape, or just rotate the phone.

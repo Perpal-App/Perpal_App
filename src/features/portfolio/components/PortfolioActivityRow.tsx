@@ -5,16 +5,11 @@ import { StyleSheet, Text, View } from 'react-native';
 import { PnlTrendIcon, TradesIcon } from '@/assets/svg/ActivityStatIcons';
 import { SkeletonText } from '@/components/feedback/Skeleton';
 import { ConcealedValue, CONCEALED_MASK } from '@/components/ui/ConcealedValue';
-import {
-  amountTone,
-  percent,
-  signedMoney,
-  unrealizedPnl,
-  unrealizedRate,
-  type FigureTone,
-} from '@/domain/portfolio/accountFigures';
+import { formatSignedBpsPercent, formatSignedDetailedUsd } from '@/domain/money/amount';
+import { amountTone, type FigureTone } from '@/domain/portfolio/accountFigures';
+import { useLiveUnrealized } from '@/features/portfolio/hooks/useLiveUnrealized';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, interfaceType, radii, spacing } from '@/theme/tokens';
 
 /** Tracks the icons' own size, so the slot never crops the glyph it holds. */
 const MARK_SIZE = 28;
@@ -31,16 +26,16 @@ const MARK_SIZE = 28;
  * Recomputing this from the *current* layout would defeat it. The point is that the pair keeps the size
  * it had, so it stays in proportion with the holdings tiles above.
  *
- * With the mark at 28 and the figure at `title`, the content now measures past this on its own, so it
- * acts as a floor rather than as the binding height — kept for the case where a figure or the rate line
- * goes missing and the card would otherwise collapse under its neighbour.
+ * With the mark at 28 and the figure at `figureLarge`, the content now measures past this on its own, so
+ * it acts as a floor rather than as the binding height — kept for the case where a figure or the rate
+ * line goes missing and the card would otherwise collapse under its neighbour.
  */
 const CARD_MIN_HEIGHT =
   spacing.md * 2 +
-  typography.caption.lineHeight +
+  interfaceType.overline.lineHeight +
   MARK_SIZE +
-  typography.label.lineHeight +
-  typography.eyebrow.lineHeight +
+  interfaceType.figure.lineHeight +
+  interfaceType.figureCaption.lineHeight +
   spacing.xs * 3;
 
 /** The arrow's direction is information; its colour is not. The figure below carries the tone. */
@@ -68,8 +63,9 @@ export function PortfolioActivityRow({
   readonly hidden: boolean;
   readonly portfolio: PacificaPortfolioSnapshot | null;
 }) {
-  const pnl = unrealizedPnl(portfolio);
-  const rate = unrealizedRate(portfolio, pnl);
+  // The cards' own figures, summed, so this and the position cards below agree to the cent — and the rate
+  // is taken on the same base as theirs, the margin behind the positions.
+  const { pnl, positionRateBps: rate } = useLiveUnrealized(portfolio);
   const tone = amountTone(pnl);
 
   return (
@@ -82,12 +78,12 @@ export function PortfolioActivityRow({
         value={portfolio === null ? null : String(portfolio.positions.length)}
       />
       <StatCard
-        caption={rate === null || hidden ? null : percent(rate)}
+        caption={rate === null || hidden ? null : formatSignedBpsPercent(rate).replace('-', '\u2212')}
         hidden={hidden}
         icon={<PnlTrendIcon direction={TREND[tone]} />}
         label="Unrealized PnL"
         tone={tone}
-        value={signedMoney(pnl)}
+        value={pnl === null ? null : formatSignedDetailedUsd(pnl)}
       />
     </View>
   );
@@ -134,13 +130,15 @@ function StatCard({
 
       <View style={styles.figure}>
         {value === null && !hidden ? (
-          <SkeletonText align="right" role="title" width={96} />
+          <SkeletonText align="right" metrics={interfaceType.figureLarge} width={92} />
         ) : (
           <ConcealedValue
+            adjustsFontSizeToFit
             hidden={hidden}
             // A tone is a claim about the figure, so the mask must stop making it: it returns to the
             // plain colour while the value fades out still wearing its own.
             maskStyle={styles.value}
+            minimumFontScale={0.7}
             numberOfLines={1}
             style={[
               styles.value,
@@ -189,31 +187,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  label: { ...typography.caption, color: colors.textSecondary },
+  // The tiles' label above: the same role, so every name on the summary reads as one kind of thing.
+  label: { ...interfaceType.overline, color: colors.textSecondary },
   // Ranged right and pinned to the base by the card's `space-between`, so the figure lands in the
   // corner diagonally opposite its mark. The two read as one block, which is why the rate sits inside
   // this rather than on the card.
   //
   // Held off the right edge by half a step more than the card's own inset. Flush against it, a bold
-  // 26pt figure sat closer to the edge than the label does on the other side — optically tighter than
-  // the same measurement reads at caption size, because the heavier the type the more its mass carries
-  // to the boundary.
+  // display figure sat closer to the edge than the label does on the other side — optically tighter
+  // than the same measurement reads at label size, because the heavier the type the more its mass
+  // carries to the boundary.
   figure: { alignItems: 'flex-end', gap: 2, paddingRight: spacing.xs },
-  // `title`, well above the holdings tiles' `label`. These cards carry a single figure with nothing
-  // competing beside it, where a tile has to leave room for a row of logos over its own.
-  value: {
-    ...typography.title,
-    color: colors.textPrimary,
-    textAlign: 'right',
-    fontVariant: ['tabular-nums'],
-  },
-  caption: {
-    ...typography.eyebrow,
-    letterSpacing: 0,
-    color: colors.textMuted,
-    textAlign: 'right',
-    fontVariant: ['tabular-nums'],
-  },
+  // The balance tiles' figure role, so the four figures under the total are one size and one weight.
+  value: { ...interfaceType.figureLarge, color: colors.textPrimary, textAlign: 'right' },
+  caption: { ...interfaceType.figureCaption, color: colors.textMuted, textAlign: 'right' },
   positive: { color: colors.positive },
   negative: { color: colors.negative },
 });

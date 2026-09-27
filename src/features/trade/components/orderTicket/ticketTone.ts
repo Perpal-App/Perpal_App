@@ -3,7 +3,7 @@ import type { PacificaOrderSide } from '@/integrations/perps/pacifica/pacificaOr
 import { colors } from '@/theme/tokens';
 
 /** The colours the ticket can take: the trade's side, or the accent on the deposit form. */
-export type TicketTone = Exclude<ActionButtonTone, 'neutral'>;
+export type TicketTone = Exclude<ActionButtonTone, 'neutral' | 'secondary'>;
 
 /**
  * What each tone paints a chosen control with: `ink` for its label, `rim` for its edge and any filled

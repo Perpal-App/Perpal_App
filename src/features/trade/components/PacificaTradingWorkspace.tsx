@@ -10,6 +10,7 @@ import { PacificaTradesPanel } from '@/features/trade/components/PacificaMarketT
 import { PacificaFundingPanel } from '@/features/trade/components/PacificaFundingPanel';
 import { PacificaLiquidationsPanel } from '@/features/trade/components/PacificaLiquidationsPanel';
 import { PacificaTradeAccountPanel } from '@/features/trade/components/PacificaTradeAccountPanel';
+import { PositionCloseDialog } from '@/features/trade/components/PositionCloseDialog';
 import { TradingViewMarketChart } from '@/features/trade/components/TradingViewMarketChart';
 import { useChartPositions } from '@/features/trade/hooks/useChartPositions';
 import { usePacificaMarketHistory } from '@/features/trade/hooks/usePacificaMarketHistory';
@@ -92,8 +93,10 @@ export function PacificaTradingWorkspace(props: {
         positions={chartPositions.lines}
         status={history.status}
         symbol={`${props.market.baseAsset}/USD`}
+        tickSize={props.market.tickSize}
         timeframe={timeframe}
       />
+      <PositionCloseDialog {...chartPositions.dialog} />
 
       <PacificaTradeAccountPanel
         apiOrigin={apiOrigin}

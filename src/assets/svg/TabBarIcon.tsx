@@ -56,16 +56,18 @@ const glyphByName: Record<TabIconName, Glyph> = {
     solid: 'M13.5 6.8h5.2v5.2Z',
     solidStroke: 'M4.1 15.6 8.6 11.1l3 3 5.2-5.2',
   },
-  // Pie with one quarter called out: dividers as radii at rest, the quarter cut away when
-  // solid. Both alternatives tried first failed for the same reason — they relied on a gap
-  // a pill-sized glyph cannot show. Thin slots along the radii read as a clock face, and
-  // offsetting the quarter to sit just outside the disc closed up into a plain circle.
-  // Taking the quarter out entirely needs no gap to be legible at all.
+  // Pie with one quarter called out: dividers as radii at rest; when solid, the whole pie is
+  // there, with the quarter pulled out from the rest of it.
+  //
+  // The solid used to cut the quarter away altogether, and that read as a clipped glyph — a
+  // disc with a bite out of it — rather than as a pie. The quarter is back, drawn out along its
+  // own bisector so it stands apart from the body by 1.8 units: at 21pt that is about 1.6pt, a
+  // gap that stays open on the pill. An earlier attempt at this closed up into a plain circle
+  // because its gap was a fraction of that. The body and the quarter are shifted back together
+  // by half the pull, so the pair is centred in the box and nothing crosses its edge.
   portfolio: {
     outline: 'M12 3.9a8.1 8.1 0 1 0 0 16.2 8.1 8.1 0 0 0 0-16.2ZM12 12V3.9M12 12h8.1',
-    solid:
-      'M12 3.6a8.4 8.4 0 1 0 0 16.8 8.4 8.4 0 0 0 0-16.8ZM12 12V3.6A8.4 8.4 0 0 1 20.4 12Z',
-    solidHasHole: true,
+    solid: 'M11.1 12.9V5A7.9 7.9 0 1 0 19 12.9ZM12.9 11.1V3.2A7.9 7.9 0 0 1 20.8 11.1Z',
   },
   // Head and shoulders. The outline leaves the shoulders as an open arc, which is lighter
   // than a closed U at this size; the solid closes them into a body.

@@ -20,8 +20,10 @@
  * 2. Every line leads at ~1.5x its size. Poppins' glyph box is 1.4em tall
  *    (ascender 1.05em + descender 0.35em) and its natural line is 1.5em; Android
  *    crops a line whose `lineHeight` is shorter than the glyph box, which is how
- *    descenders and accents get shaved. Patrick Hand's box is 1.36em, so the
- *    wordmark leads at that instead. Keep any local override on the same ratio.
+ *    descenders and accents get shaved. Keep any local override on the same ratio.
+ *
+ * Every face named here is embedded natively by `app.config.ts`, and only these:
+ * a face that nothing renders is dead weight in every build.
  */
 
 export const fonts = {
@@ -29,8 +31,6 @@ export const fonts = {
   medium: 'Poppins-Medium',
   semiBold: 'Poppins-SemiBold',
   bold: 'Poppins-Bold',
-  /** Handwritten face, reserved for the Perpal wordmark. */
-  brand: 'PatrickHand-Regular',
 } as const;
 
 export type FontFace = (typeof fonts)[keyof typeof fonts];

@@ -19,12 +19,11 @@ import {
 import { usePacificaActivity } from '@/features/portfolio/hooks/usePacificaActivity';
 import { useSolanaWalletActivity } from '@/features/portfolio/hooks/useSolanaWalletActivity';
 import type { GatewayRequestSigner } from '@/integrations/api/gatewayClient';
-import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
 import {
   readInAppNotifications,
   subscribeInAppNotifications,
 } from '@/storage/inAppNotifications';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, radii, spacing } from '@/theme/tokens';
 
 const VISIBLE_PAGE_SIZE = 20;
 
@@ -44,7 +43,6 @@ export function GlobalActivityTracker({
   account,
   apiOrigin,
   generation,
-  metadata,
   pacificaProgramId,
   paused,
   publicAccount,
@@ -56,15 +54,6 @@ export function GlobalActivityTracker({
   readonly account: string;
   readonly apiOrigin: string;
   readonly generation: number;
-  /**
-   * Token artwork, from the map the balance refresh already fetches.
-   *
-   * Passed to the rows rather than folded into `mergeActivity`, which is a pure transform over the
-   * activity sources. Threading a network-derived map through it would put an image URL inside
-   * `ActivityItem` — coupling the item model to RPC state — and add the map to that memo's deps, so a
-   * forty-row list would rebuild on every balance refresh even when no activity had changed.
-   */
-  readonly metadata: TokenMetadataMap;
   readonly pacificaProgramId: string;
   /**
    * Stops wallet-history RPC while a funding sheet owns the user's attention.
@@ -153,9 +142,11 @@ export function GlobalActivityTracker({
 
   return (
     <View style={styles.section}>
-      <View style={styles.header}>
-        <Text accessibilityRole="header" style={styles.heading}>Activity</Text>
-        {remoteUnavailable ? (
+      {/* Named by the segment above it, so no heading of its own; the row appears only to offer the
+          retry when a source could not be read. */}
+      {remoteUnavailable ? (
+        <View style={styles.header}>
+          <Text accessibilityLiveRegion="polite" style={styles.notice}>Activity may be out of date.</Text>
           <PressableScale
             accessibilityLabel="Retry activity"
             accessibilityRole="button"
@@ -167,8 +158,8 @@ export function GlobalActivityTracker({
           >
             <Text style={styles.retryText}>Retry</Text>
           </PressableScale>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
 
       {/* Always mounted, including on an empty history. Gating them on there being something to
           search meant the controls appeared and disappeared as the first event landed, and a reader
@@ -216,7 +207,7 @@ export function GlobalActivityTracker({
           </Text>
         ) : (
           displayed.map((item) => (
-            <ActivityRow item={item} key={item.id} metadata={metadata} />
+            <ActivityRow item={item} key={item.id} />
           ))
         )}
       </View>
@@ -280,9 +271,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
   },
-  // `label`, matching the other section headings on this screen rather than the larger `heading` it
-  // used: one screen, one level of section title.
-  heading: { ...typography.label, flex: 1, color: colors.textPrimary },
+  notice: { ...interfaceType.caption, flex: 1, color: colors.textSecondary },
   retry: {
     minWidth: 52,
     minHeight: 36,
@@ -291,7 +280,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     backgroundColor: colors.surfaceElevated,
   },
-  retryText: { ...typography.label, color: colors.accentSoft },
+  retryText: { ...interfaceType.controlCompact, color: colors.accentSoft },
   // Clipped, and that is what makes the morph read as a shape rather than a slide: the rows are laid
   // out at their final size the instant a filter changes while the box is still travelling to meet
   // them, so the overflow would otherwise spill past it for the length of the spring.
@@ -301,8 +290,8 @@ const styles = StyleSheet.create({
   list: { overflow: 'hidden', gap: spacing.xs },
   // The list's own rhythm, so the placeholder cards sit exactly where the real ones will.
   loading: { gap: spacing.xs },
-  status: { ...typography.bodyCompact, paddingVertical: spacing.md, color: colors.textSecondary },
-  error: { ...typography.caption, color: colors.negative },
+  status: { ...interfaceType.body, paddingVertical: spacing.md, color: colors.textSecondary },
+  error: { ...interfaceType.caption, color: colors.negative },
   more: {
     minHeight: 40,
     alignItems: 'center',
@@ -310,12 +299,12 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     backgroundColor: colors.surfaceElevated,
   },
-  moreText: { ...typography.label, color: colors.textPrimary },
-  count: { ...typography.caption, color: colors.textMuted },
+  moreText: { ...interfaceType.control, color: colors.textPrimary },
+  count: { ...interfaceType.figureCaption, color: colors.textMuted },
   empty: { alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xl },
-  emptyTitle: { ...typography.label, marginTop: spacing.xs, color: colors.textPrimary },
+  emptyTitle: { ...interfaceType.headline, marginTop: spacing.xs, color: colors.textPrimary },
   emptyMessage: {
-    ...typography.caption,
+    ...interfaceType.caption,
     maxWidth: 260,
     color: colors.textMuted,
     textAlign: 'center',

@@ -12,7 +12,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, radii, spacing, typography } from '@/theme/tokens';
 
 /**
  * Where the menu sits, resolved by the caller from its own control.
@@ -115,6 +115,7 @@ const MENU_SPRING = { damping: 29, mass: 0.55, stiffness: 420 } as const;
  */
 export function AnchoredMenu<Id extends string>({
   anchor,
+  face = 'brand',
   onClose,
   onSelect,
   options,
@@ -123,6 +124,11 @@ export function AnchoredMenu<Id extends string>({
   visible,
 }: {
   readonly anchor: MenuAnchor | null;
+  /**
+   * The face its words are set in: `brand`, the default, or `interface` — the system face, in sentence
+   * case — for a menu raised from a screen set entirely in that one.
+   */
+  readonly face?: 'brand' | 'interface';
   readonly onClose: () => void;
   readonly onSelect: (id: Id) => void;
   readonly options: readonly MenuOption<Id>[];
@@ -131,6 +137,7 @@ export function AnchoredMenu<Id extends string>({
   readonly title?: string;
   readonly visible: boolean;
 }) {
+  const plain = face === 'interface';
   // Read here rather than taken from a screen, for the same reason the toast host and the tab bar read
   // them: this draws inside a `statusBarTranslucent` Modal, outside `AppScreen` entirely, so there is
   // no safe area above it to inherit. They are used only to keep the card off the system bars — no
@@ -240,7 +247,7 @@ export function AnchoredMenu<Id extends string>({
         >
           <Animated.View style={[styles.content, contentStyle]}>
             {title === undefined ? null : (
-              <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+              <Text accessibilityRole="header" style={[styles.title, plain && styles.titlePlain]}>{title}</Text>
             )}
             {/* Sizes to its options and scrolls only if the card was still capped after repositioning.
                 With `flexShrink` and no `flexGrow` a menu of four is the height of four; it never
@@ -263,12 +270,14 @@ export function AnchoredMenu<Id extends string>({
                   >
                     <Text
                       numberOfLines={1}
-                      style={[styles.label, checked && styles.labelChecked]}
+                      style={[styles.label, plain && styles.labelPlain, checked && styles.labelChecked]}
                     >
                       {option.label}
                     </Text>
                     {option.detail === undefined ? null : (
-                      <Text numberOfLines={1} style={styles.detail}>{option.detail}</Text>
+                      <Text numberOfLines={1} style={[styles.detail, plain && styles.detailPlain]}>
+                        {option.detail}
+                      </Text>
                     )}
                     {checked ? <TickGlyph /> : null}
                   </Pressable>
@@ -438,5 +447,10 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontVariant: ['tabular-nums'],
   },
+  // The same three, in the interface face. The title drops its caps and tracking: that scale is set in
+  // sentence case throughout.
+  titlePlain: { ...interfaceType.overline, letterSpacing: 0 },
+  labelPlain: interfaceType.body,
+  detailPlain: interfaceType.figureCaption,
   pressed: { backgroundColor: colors.surface },
 });

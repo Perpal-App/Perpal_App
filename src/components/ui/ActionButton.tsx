@@ -14,7 +14,7 @@ import { colors, gradients, radii, spacing, typography } from '@/theme/tokens';
  */
 const MIN_HEIGHT = 42;
 
-export type ActionButtonTone = 'accent' | 'negative' | 'neutral' | 'positive';
+export type ActionButtonTone = 'accent' | 'negative' | 'neutral' | 'positive' | 'secondary';
 
 /**
  * The four materials an action can be cut from: a solid fill, a label colour, a halo, and how much
@@ -66,6 +66,19 @@ const TONES = {
     label: colors.onLight,
     rim: null,
     sheen: 1,
+  },
+  /**
+   * The quiet answer beside a lit one on a raised surface — a dialog's "Keep open" beside its red. Filled a
+   * step above the surface and modelled like the lit tones, with no rim, so the pair are the same kind of
+   * object at the same size and differ only in colour. `neutral`'s dark fill and rim read as an outline
+   * next to a solid, which made two equal buttons look unequal.
+   */
+  secondary: {
+    fill: colors.controlFill,
+    glow: colors.raisedHalo,
+    label: colors.textPrimary,
+    rim: null,
+    sheen: 0.5,
   },
 } as const;
 

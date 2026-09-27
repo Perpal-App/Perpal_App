@@ -2,7 +2,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Svg, { Circle, Line } from 'react-native-svg';
 
-import { colors, fonts, gradients, layout, radii, spacing, typography } from '@/theme/tokens';
+import {
+  colors,
+  fonts,
+  gradients,
+  interfaceType,
+  layout,
+  radii,
+  spacing,
+  typography,
+} from '@/theme/tokens';
 
 /**
  * Search input as a rounded, raised card.
@@ -14,12 +23,18 @@ import { colors, fonts, gradients, layout, radii, spacing, typography } from '@/
  */
 export function SearchField({
   compact = false,
+  face = 'brand',
   flush = false,
   onChangeText,
   placeholder,
   value,
 }: {
   readonly compact?: boolean;
+  /**
+   * The face the query is typed in. `brand`, the default, sets it in Poppins with the markets list it
+   * filters; `interface` in the system face, for a screen set entirely in that one — the portfolio.
+   */
+  readonly face?: 'brand' | 'interface';
   /**
    * Drop the field's own gutter and bottom margin.
    *
@@ -54,7 +69,7 @@ export function SearchField({
         selectionColor={colors.accent}
         // No lineHeight on an input: Android derives the caret box from the
         // font's own metrics and a forced line clips the typed text.
-        style={styles.input}
+        style={[styles.input, face === 'interface' && styles.inputInterface]}
         value={value}
       />
       {value.length === 0 ? null : (
@@ -151,6 +166,8 @@ const styles = StyleSheet.create({
     minHeight: layout.minTouchTarget - spacing.xs,
     color: colors.textPrimary,
   },
+  // The interface face's body role, without its leading for the same reason as above.
+  inputInterface: { ...interfaceType.body, lineHeight: undefined },
   clear: { alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.72 },
 });

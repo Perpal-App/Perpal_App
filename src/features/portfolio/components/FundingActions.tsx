@@ -7,7 +7,7 @@ import {
   WithdrawArrowIcon,
 } from '@/assets/svg/FundingActionIcons';
 import { RaisedChip } from '@/components/ui/RaisedChip';
-import { colors, fonts, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, spacing } from '@/theme/tokens';
 
 export type FundingAction = 'deposit' | 'swap' | 'withdraw';
 
@@ -101,12 +101,7 @@ const styles = StyleSheet.create({
     flexBasis: 'auto',
     flexShrink: 0,
   },
-  // SemiBold at caption size. The face is named, never reached through `fontWeight` — Poppins ships
-  // its weights under legacy family names, so a numeric weight silently resolves to Regular on iOS
-  // and to a synthetic bold on Android.
-  label: {
-    ...typography.caption,
-    fontFamily: fonts.semiBold,
-    color: colors.textPrimary,
-  },
+  // The interface face at its compact control size, like every word on the portfolio: three of these sit
+  // abreast, so they take a step under the sheet's controls.
+  label: { ...interfaceType.controlCompact, color: colors.textPrimary },
 });

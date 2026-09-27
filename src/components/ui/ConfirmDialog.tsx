@@ -1,29 +1,19 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
+import type { ReactNode } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { useDialogMorph, type DialogOrigin } from '@/components/motion/useDialogMorph';
 import { ActionButton, type ActionButtonTone } from '@/components/ui/ActionButton';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { colors, layout, radii, spacing, typography } from '@/theme/tokens';
+import { colors, layout, motion, radii, spacing, typography } from '@/theme/tokens';
 
-/** Scale the card grows from. Close to one: a dialog is an interruption, not an entrance. */
-const FROM_SCALE = 0.94;
+export type { DialogOrigin } from '@/components/motion/useDialogMorph';
 
-/**
- * One spring, both directions, and the same physics the anchored menu uses.
- *
- * Damping ratio works out just over 1, so the card settles with no overshoot. A confirmation that
- * bounces reads as playful, which is the wrong register for the last screen before something happens.
- */
-const DIALOG_SPRING = { damping: 22, stiffness: 320, mass: 0.6 } as const;
+/** The card's resting corner, which the morph eases into from a full round. */
+const CARD_RADIUS = radii.lg;
 
 /**
  * The app's confirmation, in the app's own materials.
@@ -36,6 +26,9 @@ const DIALOG_SPRING = { damping: 22, stiffness: 320, mass: 0.6 } as const;
  * Both actions are real buttons rather than tinted text, so the destructive one can carry the app's red
  * material and the pair can be told apart at a glance instead of by reading them.
  *
+ * Given the point it was asked from, it grows out of that control and goes back into it when dismissed;
+ * see `useDialogMorph`. Without one it rises in place.
+ *
  * Deliberately not a sheet. A sheet is a place you go; a confirmation is a question asked where you
  * already are, and moving the screen for it implies the first is happening.
  */
@@ -44,11 +37,20 @@ type ConfirmDialogBody =
   | { readonly children?: never; readonly message: string };
 
 type ConfirmDialogProps = ConfirmDialogBody & {
+  /**
+   * How the two answers sit. `stack`, the default: full width, one over the other, which a long
+   * consequential label — "Verify and recover" — needs to stay whole at any text size. `row`: side by side
+   * as fully rounded capsules, for a pair of short labels, where a row reads faster than a stack. Both keep
+   * the raised material every action in the app is cut from.
+   */
+  readonly actions?: 'row' | 'stack';
   readonly cancelLabel?: string;
   readonly confirmLabel: string;
   readonly confirmLoading?: boolean;
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
+  /** Where on screen the dialog was asked from, in window coordinates, to grow out of and go back into. */
+  readonly origin?: DialogOrigin | null;
   readonly title: string;
   /** `negative` for an action that destroys something. `accent` for one that is merely consequential. */
   readonly tone?: Extract<ActionButtonTone, 'accent' | 'negative'>;
@@ -56,6 +58,7 @@ type ConfirmDialogProps = ConfirmDialogBody & {
 };
 
 export function ConfirmDialog({
+  actions = 'stack',
   cancelLabel = 'Cancel',
   children,
   confirmLabel,
@@ -63,48 +66,28 @@ export function ConfirmDialog({
   message,
   onCancel,
   onConfirm,
+  origin = null,
   title,
   tone = 'accent',
   visible,
 }: ConfirmDialogProps) {
-  const reduceMotion = useReducedMotion();
+  const inline = actions === 'row';
+  const morph = useDialogMorph({ origin, radius: CARD_RADIUS, visible });
+  // Each answer is felt as well as seen: a light tick for backing out, a firmer tap for going ahead, a
+  // firmer one again when what goes ahead destroys something. iOS only, as everywhere in the app.
   const requestCancel = () => {
-    if (!confirmLoading) onCancel();
+    if (confirmLoading) return;
+    if (Platform.OS === 'ios') void Haptics.selectionAsync();
+    onCancel();
   };
-  // `mounted` keeps the modal in the tree; `progress` is how far open the card is. A dismissal has to
-  // finish travelling before the modal can unmount, so one boolean cannot express both.
-  const [mounted, setMounted] = useState(false);
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      progress.set(reduceMotion ? 1 : withSpring(1, DIALOG_SPRING));
-      return;
+  const requestConfirm = () => {
+    if (Platform.OS === 'ios') {
+      void Haptics.impactAsync(tone === 'negative'
+        ? Haptics.ImpactFeedbackStyle.Medium
+        : Haptics.ImpactFeedbackStyle.Light);
     }
-
-    if (reduceMotion) {
-      progress.set(0);
-      setMounted(false);
-      return;
-    }
-
-    progress.set(withSpring(0, DIALOG_SPRING, (finished) => {
-      'worklet';
-      if (finished === true) runOnJS(setMounted)(false);
-    }));
-  }, [progress, reduceMotion, visible]);
-
-  const cardStyle = useAnimatedStyle(() => ({
-    // Clamped, because a spring can undershoot past zero and a negative opacity is a warning on some
-    // platforms rather than simply invisible.
-    opacity: Math.max(progress.value, 0),
-    transform: [{ scale: FROM_SCALE + (1 - FROM_SCALE) * progress.value }],
-  }));
-
-  const scrimStyle = useAnimatedStyle(() => ({
-    opacity: Math.max(progress.value, 0),
-  }));
+    onConfirm();
+  };
 
   return (
     <Modal
@@ -115,10 +98,10 @@ export function ConfirmDialog({
       presentationStyle="overFullScreen"
       statusBarTranslucent
       transparent
-      visible={mounted}
+      visible={morph.mounted}
     >
       <SafeAreaView edges={['top', 'bottom']} style={styles.root}>
-        <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, scrimStyle]}>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, morph.scrimStyle]}>
           {/* Tapping outside cancels, which is the same answer the cancel button gives. A dialog that
               can only be dismissed by reading it is a dialog people learn to dismiss without reading. */}
           <Pressable
@@ -134,44 +117,59 @@ export function ConfirmDialog({
         <Animated.View
           accessibilityViewIsModal
           onAccessibilityEscape={requestCancel}
-          style={[styles.card, cardStyle]}
+          onLayout={morph.onCardLayout}
+          style={[styles.card, morph.cardStyle]}
         >
-          <View style={styles.titleRow}>
-            <Text accessibilityRole="header" style={styles.title}>{title}</Text>
-            <PressableScale
-              accessibilityLabel={`Close ${title}`}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: confirmLoading }}
-              disabled={confirmLoading}
-              hitSlop={12}
-              onPress={requestCancel}
-              pressedScale={0.94}
-              style={styles.close}
-            >
-              <CloseIcon />
-            </PressableScale>
-          </View>
-          <View style={styles.content}>
-            {message === undefined ? children : (
-              <Text selectable style={styles.message}>{message}</Text>
-            )}
-          </View>
-          <View style={styles.actions}>
-            <ActionButton
-              disabled={confirmLoading}
-              label={cancelLabel}
-              onPress={requestCancel}
-              style={styles.action}
-              tone="neutral"
-            />
-            <ActionButton
-              label={confirmLabel}
-              loading={confirmLoading}
-              onPress={onConfirm}
-              style={styles.action}
-              tone={tone}
-            />
-          </View>
+          {/* Everything inside fades on its own layer, late on the way in and early on the way out, so
+              the card is only ever seen full of its contents or as a clean shape. */}
+          <Animated.View style={[styles.body, morph.contentStyle]}>
+            <View style={styles.titleRow}>
+              <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+              <PressableScale
+                accessibilityLabel={`Close ${title}`}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: confirmLoading }}
+                disabled={confirmLoading}
+                hitSlop={12}
+                onPress={requestCancel}
+                // Pinches in, then springs back just past round: the same give the buttons below have.
+                pressRebound={0.45}
+                pressSpring={motion.pressGooey}
+                pressedScale={0.88}
+                style={styles.close}
+              >
+                <CloseIcon />
+              </PressableScale>
+            </View>
+            <View style={styles.content}>
+              {message === undefined ? children : (
+                <Text selectable style={styles.message}>{message}</Text>
+              )}
+            </View>
+            {/* Both answers squash under the finger and spring back through a small wobble on release,
+                the press every raised action in the app gives. The answer still lands on release;
+                nothing waits for the wobble. */}
+            <View style={[styles.actions, inline && styles.actionsRow]}>
+              <ActionButton
+                disabled={confirmLoading}
+                gooey
+                label={cancelLabel}
+                onPress={requestCancel}
+                {...(inline ? { radius: radii.pill } : {})}
+                style={inline ? styles.actionInline : styles.action}
+                tone={inline ? 'secondary' : 'neutral'}
+              />
+              <ActionButton
+                gooey
+                label={confirmLabel}
+                loading={confirmLoading}
+                onPress={requestConfirm}
+                {...(inline ? { radius: radii.pill } : {})}
+                style={inline ? styles.actionInline : styles.action}
+                tone={tone}
+              />
+            </View>
+          </Animated.View>
         </Animated.View>
       </SafeAreaView>
     </Modal>
@@ -202,14 +200,14 @@ const styles = StyleSheet.create({
     maxWidth: 360,
     maxHeight: '100%',
     flexShrink: 1,
-    gap: spacing.sm,
     padding: spacing.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderStrong,
-    borderRadius: radii.md,
+    borderRadius: CARD_RADIUS,
     borderCurve: 'continuous',
     backgroundColor: colors.surfaceElevated,
   },
+  body: { flexShrink: 1, gap: spacing.sm },
   titleRow: {
     minHeight: 36,
     flexDirection: 'row',
@@ -230,4 +228,9 @@ const styles = StyleSheet.create({
   // Full-width actions survive small screens and large text without shortening a consequential label.
   actions: { gap: spacing.sm, marginTop: spacing.xs },
   action: { width: '100%' },
+  // Backing out on the left and going ahead on the right, in equal halves, so neither answer is the
+  // bigger target.
+  actionsRow: { flexDirection: 'row' },
+  // Equal halves at one fixed height, whatever either label measures.
+  actionInline: { flex: 1, minWidth: 0, height: layout.minTouchTarget },
 });

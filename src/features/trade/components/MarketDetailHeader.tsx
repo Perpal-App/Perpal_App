@@ -6,8 +6,9 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Skeleton, SkeletonText } from '@/components/feedback/Skeleton';
 import { RiseInView } from '@/components/motion/RiseInView';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { formatCompactTokenPrice, formatCompactUsd } from '@/domain/money/amount';
+import { formatCompactUsd, type Amount } from '@/domain/money/amount';
 import { MarketLogo } from '@/features/trade/components/MarketLogo';
+import { formatPositionPrice, tickPlaces } from '@/features/trade/components/positionText';
 import { formatPacificaRatePercent } from '@/integrations/perps/pacifica/pacificaMarketData';
 import type {
   PacificaMarket,
@@ -17,6 +18,7 @@ import {
   colors,
   fonts,
   gradients,
+  interfaceType,
   layout,
   motion,
   radii,
@@ -71,69 +73,48 @@ export function MarketDetailHeader({
       <RiseInView style={styles.instrument}>
         <BackButton />
         <MarketLogo size={30} symbol={market.baseAsset} url={market.iconUrl} />
+        {/* The pair and its leverage on one line, the badge at the size it always had. The pair may give
+            a little of its size to fit a long ticker beside it, but never a character. */}
         <View style={styles.identity}>
-          {/* The pair owns the first line on its own. With the badge beside it an eight-character
-              ticker ran past the price on anything under 390pt, and truncating the instrument is the
-              one thing this header must not do — so leverage and contract type share the qualifier
-              line below, the same split the markets table uses. */}
-          <Text numberOfLines={1} style={styles.symbol}>
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.8}
+            numberOfLines={1}
+            style={styles.symbol}
+          >
             {market.baseAsset}-USD
           </Text>
-          <View style={styles.qualifier}>
-            <View style={styles.leverageBadge}>
-              <Text style={styles.leverage}>{market.maxLeverage}×</Text>
-            </View>
-            <Text numberOfLines={1} style={styles.name}>
-              {market.displayName === market.baseAsset
-                ? 'Perpetual'
-                : `Perpetual · ${market.displayName}`}
-            </Text>
+          <View
+            accessibilityLabel={`Up to ${market.maxLeverage} times leverage`}
+            accessible
+            style={styles.leverageBadge}
+          >
+            <Text style={styles.leverage}>{market.maxLeverage}×</Text>
           </View>
         </View>
-        <View style={styles.priceSummary}>
+        {/* What the price is, then the price and its day's move under it, in the system face with
+            tabular figures: a price read digit by digit, and one that ticks, holds its width. Quoted at
+            the market's own tick, so SOL reads `$121.50`, not `$121.5`. The move is the mark against
+            yesterday's mark, never the oracle, so one name covers both numbers honestly. */}
+        <View
+          accessibilityLabel={price === null
+            ? 'Mark price unavailable'
+            : `Mark price ${markText(price, market.tickSize)}, ${spokenChange(change)} over 24 hours`}
+          accessible
+          style={styles.priceSummary}
+        >
+          <Text numberOfLines={1} style={styles.priceTitle}>Mark price</Text>
           {pricePending ? (
-            <>
-              <SkeletonText align="right" role="heading" width={84} />
-              <SkeletonText align="right" role="caption" width={76} />
-            </>
+            <PriceLinePlaceholder />
           ) : (
-            <>
-              {/* `formatCompactTokenPrice`, the same formatter the strip and the markets table use.
-                  This was `formatAmountWithCommas`, which renders the exact stored decimal and never
-                  rounds — so BTC came out as `$84,822` beside an oracle reading of `$83,936.5`, two
-                  numbers rendered to different precision from the same feed. Half of the "these are
-                  not synced" impression was the formatting, not the values.
-                  It caps at two decimals above a unit and falls back to four significant digits below
-                  one, so a sub-cent market still reads as `$0.00001234` instead of `$0.00`. */}
-              <Text
-                // Named for a screen reader too, which previously heard a bare number with no
-                // indication of which of this screen's prices it had landed on.
-                accessibilityLabel={price === null
-                  ? 'Mark price unavailable'
-                  : `Mark price, ${formatCompactTokenPrice(price)}`}
-                numberOfLines={1}
-                selectable
-                style={styles.price}
-              >
-                {price === null ? UNAVAILABLE : formatCompactTokenPrice(price)}
+            <View style={styles.priceLine}>
+              <Text numberOfLines={1} selectable style={styles.price}>
+                {price === null ? UNAVAILABLE : markText(price, market.tickSize)}
               </Text>
-              {/* The basis this block is quoted on, which the header never stated. Two prices appear on
-                  this screen — the venue's mark here, the index price in the strip — and only the
-                  second was named, so the unnamed one looked like it ought to match it. A gap between
-                  them is normal; closing it is what the funding rate two cells over is for.
-                  On the change line rather than above the price because both blocks in this header are
-                  two lines, which is what sits the price on the symbol's line. It is also free: the
-                  label plus the change measures 84pt against the 88.8pt the widest price
-                  (`$0.00001234`) already claims, so the column does not grow.
-                  One label covers both numbers honestly — `change24hBps` is derived from the mark
-                  against yesterday's mark, never from the oracle. */}
-              <View style={styles.priceBasis}>
-                <Text style={styles.basisLabel}>MARK</Text>
-                <Text numberOfLines={1} style={[styles.change, toneStyle(change)]}>
-                  {formatChange(change)}
-                </Text>
-              </View>
-            </>
+              <Text numberOfLines={1} style={[styles.change, toneStyle(change)]}>
+                {formatChange(change)}
+              </Text>
+            </View>
           )}
         </View>
       </RiseInView>
@@ -199,12 +180,11 @@ export function MarketDetailHeaderSkeleton() {
         <BackButton />
         <Skeleton height={30} radius={15} width={30} />
         <View style={styles.identity}>
-          <SkeletonText role="heading" width={112} />
-          <SkeletonText role="caption" width={84} />
+          <SkeletonText role="heading" width={136} />
         </View>
         <View style={styles.priceSummary}>
-          <SkeletonText align="right" role="heading" width={84} />
-          <SkeletonText align="right" role="caption" width={52} />
+          <Text numberOfLines={1} style={styles.priceTitle}>Mark price</Text>
+          <PriceLinePlaceholder />
         </View>
       </View>
 
@@ -250,10 +230,33 @@ function Figure({
   );
 }
 
+/** The price line's placeholder, on the figure's own line height so nothing moves when it lands. */
+function PriceLinePlaceholder() {
+  return (
+    <View style={styles.pricePlaceholder}>
+      <Skeleton height={14} width={116} />
+    </View>
+  );
+}
+
+/** The mark at its market's tick: `$121.50`, `$0.070806`. */
+function markText(price: Amount, tickSize: string): string {
+  return formatPositionPrice(price, tickPlaces(tickSize));
+}
+
+function percentText(absoluteBps: number): string {
+  return `${Math.floor(absoluteBps / 100)}.${String(absoluteBps % 100).padStart(2, '0')}`;
+}
+
+/** The day's move with its direction and a true minus: `+0.30%`, `−1.12%`. */
 function formatChange(value: number | null): string {
   if (value === null) return UNAVAILABLE;
-  const absolute = Math.abs(value);
-  return `${value >= 0 ? '+' : '-'}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}%`;
+  return `${value >= 0 ? '+' : '\u2212'}${percentText(Math.abs(value))}%`;
+}
+
+function spokenChange(value: number | null): string {
+  if (value === null) return 'change unavailable';
+  return `${value < 0 ? 'down' : 'up'} ${percentText(Math.abs(value))} percent`;
 }
 
 function toneStyle(value: number | null) {
@@ -326,15 +329,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   backFill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  identity: { flex: 1, minWidth: 0 },
-  symbol: { ...typography.heading, color: colors.textPrimary },
-  qualifier: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xxs,
-    minWidth: 0,
-  },
-  name: { ...typography.caption, flexShrink: 1, color: colors.textMuted },
+  // The pair and its badge on one line: the pair shrinks first, the badge never does.
+  identity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  symbol: { ...typography.heading, flexShrink: 1, color: colors.textPrimary },
   leverageBadge: {
     flexShrink: 0,
     paddingHorizontal: spacing.xxs,
@@ -344,20 +341,16 @@ const styles = StyleSheet.create({
   },
   leverage: { ...typography.eyebrow, letterSpacing: 0, color: colors.accentSoft },
   priceSummary: { flexShrink: 0, alignItems: 'flex-end' },
-  // Label size, but on the symbol's line height: both blocks then measure the same two lines, so the
-  // price sits exactly on the symbol's line and the change on the line under it, without the price
-  // claiming the title's width.
-  price: {
-    ...typography.label,
-    lineHeight: typography.heading.lineHeight,
-    color: colors.textPrimary,
+  priceTitle: { ...interfaceType.caption, color: colors.textMuted },
+  // The price leads and the move follows it on the same baseline, a step smaller.
+  priceLine: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs },
+  price: { ...interfaceType.figureLead, color: colors.textPrimary },
+  change: interfaceType.figureStrong,
+  pricePlaceholder: {
+    height: interfaceType.figureLead.lineHeight,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
-  priceBasis: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
-  // The strip's own label treatment, so the word naming the headline's basis and the word naming the
-  // oracle's are visibly the same kind of thing — which is the point, since the reader is being asked
-  // to tell two prices apart.
-  basisLabel: { ...typography.eyebrow, letterSpacing: 0.5, color: colors.textMuted },
-  change: { ...typography.caption },
   // All five figures on one row. Each cell is only as wide as its own content and the leftover space is
   // shared between them, so the row reads as evenly spaced without any cell being cut off — measured,
   // the five come to 279pt against 296pt of content width on the narrowest screen the app supports.

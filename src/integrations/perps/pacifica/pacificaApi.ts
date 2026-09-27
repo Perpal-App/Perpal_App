@@ -12,10 +12,53 @@ import {
 } from '@/integrations/perps/pacifica/pacificaReadCoordinator';
 
 const API_PREFIX = '/api/v1';
-const EXPIRY_WINDOW_MS = 5_000;
+/**
+ * How long Pacifica honours a signature after its timestamp. Longer than the request timeout below, so a
+ * request that is still allowed to be in flight is never one the venue has stopped accepting — at 5s a
+ * slow mobile round trip could outlive its own signature.
+ */
+const EXPIRY_WINDOW_MS = 15_000;
 const MAX_RESPONSE_BYTES = 1_000_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const UTF8_ENCODER = new TextEncoder();
+/** A difference from Pacifica's clock smaller than this is noise in the estimate, not drift. */
+const CLOCK_TOLERANCE_MS = 1_500;
+
+/**
+ * How far Pacifica's clock is ahead of this device's, as far as the device can tell: the time the venue's
+ * responses are stamped with, less the device's own clock when they arrive.
+ *
+ * A signed request carries a timestamp that Pacifica checks against its own clock. A device whose clock has
+ * fallen behind — an emulator after its host slept, a phone whose time was set by hand — signed requests the
+ * venue already held to be expired, so every order and every close failed with "signature expired". Signing
+ * on the venue's clock makes a request exactly as fresh as the moment it was signed, whatever the device's
+ * own clock says.
+ *
+ * Read from the `Date` header every response carries. It has one-second resolution and is truncated, and the
+ * response has travelled since, so the estimate runs slightly behind the venue: the safe side, as a timestamp
+ * is never put in Pacifica's future. Under `CLOCK_TOLERANCE_MS` it counts as none, and a device whose clock is
+ * right signs on it exactly as before.
+ */
+let clockOffsetMs = 0;
+
+/** Now, on Pacifica's clock: what its signatures are timed by and its timestamps are compared with. */
+export function pacificaNow(): number {
+  return Date.now() + clockOffsetMs;
+}
+
+function learnClock(response: Response, receivedAtMs: number): void {
+  const stamped = response.headers.get('date');
+  if (stamped === null) return;
+  const venueMs = Date.parse(stamped);
+  if (!Number.isFinite(venueMs)) return;
+  const offset = venueMs - receivedAtMs;
+  clockOffsetMs = Math.abs(offset) < CLOCK_TOLERANCE_MS ? 0 : offset;
+}
+
+/** The venue's own words for a signature that reached it too late, on its clock. */
+function isExpiredSignature(cause: unknown): cause is PacificaApiError {
+  return cause instanceof PacificaApiError && /signature expired/iu.test(cause.message);
+}
 
 export class PacificaApiError extends Error {
   constructor(
@@ -132,7 +175,31 @@ export async function pacificaPostSigned<T>(input: {
     );
   }
 
-  const timestamp = Date.now();
+  try {
+    return await postSignedOnce<T>(input);
+  } catch (cause) {
+    if (!isExpiredSignature(cause)) throw cause;
+    // Rejected for its timestamp alone, which the venue checks before it acts on anything, so nothing was
+    // done and sending again cannot do anything twice. The rejection's own response has just set the clock
+    // right, so it is signed afresh on the venue's time and sent once more. Only once: a second expiry is
+    // not a clock that one reading can fix.
+    try {
+      return await postSignedOnce<T>(input);
+    } catch (retried) {
+      if (!isExpiredSignature(retried)) throw retried;
+      throw new PacificaApiError(
+        'Pacifica says the signature expired. Set the time automatically and retry.',
+        'signature_expired',
+        retried.status,
+        retried.requestPath,
+      );
+    }
+  }
+}
+
+/** One signature, one request. The timestamp is taken on the venue's clock, immediately before signing. */
+async function postSignedOnce<T>(input: Parameters<typeof pacificaPostSigned>[0]): Promise<T> {
+  const timestamp = pacificaNow();
   const signedValue = {
     data: input.payload,
     expiry_window: EXPIRY_WINDOW_MS,
@@ -219,6 +286,8 @@ async function requestEnvelope(
       headers: { accept: 'application/json', ...init.headers },
       signal: controller.signal,
     });
+    // Every answer, a refusal included, says what time the venue thinks it is.
+    learnClock(response, Date.now());
     const declaredLength = response.headers.get('content-length');
     if (
       declaredLength !== null &&

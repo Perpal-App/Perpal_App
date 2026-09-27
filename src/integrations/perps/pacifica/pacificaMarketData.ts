@@ -3,7 +3,7 @@ import {
   type Amount,
   type TokenDecimals,
 } from '@/domain/money/amount';
-import { pacificaGet } from '@/integrations/perps/pacifica/pacificaApi';
+import { pacificaGet, pacificaNow } from '@/integrations/perps/pacifica/pacificaApi';
 
 const PRICE_DECIMALS = 10 as const;
 const USD_DECIMALS = 10 as const;
@@ -76,7 +76,9 @@ export function parsePacificaPrices(value: unknown): readonly PacificaMarketSnap
       venueRef: symbol,
       price: mark,
       oraclePrice: decimal(price.oracle, PRICE_DECIMALS, 'oracle price'),
-      priceStale: Date.now() - published > STALE_AFTER_MS,
+      // The venue's timestamp against the venue's clock: a device clock that had drifted made every price
+      // look delayed, or none.
+      priceStale: pacificaNow() - published > STALE_AFTER_MS,
       pricePublishedAtMs: published,
       change24hBps,
       volume24h: decimal(price.volume_24h, USD_DECIMALS, '24 hour volume'),

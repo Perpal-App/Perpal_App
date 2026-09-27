@@ -4,7 +4,9 @@ import { fonts } from './fonts';
 
 /**
  * The interface type scale: the platform's own face — San Francisco on iOS, Roboto on Android — for the
- * surfaces where figures are the point. Today that is the order ticket and everything in its sheet.
+ * surfaces where figures are the point. Today that is the order ticket and everything in its sheet, the
+ * market header, the position cards, and the whole portfolio screen, which is set in this face alone so
+ * no two things on it are cut from different families.
  *
  * Poppins stays the brand face everywhere else. It is a geometric display family: wide, round, and with
  * proportional figures only and no `tnum` feature, so an amount changes width as its digits change and a
@@ -32,6 +34,11 @@ const TABULAR: TextStyle['fontVariant'] = ['tabular-nums'];
 export const interfaceType = {
   // Words.
 
+  /**
+   * A screen's own name at the top of its tab: `Portfolio`. Display size, so it is pulled in a little, as
+   * the large figures are.
+   */
+  largeTitle: { fontFamily: FACE, fontSize: 32, lineHeight: 38, fontWeight: '700', letterSpacing: -0.6 },
   /** The sheet's title and a page header: `SOL-USD`, `Review order`. */
   headline: { fontFamily: FACE, fontSize: 17, lineHeight: 22, fontWeight: '600' },
   /** A heading inside the sheet: the receipt's outcome, the deposit form's title. */
@@ -42,6 +49,8 @@ export const interfaceType = {
   body: { fontFamily: FACE, fontSize: 15, lineHeight: 20, fontWeight: '400' },
   /** Secondary lines: an option's state, notes, errors under a field. */
   caption: { fontFamily: FACE, fontSize: 13, lineHeight: 18, fontWeight: '400' },
+  /** The quietest line on a dense row, a step under a caption: an activity event's particulars. */
+  footnote: { fontFamily: FACE, fontSize: 12, lineHeight: 16, fontWeight: '400' },
   /** What a card or a section holds, in sentence case: `Collateral`, `Take profit`, `Order`. */
   overline: { fontFamily: FACE, fontSize: 13, lineHeight: 18, fontWeight: '500' },
   /** A compact card's name: a position's instrument. */
@@ -50,6 +59,8 @@ export const interfaceType = {
   fieldLabel: { fontFamily: FACE, fontSize: 11, lineHeight: 14, fontWeight: '500' },
   /** A word that can be pressed inside the sheet: `Clear`, `Done`, a token's ticker beside its mark. */
   control: { fontFamily: FACE, fontSize: 15, lineHeight: 20, fontWeight: '600' },
+  /** A control's word where room is short: three funding actions abreast, a chip in a card's header. */
+  controlCompact: { fontFamily: FACE, fontSize: 14, lineHeight: 18, fontWeight: '600' },
   /** The label on the ticket's primary action. */
   action: { fontFamily: FACE, fontSize: 17, lineHeight: 22, fontWeight: '600' },
 
@@ -65,8 +76,9 @@ export const interfaceType = {
     fontVariant: TABULAR,
   },
   /**
-   * The multiple being chosen on the leverage editor. Bold: at this size the semibold read thin, and the
-   * figure is the one thing on the editor the eye has to find mid-drag.
+   * A surface's lead figure at display size: the multiple being chosen on the leverage editor, the
+   * portfolio's total balance. Bold: at this size the semibold read thin, and the figure is the one thing
+   * the eye has to find.
    */
   amountLarge: {
     fontFamily: FACE,
@@ -93,10 +105,24 @@ export const interfaceType = {
   figureStrong: { fontFamily: FACE, fontSize: 14, lineHeight: 18, fontWeight: '600', fontVariant: TABULAR },
   /** Figures in a secondary line: `0 USDC`, `Available balance: $13.10`, a slider's bounds. */
   figureCaption: { fontFamily: FACE, fontSize: 13, lineHeight: 18, fontWeight: '400', fontVariant: TABULAR },
+  /** A figure on a footnote's line: the time under an activity event's amount. */
+  figureFootnote: { fontFamily: FACE, fontSize: 12, lineHeight: 16, fontWeight: '400', fontVariant: TABULAR },
   /** An estimate on its badge: `+$91.50`. */
   badge: { fontFamily: FACE, fontSize: 12, lineHeight: 16, fontWeight: '600', fontVariant: TABULAR },
   /** The lead figure of a compact card: a position's unrealized profit or loss. */
   figureLead: { fontFamily: FACE, fontSize: 17, lineHeight: 22, fontWeight: '600', fontVariant: TABULAR },
+  /**
+   * The one figure a tile exists to show: a side of the balance, a count of open trades, the unrealized
+   * profit and loss. A step under the display size, and pulled in the same way.
+   */
+  figureLarge: {
+    fontFamily: FACE,
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    fontVariant: TABULAR,
+  },
   /** A value in a dense grid of figures, three to a row. */
   figureCompact: { fontFamily: FACE, fontSize: 13, lineHeight: 17, fontWeight: '600', fontVariant: TABULAR },
   /**

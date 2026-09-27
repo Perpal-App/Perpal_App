@@ -9,6 +9,10 @@ import { FundsSheet, type FundsRequest } from '@/features/portfolio/components/F
 import { GlobalActivityTracker } from '@/features/portfolio/components/GlobalActivityTracker';
 import { OpenPositions } from '@/features/portfolio/components/OpenPositions';
 import { OrderCard } from '@/features/portfolio/components/PortfolioCards';
+import {
+  PortfolioSections,
+  type PortfolioSection,
+} from '@/features/portfolio/components/PortfolioSections';
 import { PortfolioSummaryCard } from '@/features/portfolio/components/PortfolioSummaryCard';
 import {
   cancelPacificaOrder,
@@ -22,13 +26,9 @@ import {
   captureInAppNotificationScope,
   publishInAppNotification,
 } from '@/storage/inAppNotifications';
-import type { TokenMetadataMap } from '@/integrations/solana/tokenMetadata';
 import { TAB_BAR_CLEARANCE } from '@/navigation/tabs/GlassTabBar';
-import { colors, layout, spacing, typography } from '@/theme/tokens';
+import { colors, interfaceType, layout, spacing } from '@/theme/tokens';
 import { useTradingSession } from '@/wallet/trading/TradingSessionProvider';
-
-/** Stable empty map, so a render before balances land does not churn the rows' props. */
-const EMPTY_METADATA: TokenMetadataMap = new Map();
 
 
 type Props = {
@@ -49,6 +49,7 @@ export function PacificaPortfolioContent({
   const positions = snapshot?.positions ?? [];
   const orders = snapshot?.orders ?? [];
   const [fundsRequest, setFundsRequest] = useState<FundsRequest | null>(null);
+  const [section, setSection] = useState<PortfolioSection>('activity');
   // An intent handed over by another screen. The order ticket sends `funds=deposit` when a trade cannot
   // be collateralised, because the funding flow takes minutes and belongs here rather than inside a
   // ticket. Consumed once per arrival: the ref is what stops a param that outlives the navigation from
@@ -153,39 +154,49 @@ export function PacificaPortfolioContent({
         portfolio={snapshot}
       />
 
-      <OpenPositions
-        apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
-        assetOrigin={config.ok ? config.value.perps.pacificaAssetOrigin : ''}
-        onClosed={onPacificaRefresh}
-        positions={positions}
-        wsOrigin={config.ok ? config.value.perps.pacificaWsOrigin : ''}
-      />
-
-      {hasOrders ? (
-        <View style={styles.section}>
-          <Text accessibilityRole="header" style={styles.heading}>Open orders</Text>
-          {orders.map((order) => (
-            <OrderCard
-              key={`pacifica:${order.orderId}`}
-              onCancel={() => cancel(order)}
-              order={order}
+      <PortfolioSections
+        activity={(
+          <GlobalActivityTracker
+            account={session.address ?? ''}
+            apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
+            generation={session.generation}
+            pacificaProgramId={config.ok ? config.value.perps.pacificaProgramId : ''}
+            paused={fundsRequest !== null || balances === null}
+            publicAccount={session.mainWalletAddress}
+            rpcUrl={config.ok ? config.value.api.rpcUrl : ''}
+            signer={session.signer}
+            usdcMint={config.ok ? config.value.perps.usdcMint : ''}
+            usdtMint={config.ok ? config.value.perps.usdtMint : ''}
+          />
+        )}
+        onSectionChange={setSection}
+        positionCount={positions.length}
+        // What is open now: the positions, then any resting orders under them.
+        positions={positions.length === 0 && !hasOrders ? null : (
+          <View style={styles.open}>
+            <OpenPositions
+              apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
+              assetOrigin={config.ok ? config.value.perps.pacificaAssetOrigin : ''}
+              enabled={section === 'positions'}
+              onClosed={onPacificaRefresh}
+              positions={positions}
+              wsOrigin={config.ok ? config.value.perps.pacificaWsOrigin : ''}
             />
-          ))}
-        </View>
-      ) : null}
-
-      <GlobalActivityTracker
-        account={session.address ?? ''}
-        apiOrigin={config.ok ? config.value.perps.pacificaApiOrigin : ''}
-        generation={session.generation}
-        metadata={balances?.tokenMetadata ?? EMPTY_METADATA}
-        pacificaProgramId={config.ok ? config.value.perps.pacificaProgramId : ''}
-        paused={fundsRequest !== null || balances === null}
-        publicAccount={session.mainWalletAddress}
-        rpcUrl={config.ok ? config.value.api.rpcUrl : ''}
-        signer={session.signer}
-        usdcMint={config.ok ? config.value.perps.usdcMint : ''}
-        usdtMint={config.ok ? config.value.perps.usdtMint : ''}
+            {hasOrders ? (
+              <View style={styles.section}>
+                <Text accessibilityRole="header" style={styles.heading}>Open orders</Text>
+                {orders.map((order) => (
+                  <OrderCard
+                    key={`pacifica:${order.orderId}`}
+                    onCancel={() => cancel(order)}
+                    order={order}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </View>
+        )}
+        section={section}
       />
 
       <FundsSheet
@@ -211,7 +222,10 @@ const styles = StyleSheet.create({
     paddingBottom: TAB_BAR_CLEARANCE,
     gap: spacing.lg,
   },
-  title: { ...typography.title, flexShrink: 1, color: colors.textPrimary },
+  // The whole screen is set in the interface face, from this title down, so nothing on it is cut from a
+  // different family than what sits beside it.
+  title: { ...interfaceType.largeTitle, flexShrink: 1, color: colors.textPrimary },
+  open: { gap: spacing.lg },
   section: { gap: spacing.sm },
-  heading: { ...typography.label, color: colors.textPrimary },
+  heading: { ...interfaceType.headline, color: colors.textPrimary },
 });

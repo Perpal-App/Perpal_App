@@ -23,33 +23,17 @@ export type ActivityItem = {
   /**
    * A second line, only when it says something the title and the amount do not.
    *
-   * Null for every wallet movement, because those lines were ceremony: "Public wallet · Confirmed on
-   * Solana · Sep 4, 4:12 PM" restated the wallet the reader had already filtered to, asserted a
+   * Null for almost every wallet movement, because those lines were ceremony: "Public wallet · Confirmed
+   * on Solana · Sep 4, 4:12 PM" restated the wallet the reader had already filtered to, asserted a
    * confirmation that is the precondition for the row existing at all, and repeated the timestamp
    * that now sits under the amount. A trade keeps its line — size, price and fee are figures, not
-   * ceremony, and there is nowhere else on the row for them.
+   * ceremony, and there is nowhere else on the row for them — and so does a swap, for the leg it got
+   * back.
    */
   readonly detail: string | null;
   readonly id: string;
   readonly kind: ActivityKind;
   readonly outcome: 'error' | 'info' | 'success';
-  /**
-   * The two assets a swap exchanged, for the row to draw as marks instead of naming in prose.
-   *
-   * Only a swap sets it — it is the one event with two assets, so it is the one that earns a pair of
-   * marks in place of a direction glyph. Everything else names its single asset once, on its amount.
-   */
-  readonly pair?: {
-    /**
-     * Mints, not symbols.
-     *
-     * The mint is the only key the token-metadata map accepts, and that map is the only place a logo
-     * may come from. Carrying symbols here forced the row to decide what each one looks like, which is
-     * how three hardcoded marks got drawn in the first place.
-     */
-    readonly receivedMint: string;
-    readonly spentMint: string;
-  };
   readonly title: string;
   readonly value: string | null;
 };
@@ -238,13 +222,11 @@ function walletItem(item: SolanaWalletActivity): ActivityItem {
   if (action.type === 'swap') {
     return {
       ...shared,
-      detail: null,
+      // The pair in words, each asset once: the title names the exchange, the amount the leg that went,
+      // this line the leg that came back. The row carries no marks, so nothing else can say it.
+      detail: `Received ${assetAmount(action.received)}`,
       kind: 'swap',
-      // The pair moves to the row's mark, as two brand discs. It was being stated three times over:
-      // once in prose here, once on the amount, and once on a second line carrying the other leg —
-      // and that second line was what pushed the title to wrap and then ellipsise to "Swapped …".
-      pair: { receivedMint: action.received.mint, spentMint: action.spent.mint },
-      title: 'Swapped',
+      title: `Swapped ${action.spent.symbol} for ${action.received.symbol}`,
       // Unsigned: an exchange is neither a gain nor a loss, and the row's neutral tone says so.
       value: assetAmount(action.spent),
     };

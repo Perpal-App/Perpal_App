@@ -15,7 +15,6 @@ import {
   percent,
   privateFunds,
   sumAmounts,
-  unrealizedPnl,
   unrealizedRate,
   walletFunds,
 } from '@/domain/portfolio/accountFigures';
@@ -27,8 +26,9 @@ import {
   type FundingAction,
 } from '@/features/portfolio/components/FundingActions';
 import { PortfolioActivityRow } from '@/features/portfolio/components/PortfolioActivityRow';
+import { useLiveUnrealized } from '@/features/portfolio/hooks/useLiveUnrealized';
 import type { PacificaPortfolioSnapshot } from '@/integrations/perps/pacifica/pacificaPortfolio';
-import { colors, fonts, gradients, radii, spacing, typography } from '@/theme/tokens';
+import { colors, gradients, interfaceType, radii, spacing } from '@/theme/tokens';
 
 /** Invisible box around the eye. With `hitSlop` on top it clears the 48pt minimum target. */
 const REVEAL_SIZE = 34;
@@ -67,7 +67,6 @@ export function PortfolioSummaryCard({
   const privateBalance = privateFunds(balances, portfolio);
   const total = sumAmounts(publicBalance, privateBalance);
   const totalDisplay = money(total);
-  const rate = unrealizedRate(portfolio, unrealizedPnl(portfolio));
 
   return (
     <View style={styles.stack}>
@@ -126,18 +125,20 @@ export function PortfolioSummaryCard({
         <View style={styles.valueRow}>
           {totalDisplay === null ? (
             <View style={styles.heroPending}>
-              <SkeletonText role="display" width={188} />
+              <SkeletonText metrics={interfaceType.amountLarge} width={168} />
             </View>
           ) : (
             <ConcealedValue
               accessibilityLiveRegion="polite"
+              adjustsFontSizeToFit
               hidden={hidden}
+              minimumFontScale={0.6}
               numberOfLines={1}
               style={styles.hero}
               value={totalDisplay}
             />
           )}
-          <TrendPill hidden={hidden} value={rate} />
+          <LiveTrendPill hidden={hidden} portfolio={portfolio} />
         </View>
 
         <BalanceTiles balances={balances} hidden={hidden} portfolio={portfolio} />
@@ -151,7 +152,22 @@ export function PortfolioSummaryCard({
 }
 
 /**
- * The unrealized move as a rate, in a tinted capsule beside the figure.
+ * The pill, from the same live profit and loss as the PnL card and the positions, so it moves with them
+ * rather than a snapshot behind. Its own component, so a price tick redraws the pill and not the card.
+ */
+function LiveTrendPill({
+  hidden,
+  portfolio,
+}: {
+  readonly hidden: boolean;
+  readonly portfolio: PacificaPortfolioSnapshot | null;
+}) {
+  const { pnl } = useLiveUnrealized(portfolio);
+  return <TrendPill hidden={hidden} value={unrealizedRate(portfolio, pnl)} />;
+}
+
+/**
+ * The unrealized move as a rate of the deposited balance, in a tinted capsule beside the figure.
  *
  * Dropped rather than faked when there is no deposited balance to measure against. While balances
  * are hidden, its original footprint remains and its value becomes a neutral mask, so privacy does
@@ -230,16 +246,12 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
   },
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  label: { ...typography.caption, flex: 1, minWidth: 0, color: colors.textSecondary },
+  label: { ...interfaceType.overline, flex: 1, minWidth: 0, color: colors.textSecondary },
   // Short of the 48pt minimum; `RaisedChip` carries the `hitSlop` that covers the rest. Sized to the
   // eye beside it so the two controls read as one cluster rather than as two unrelated affordances.
   assets: { height: ASSETS_HEIGHT, flexShrink: 0 },
   assetsContent: { paddingHorizontal: spacing.sm },
-  assetsText: {
-    ...typography.caption,
-    fontFamily: fonts.semiBold,
-    color: colors.textPrimary,
-  },
+  assetsText: { ...interfaceType.controlCompact, color: colors.textPrimary },
   valueRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -248,13 +260,9 @@ const styles = StyleSheet.create({
   },
   // The currency sits at the figure's own size and weight. A smaller muted symbol reads as an
   // annotation on the number rather than as part of it.
-  hero: {
-    ...typography.display,
-    color: colors.textPrimary,
-    fontVariant: ['tabular-nums'],
-  },
+  hero: { ...interfaceType.amountLarge, color: colors.textPrimary },
   // Holds the figure's line so the row below does not shift when the number lands.
-  heroPending: { height: typography.display.lineHeight, justifyContent: 'center' },
+  heroPending: { height: interfaceType.amountLarge.lineHeight, justifyContent: 'center' },
   reveal: {
     width: REVEAL_SIZE,
     height: REVEAL_SIZE,
@@ -276,5 +284,5 @@ const styles = StyleSheet.create({
   // Carries the corner itself as well as the parent's clip — an absolutely positioned child of a
   // rounded, clipped View is the case Android is least reliable about clipping.
   pillTint: { opacity: 0.18, borderRadius: radii.pill },
-  pillText: { ...typography.caption, fontVariant: ['tabular-nums'] },
+  pillText: interfaceType.badge,
 });
