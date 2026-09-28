@@ -164,7 +164,12 @@ export function directErrorMessage(cause: unknown): string {
     cause.message.includes('Pacifica') ||
     cause.message.includes('trading withdrawal') ||
     cause.message.includes('private balance')
-  )) return cause.message;
+  )) {
+    if (cause.message.includes('Pacifica status is unavailable')) {
+      return 'Pacifica status is unavailable. Your release is saved to resume.';
+    }
+    return cause.message;
+  }
   return 'Withdrawal did not complete. Balances refreshed.';
 }
 

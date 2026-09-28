@@ -511,9 +511,22 @@ function waitForPacificaRead<T>(
   if (signal === undefined) return request;
   if (signal.aborted) return Promise.reject(cancelledRequest(requestPath));
   return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(cancelledRequest(requestPath));
+    let settled = false;
+    const complete = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      callback();
+    };
+    const abort = () => complete(() => reject(cancelledRequest(requestPath)));
     signal.addEventListener('abort', abort, { once: true });
-    request.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    // Supplying both callbacks means this observer is always fulfilled. The previous `.finally()`
+    // created a second, unobserved rejected promise whenever Pacifica timed out or the screen aborted
+    // its refresh, which React Native correctly surfaced as an uncaught error.
+    void request.then(
+      (value) => complete(() => resolve(value)),
+      (cause) => complete(() => reject(cause)),
+    );
   });
 }
 

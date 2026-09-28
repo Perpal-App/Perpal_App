@@ -16,6 +16,9 @@ import { readTokenBalance } from '@/integrations/solana/stablecoinSwap';
 const PREFIX = 'perpal.pacifica.withdrawal.v1.';
 export const PACIFICA_MINIMUM_WITHDRAWAL_BASE_UNITS = 1_000_000n;
 const MINIMUM_WITHDRAWAL_BASE_UNITS = PACIFICA_MINIMUM_WITHDRAWAL_BASE_UNITS;
+const WALLET_CREDIT_TIMEOUT_MS = 30_000;
+const WALLET_CREDIT_INITIAL_RETRY_MS = 750;
+const WALLET_CREDIT_MAX_RETRY_MS = 3_000;
 const inFlight = new Map<string, {
   readonly amountBaseUnits: bigint;
   readonly promise: Promise<PacificaReleaseReceipt>;
@@ -62,6 +65,12 @@ type PendingWithdrawal = PendingWithdrawalBase & (
   | { readonly version: 1 }
   | { readonly version: 2; readonly targetWalletBalanceBaseUnits: string }
   | { readonly version: 3; readonly feeBaseUnits: string }
+  | {
+      readonly version: 4;
+      readonly feeBaseUnits: string;
+      /** Confirmed private-wallet USDC before Pacifica accepted this release. */
+      readonly walletBalanceBeforeBaseUnits: string;
+    }
 );
 
 export async function ensurePacificaCollateralInWallet(
@@ -129,69 +138,77 @@ async function performWithdrawal(
     throw new Error('Resume the pending trading withdrawal before changing the amount.');
   }
 
+  await assertUsdcDestinationExists(input);
+
   if (pending === null) {
-    const portfolio = await fetchFreshPacificaAccount(
-      input.apiOrigin,
-      input.account,
-      input.signal,
-    );
+    const [portfolio, walletBalanceBeforeBaseUnits] = await Promise.all([
+      fetchFreshPacificaAccount(input.apiOrigin, input.account, input.signal),
+      balance(input),
+    ]);
     const available = usdc(portfolio.availableToWithdraw);
     if (available < providerAmount) {
       throw new Error('Your private balance does not have enough withdrawable USDC for this amount and its fee.');
     }
     pending = {
-      version: 3,
+      version: 4,
       account: input.account,
       amountBaseUnits: providerAmount.toString(),
       feeBaseUnits: input.withdrawalFeeBaseUnits.toString(),
+      walletBalanceBeforeBaseUnits: walletBalanceBeforeBaseUnits.toString(),
       idempotencyKey: Crypto.randomUUID(),
+      batchNonce: null,
+      updatedAtMs: Date.now(),
+    };
+    await write(pending);
+  } else if (pending.batchNonce === null && pending.version !== 4) {
+    // Previous releases opened the status socket before making the Pacifica request. A socket failure
+    // therefore left a persisted-but-never-submitted record. Capture the wallet baseline before the
+    // idempotent retry so that this recovery can prove the eventual credit without the socket.
+    pending = {
+      version: 4,
+      account: pending.account,
+      amountBaseUnits: pending.amountBaseUnits,
+      feeBaseUnits: pending.version === 3
+        ? pending.feeBaseUnits
+        : input.withdrawalFeeBaseUnits.toString(),
+      walletBalanceBeforeBaseUnits: (await balance(input)).toString(),
+      idempotencyKey: pending.idempotencyKey,
       batchNonce: null,
       updatedAtMs: Date.now(),
     };
     await write(pending);
   }
 
-  await assertUsdcDestinationExists(input);
-  const monitor = await openPacificaWithdrawalMonitor({
-    account: input.account,
-    ...(input.signal ? { signal: input.signal } : {}),
-    wsOrigin: input.wsOrigin,
-  });
-  try {
-    if (pending.batchNonce === null) {
-      const response = object(await pacificaPostSigned<unknown>({
-        account: input.account,
-        apiOrigin: input.apiOrigin,
-        operation: 'withdraw',
-        payload: {
-          amount: formatUsdc(providerAmount),
-          idempotency_key: pending.idempotencyKey,
-        },
-        signer: input.signer,
-        signal: input.signal,
-      }));
-      const batchNonce = nonce(response.batch_nonce);
-      if (batchNonce === null) throw new Error('The trading withdrawal receipt is invalid.');
-      pending = { ...pending, batchNonce, updatedAtMs: Date.now() };
-      await write(pending);
-      const receipt = withdrawalReceipt(response);
-      const expectedFee = pending.version === 3
-        ? BigInt(pending.feeBaseUnits)
-        : input.withdrawalFeeBaseUnits;
-      if (receipt.requestedAmount !== providerAmount || receipt.feeAmount !== expectedFee) {
-        throw new Error('Pacifica returned a withdrawal receipt that does not match your review.');
-      }
+  if (pending.batchNonce === null) {
+    // The idempotency key is persisted before this request. Reissuing after an interrupted response is
+    // therefore safe: Pacifica receives the same withdrawal intent rather than a second withdrawal.
+    const response = object(await pacificaPostSigned<unknown>({
+      account: input.account,
+      apiOrigin: input.apiOrigin,
+      operation: 'withdraw',
+      payload: {
+        amount: formatUsdc(providerAmount),
+        idempotency_key: pending.idempotencyKey,
+      },
+      signer: input.signer,
+      signal: input.signal,
+    }));
+    const batchNonce = nonce(response.batch_nonce);
+    if (batchNonce === null) throw new Error('The trading withdrawal receipt is invalid.');
+    const receipt = withdrawalReceipt(response);
+    const expectedFee = pending.version === 3 || pending.version === 4
+      ? BigInt(pending.feeBaseUnits)
+      : input.withdrawalFeeBaseUnits;
+    if (receipt.requestedAmount !== providerAmount || receipt.feeAmount !== expectedFee) {
+      throw new Error('Pacifica returned a withdrawal receipt that does not match your review.');
     }
-
-    const batchNonce = pending.batchNonce;
-    if (batchNonce === null) throw new Error('The saved Pacifica receipt is incomplete.');
-    const confirmation = await monitor.waitFor(batchNonce, input.signal);
-    const receipt = confirmationReceipt(confirmation, pending);
-    await clear(input.account);
-    return receipt;
-  } finally {
-    monitor.close();
+    pending = { ...pending, batchNonce, updatedAtMs: Date.now() };
+    await write(pending);
   }
+
+  const receipt = await waitForPacificaRelease(pending, input);
+  await clear(input.account);
+  return receipt;
 }
 
 export async function hasPendingPacificaWithdrawal(account: string): Promise<boolean> {
@@ -280,7 +297,9 @@ function confirmationReceipt(
   const requested = usdc(confirmation.requestedAmount);
   const fee = usdc(confirmation.feeAmount);
   const credited = usdc(confirmation.amount);
-  const expectedFee = pending.version === 3 ? BigInt(pending.feeBaseUnits) : fee;
+  const expectedFee = pending.version === 3 || pending.version === 4
+    ? BigInt(pending.feeBaseUnits)
+    : fee;
   if (
     confirmation.batchNonce !== pending.batchNonce ||
     requested !== BigInt(pending.amountBaseUnits) ||
@@ -299,13 +318,73 @@ function confirmationReceipt(
   };
 }
 
+async function waitForPacificaRelease(
+  pending: PendingWithdrawal,
+  input: WithdrawalInput,
+): Promise<PacificaReleaseReceipt> {
+  const batchNonce = pending.batchNonce;
+  if (batchNonce === null) throw new Error('The saved Pacifica receipt is incomplete.');
+
+  try {
+    const monitor = await openPacificaWithdrawalMonitor({
+      account: input.account,
+      ...(input.signal ? { signal: input.signal } : {}),
+      wsOrigin: input.wsOrigin,
+    });
+    try {
+      return confirmationReceipt(await monitor.waitFor(batchNonce, input.signal), pending);
+    } finally {
+      monitor.close();
+    }
+  } catch (cause) {
+    if (input.signal?.aborted || pending.version !== 4) throw cause;
+    return waitForWalletCredit(pending, input);
+  }
+}
+
+async function waitForWalletCredit(
+  pending: Extract<PendingWithdrawal, { readonly version: 4 }>,
+  input: WithdrawalInput,
+): Promise<PacificaReleaseReceipt> {
+  const requestedBaseUnits = BigInt(pending.amountBaseUnits);
+  const feeBaseUnits = BigInt(pending.feeBaseUnits);
+  if (feeBaseUnits >= requestedBaseUnits) {
+    throw new Error('The saved Pacifica receipt is invalid.');
+  }
+  const receipt: PacificaReleaseReceipt = {
+    creditedBaseUnits: requestedBaseUnits - feeBaseUnits,
+    feeBaseUnits,
+    requestedBaseUnits,
+  };
+  const minimumBalance = BigInt(pending.walletBalanceBeforeBaseUnits) + receipt.creditedBaseUnits;
+  const deadline = Date.now() + WALLET_CREDIT_TIMEOUT_MS;
+  let delayMs = WALLET_CREDIT_INITIAL_RETRY_MS;
+
+  while (true) {
+    if (input.signal?.aborted) throw cancelled();
+    try {
+      if (await balance(input) >= minimumBalance) return receipt;
+    } catch (cause) {
+      if (input.signal?.aborted) throw cancelled();
+      if (Date.now() >= deadline) throw cause;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        'Pacifica is still processing the release. Your request is saved; resume it shortly.',
+      );
+    }
+    await delay(Math.min(delayMs, deadline - Date.now()), input.signal);
+    delayMs = Math.min(WALLET_CREDIT_MAX_RETRY_MS, Math.round(delayMs * 1.5));
+  }
+}
+
 async function read(account: string): Promise<PendingWithdrawal | null> {
   const value = await SecureStore.getItemAsync(await key(account));
   if (value === null) return null;
   try {
     const record = JSON.parse(value) as Record<string, unknown>;
     if (
-      (record.version !== 1 && record.version !== 2 && record.version !== 3) ||
+      (record.version !== 1 && record.version !== 2 && record.version !== 3 && record.version !== 4) ||
       record.account !== account ||
       typeof record.amountBaseUnits !== 'string' ||
       !/^\d+$/u.test(record.amountBaseUnits) ||
@@ -316,6 +395,12 @@ async function read(account: string): Promise<PendingWithdrawal | null> {
       (record.version === 3 && (
         typeof record.feeBaseUnits !== 'string' ||
         !/^\d+$/u.test(record.feeBaseUnits)
+      )) ||
+      (record.version === 4 && (
+        typeof record.feeBaseUnits !== 'string' ||
+        !/^\d+$/u.test(record.feeBaseUnits) ||
+        typeof record.walletBalanceBeforeBaseUnits !== 'string' ||
+        !/^\d+$/u.test(record.walletBalanceBeforeBaseUnits)
       )) ||
       typeof record.idempotencyKey !== 'string' ||
       (record.batchNonce !== null && (
@@ -373,4 +458,24 @@ function nonce(value: unknown): string | null {
     return String(value);
   }
   return null;
+}
+
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, Math.max(0, milliseconds));
+    const abort = () => {
+      clearTimeout(timer);
+      done(cancelled());
+    };
+    function done(error?: Error) {
+      signal?.removeEventListener('abort', abort);
+      if (error === undefined) resolve();
+      else reject(error);
+    }
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+function cancelled(): Error {
+  return new Error('Trading withdrawal cancelled. The saved request was not discarded.');
 }
